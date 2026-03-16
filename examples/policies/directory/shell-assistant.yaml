@@ -1,0 +1,26 @@
+# Policy for the shell-assistant agent
+# Safe commands are auto-allowed; everything else requires human approval.
+rules:
+  - id: "allow-safe-shell"
+    priority: 10
+    when:
+      action: "tool.invoke"
+      tool_id: "shell.exec"
+      arguments:
+        - field: "command"
+          pattern: "^(ls|cat|echo|pwd|whoami|date|head|tail|wc)"
+        - field: "timeout"
+          max: 30
+    then:
+      decision: "allow"
+      reason: "Safe read-only shell commands allowed"
+      timeout_ms: 10000
+
+  - id: "require-approval-shell"
+    priority: 20
+    when:
+      action: "tool.invoke"
+      tool_id: "shell.exec"
+    then:
+      decision: "require_approval"
+      reason: "Shell commands require human approval"

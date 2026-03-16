@@ -1,0 +1,39 @@
+# Policy for the researcher-local agent (local tool execution)
+# This agent runs tools in-process, so we can be more permissive
+# with tool arguments but restrict to specific safe tools.
+rules:
+  - id: "web-tools"
+    priority: 10
+    when:
+      action: "tool.invoke"
+      tool_ids: ["doc.*", "web.*"]
+    then:
+      decision: "allow"
+      timeout_ms: 30000
+
+  - id: "calculator"
+    priority: 20
+    when:
+      action: "tool.invoke"
+      tool_id: "calculator"
+    then:
+      decision: "allow"
+      timeout_ms: 10000
+
+  - id: "allow-local-fs-read"
+    priority: 30
+    when:
+      action: "tool.invoke"
+      tool_ids: ["fs.read", "fs.list"]
+    then:
+      decision: "allow"
+      timeout_ms: 5000
+
+  - id: "deny-remote-only-tools"
+    priority: 90
+    when:
+      action: "tool.invoke"
+      tool_ids: ["remote.*", "deploy.*"]
+    then:
+      decision: "deny"
+      reason: "Remote-only tools are not available in local execution mode"

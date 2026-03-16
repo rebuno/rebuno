@@ -1,0 +1,14 @@
+# Policy for the hello world agent.
+# Allows reverse and word_count, denies everything else.
+rules:
+  - id: "allow-hello-tools"
+    priority: 10
+    when:
+      action: "tool.invoke"
+      tool_ids: ["reverse"]
+    then:
+      decision: "allow"
+
+default:
+  decision: "deny"
+  reason: "Tool not allowed by policy"
