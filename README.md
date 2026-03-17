@@ -1,5 +1,10 @@
 <p align="center">
-  <img src="rebuno.svg" alt="rebuno" width="200" />
+  <a href="https://rebuno.io"><img src="rebuno.svg" alt="rebuno" width="200"></a>
+</p>
+
+<p align="center">
+  <a href="https://discord.gg/zv72f2PvzB"><img src="https://img.shields.io/discord/1483512352438616238?logo=discord&logoColor=white&color=5865F2&label=Discord&style=for-the-badge" alt="Discord"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?&style=for-the-badge" alt="License"></a>
 </p>
 
 A kernel-authoritative execution runtime for AI agents.
