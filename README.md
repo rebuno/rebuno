@@ -26,7 +26,7 @@ Start an agent:
 
 ```bash
 pip install rebuno
-python examples/agent/hello.py
+python examples/python/agent/hello.py
 ```
 
 Create an execution:
@@ -46,7 +46,8 @@ See [Getting Started](docs/getting-started.md) for the full walkthrough.
 | [Getting Started](docs/getting-started.md) | Quick start walkthrough |
 | [Architecture](docs/architecture.md) | Core concepts and state transitions |
 | [Deployment](docs/deployment.md) | Production setup, auth, and configuration |
-| [Python SDK](docs/sdk.md) | Building agents and runners |
+| [Python SDK](docs/sdk/python.md) | Building agents and runners in Python |
+| [TypeScript SDK](docs/sdk/typescript.md) | Building agents and runners in TypeScript |
 | [Tools](docs/tools.md) | Local, remote, and MCP tools |
 | [Policy](docs/policy.md) | Declarative policy rules |
 | [API Reference](docs/api.md) | HTTP endpoints and schemas |
