@@ -9,7 +9,7 @@ import (
 )
 
 type SessionStore struct {
-	mu      sync.RWMutex
+	mu       sync.RWMutex
 	sessions map[string]domain.Session // sessionID -> Session
 	byExec   map[string]string         // executionID -> sessionID
 }

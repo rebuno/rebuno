@@ -102,11 +102,12 @@ func TestSubmitJobResultFailureWithRetry(t *testing.T) {
 		t.Fatal("timed out waiting for retry dispatch")
 	}
 
-	k.pendingJobsMu.Lock()
-	pendingCount := len(k.pendingJobs)
-	k.pendingJobsMu.Unlock()
-	if pendingCount != 0 {
-		t.Fatalf("expected 0 pending jobs (should have been dispatched), got %d", pendingCount)
+	jobs, err := k.jobQueue.All(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("expected 0 pending jobs (should have been dispatched), got %d", len(jobs))
 	}
 }
 
@@ -170,25 +171,30 @@ func TestRetryDelay(t *testing.T) {
 
 func TestDispatchPendingJobs(t *testing.T) {
 	k, _, _, runnerHub, _, _ := newTestKernel()
+	ctx := context.Background()
 
 	job := domain.Job{
 		ToolID: "web.search",
 	}
 	k.enqueuePendingJob(job)
 
-	k.pendingJobsMu.Lock()
-	if len(k.pendingJobs) != 1 {
-		t.Fatalf("expected 1 pending job, got %d", len(k.pendingJobs))
+	jobs, err := k.jobQueue.All(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	k.pendingJobsMu.Unlock()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 pending job, got %d", len(jobs))
+	}
 
 	k.DispatchPendingJobs()
 
-	k.pendingJobsMu.Lock()
-	if len(k.pendingJobs) != 0 {
-		t.Fatalf("expected 0 pending jobs after dispatch, got %d", len(k.pendingJobs))
+	jobs, err = k.jobQueue.All(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	k.pendingJobsMu.Unlock()
+	if len(jobs) != 0 {
+		t.Fatalf("expected 0 pending jobs after dispatch, got %d", len(jobs))
+	}
 
 	runnerHub.mu.Lock()
 	if len(runnerHub.dispatched) != 1 {

@@ -42,6 +42,8 @@ type Config struct {
 
 	BearerToken string
 	CORSOrigins string
+
+	RedisURL string
 }
 
 func DefaultConfig() *Config {
@@ -175,6 +177,9 @@ func (c *Config) ApplyEnv() {
 	}
 	if v := os.Getenv("REBUNO_CORS_ORIGINS"); v != "" {
 		c.CORSOrigins = v
+	}
+	if v := os.Getenv("REBUNO_REDIS_URL"); v != "" {
+		c.RedisURL = v
 	}
 }
 

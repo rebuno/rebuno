@@ -15,6 +15,7 @@ import (
 	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/projector"
 	"github.com/rebuno/rebuno/internal/store"
+	memqueue "github.com/rebuno/rebuno/internal/store/memory"
 )
 
 type KernelConfig struct {
@@ -50,9 +51,7 @@ type Kernel struct {
 	logger      *slog.Logger
 	metrics     *observe.Metrics
 	watcher     *executionWatcher
-
-	pendingJobsMu sync.Mutex
-	pendingJobs   []domain.Job
+	jobQueue    store.JobQueue
 
 	retryWg   sync.WaitGroup
 	done      chan struct{}
@@ -72,6 +71,7 @@ type Deps struct {
 	Config      KernelConfig
 	Logger      *slog.Logger
 	Metrics     *observe.Metrics
+	JobQueue    store.JobQueue
 }
 
 func NewKernel(d Deps) *Kernel {
@@ -100,6 +100,11 @@ func NewKernel(d Deps) *Kernel {
 
 	proj := projector.New(d.Events, d.Checkpoints, logger)
 
+	jobQueue := d.JobQueue
+	if jobQueue == nil {
+		jobQueue = memqueue.NewJobQueue()
+	}
+
 	return &Kernel{
 		events:      d.Events,
 		checkpoints: d.Checkpoints,
@@ -115,6 +120,7 @@ func NewKernel(d Deps) *Kernel {
 		logger:      logger,
 		metrics:     d.Metrics,
 		watcher:     newExecutionWatcher(),
+		jobQueue:    jobQueue,
 		done:        make(chan struct{}),
 	}
 }

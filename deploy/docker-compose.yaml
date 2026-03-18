@@ -44,6 +44,7 @@ services:
       - "--log-level=debug"
       - "--policy=/app/policies"
       # - "--bearer-token=your-secret-token"
+      # - "--redis-url=redis://localhost:6379"
     volumes:
       # - ./path/to/your/policies:/app/policies:ro
     depends_on:

@@ -200,39 +200,42 @@ func (k *Kernel) retryDelay(attempt int) time.Duration {
 }
 
 func (k *Kernel) enqueuePendingJob(job domain.Job) {
-	k.pendingJobsMu.Lock()
-	defer k.pendingJobsMu.Unlock()
-	k.pendingJobs = append(k.pendingJobs, job)
+	if err := k.jobQueue.Enqueue(context.Background(), job); err != nil {
+		k.logger.Warn("failed to enqueue pending job",
+			slog.String("job_id", job.ID.String()),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 func (k *Kernel) DispatchPendingJobs() {
-	k.pendingJobsMu.Lock()
-	defer k.pendingJobsMu.Unlock()
+	ctx := context.Background()
+	jobs, err := k.jobQueue.All(ctx)
+	if err != nil {
+		k.logger.Warn("failed to read pending jobs", slog.String("error", err.Error()))
+		return
+	}
 
-	var remaining []domain.Job
-	for _, job := range k.pendingJobs {
+	for _, job := range jobs {
 		payload, err := json.Marshal(job)
 		if err != nil {
 			k.logger.Warn("failed to marshal pending job",
 				slog.String("job_id", job.ID.String()),
 				slog.String("error", err.Error()),
 			)
-			remaining = append(remaining, job)
 			continue
 		}
 		msg := store.RunnerMessage{Type: "job.assigned", Payload: payload}
 		info, dispatched := k.runnerHub.Dispatch(job.ToolID, msg)
 		if dispatched {
 			k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
+			_ = k.jobQueue.Remove(ctx, job.ID)
 			k.logger.Debug("dispatched pending job",
 				slog.String("job_id", job.ID.String()),
 				slog.String("runner_id", info.RunnerID),
 			)
-		} else {
-			remaining = append(remaining, job)
 		}
 	}
-	k.pendingJobs = remaining
 }
 
 func (k *Kernel) retryJob(job domain.Job) {

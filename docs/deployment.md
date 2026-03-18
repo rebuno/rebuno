@@ -70,3 +70,4 @@ agent = MyAgent(
 | `--retry-max-delay` | `REBUNO_RETRY_MAX_DELAY` | `30s` | Maximum delay for step retries |
 | `--bearer-token` | `REBUNO_BEARER_TOKEN` | | Bearer token for API auth (optional in dev; required in production) |
 | `--cors-origins` | `REBUNO_CORS_ORIGINS` | | Comma-separated CORS origins |
+| `--redis-url` | `REBUNO_REDIS_URL` | | Redis URL for persistent job queue (optional) |
