@@ -1,0 +1,28 @@
+{
+  "name": "rebuno-examples-typescript",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hello": "tsx agent/hello.ts",
+    "local-tools": "tsx agent/local_tools.ts",
+    "remote-tools": "tsx agent/remote_tools.ts",
+    "shell": "tsx agent/shell.ts",
+    "mcp": "tsx agent/mcp_tools.ts",
+    "runner": "tsx runner/runner.ts",
+    "runner-mcp": "tsx runner/runner_mcp.ts",
+    "client": "tsx client/client.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^0.3.0",
+    "@langchain/langgraph": "^0.2.0",
+    "@langchain/openai": "^0.3.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "rebuno": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0",
+    "zod": "^3.25.76"
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "name": "rebuno",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Rebuno",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./tools/adapters/vercel": {
+      "import": "./dist/tools/adapters/vercel.js",
+      "types": "./dist/tools/adapters/vercel.d.ts"
+    },
+    "./tools/adapters/langchain": {
+      "import": "./dist/tools/adapters/langchain.js",
+      "types": "./dist/tools/adapters/langchain.d.ts"
+    },
+    "./tools/adapters/mastra": {
+      "import": "./dist/tools/adapters/mastra.js",
+      "types": "./dist/tools/adapters/mastra.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.22.0"
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=0.2.0",
+    "@mastra/core": ">=0.5.0",
+    "@modelcontextprotocol/sdk": ">=1.0.0",
+    "ai": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    },
+    "@mastra/core": {
+      "optional": true
+    },
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.0",
+    "zod": "^3.22.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rebuno/rebuno.git",
+    "directory": "sdk/typescript"
+  },
+  "keywords": [
+    "rebuno",
+    "agent",
+    "ai"
+  ]
+}

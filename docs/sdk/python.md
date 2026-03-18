@@ -93,7 +93,7 @@ agent.mcp_server(
 agent.mcp_server("github", url="http://localhost:3000/mcp")
 ```
 
-MCP tools are prefixed with the server name (e.g., `filesystem.read_file`) and appear alongside local and remote tools in `ctx.get_tools()`. See [Tools](tools.md) for namespacing, config-based setup, and partial failure behavior.
+MCP tools are prefixed with the server name (e.g., `filesystem.read_file`) and appear alongside local and remote tools in `ctx.get_tools()`. See [Tools](../tools.md) for namespacing, config-based setup, and partial failure behavior.
 
 ### Framework Integration
 
@@ -277,4 +277,4 @@ MCP tool IDs are automatically registered as capabilities. Jobs for MCP tools ar
 
 ## Timeouts
 
-Step timeouts are controlled by policy rules. When a policy rule includes `timeout_ms` in its `then` block, that value is used as the step deadline. Otherwise the global `StepTimeout` (default: 5 min) applies. See [Policy](policy.md) for details.
+Step timeouts are controlled by policy rules. When a policy rule includes `timeout_ms` in its `then` block, that value is used as the step deadline. Otherwise the global `StepTimeout` (default: 5 min) applies. See [Policy](../policy.md) for details.

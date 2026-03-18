@@ -13,7 +13,7 @@ Tools are functions that agents invoke through the kernel. Every tool call goes 
 
 Use **local tools** when the tool is lightweight and doesn't need isolation. Use **remote tools** when you need process isolation, different runtime dependencies, or independent scaling.
 
-See [Python SDK](sdk.md) for how to register and use both types.
+See the [Python SDK](sdk/python.md) or [TypeScript SDK](sdk/typescript.md) for how to register and use both types.
 
 ## Tool IDs
 
@@ -36,7 +36,7 @@ when:
 then: allow
 ```
 
-MCP tools can be registered on either agents (as local tools) or runners (as remote capabilities). See [Python SDK > MCP Tools](sdk.md#mcp-tools) for setup.
+MCP tools can be registered on either agents (as local tools) or runners (as remote capabilities). See [Python SDK > MCP Tools](sdk/python.md#mcp-tools) or [TypeScript SDK > MCP Tools](sdk/typescript.md#mcp-tools) for setup.
 
 ### Partial failure and retry
 
@@ -74,4 +74,4 @@ Agent calls ctx.invoke_tool("web.search", {"query": "..."})
   -> Result delivered back to agent
 ```
 
-See [Python SDK](sdk.md) for the full agent and runner API. See [Policy](policy.md) for controlling tool access.
+See the [Python SDK](sdk/python.md) or [TypeScript SDK](sdk/typescript.md) for the full agent and runner API. See [Policy](policy.md) for controlling tool access.

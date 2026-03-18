@@ -100,6 +100,7 @@ The explorer is available at `http://localhost:3000`. It connects to the kernel 
 
 - [Architecture](architecture.md) — Core concepts, workflow, and state transitions
 - [Deployment](deployment.md) — Production setup, authentication, and configuration reference
-- [Python SDK](sdk.md) — Building agents and runners
+- [Python SDK](sdk/python.md) — Building agents and runners in Python
+- [TypeScript SDK](sdk/typescript.md) — Building agents and runners in TypeScript
 - [Policy](policy.md) — Declarative policy rules
 - [CLI](cli.md) — CLI reference
