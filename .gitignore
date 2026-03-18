@@ -6,5 +6,6 @@ __pycache__/
 node_modules/
 dist/
 .next/
+next-env.d.ts
 .claude/
 .env
