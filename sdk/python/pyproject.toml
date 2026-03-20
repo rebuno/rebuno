@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rebuno"
-version = "0.1.0"
+version = "0.1.2"
 description = "Python SDK for the Rebuno execution runtime"
 readme = "README.md"
 license = "MIT"
@@ -41,5 +41,5 @@ mcp = [
     "fastmcp>=2.0.0",
 ]
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/rebuno"]
+[tool.hatch.build]
+sources = ["src"]
