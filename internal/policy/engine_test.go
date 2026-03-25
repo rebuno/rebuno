@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
 )
@@ -657,6 +658,50 @@ func TestRuleEngineDurationCondition(t *testing.T) {
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow for duration=60000 (at boundary, not exceeded), got %s", result.Decision)
+	}
+}
+
+func TestRuleEngineScheduleCondition(t *testing.T) {
+	engine, _ := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "business-hours-only",
+				Priority: 1,
+				When: domain.PolicyCondition{
+					Action:   "tool.invoke",
+					Schedule: "Mon-Fri 09:00-17:00 UTC",
+				},
+				Then: domain.PolicyAction{Decision: domain.PolicyAllow, Reason: "within business hours"},
+			},
+		},
+		Default: domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "outside business hours"},
+	})
+
+	// Wednesday 12:00 UTC - within business hours
+	withinHours := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
+	result, _ := engine.EvaluateAt(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search",
+	}, withinHours)
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow during business hours, got %s", result.Decision)
+	}
+
+	// Saturday 12:00 UTC - outside business hours
+	weekend := time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC)
+	result, _ = engine.EvaluateAt(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search",
+	}, weekend)
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny on weekend, got %s", result.Decision)
+	}
+
+	// Wednesday 22:00 UTC - outside business hours
+	lateNight := time.Date(2026, 3, 25, 22, 0, 0, 0, time.UTC)
+	result, _ = engine.EvaluateAt(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search",
+	}, lateNight)
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny outside hours, got %s", result.Decision)
 	}
 }
 

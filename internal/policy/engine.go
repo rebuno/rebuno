@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
 )
@@ -46,9 +47,13 @@ func NewRuleEngine(cfg PolicyConfig) (*RuleEngine, error) {
 	return &RuleEngine{rules: rules, defaultAction: def}, nil
 }
 
-func (e *RuleEngine) Evaluate(_ context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
+func (e *RuleEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
+	return e.EvaluateAt(ctx, input, time.Now())
+}
+
+func (e *RuleEngine) EvaluateAt(_ context.Context, input domain.PolicyInput, now time.Time) (domain.PolicyResult, error) {
 	for _, rule := range e.rules {
-		if matchesRule(rule.When, input) {
+		if matchesRule(rule.When, input, now) {
 			return domain.PolicyResult{
 				Decision:  rule.Then.Decision,
 				Reason:    rule.Then.Reason,
@@ -64,7 +69,7 @@ func (e *RuleEngine) Evaluate(_ context.Context, input domain.PolicyInput) (doma
 	}, nil
 }
 
-func matchesRule(cond domain.PolicyCondition, input domain.PolicyInput) bool {
+func matchesRule(cond domain.PolicyCondition, input domain.PolicyInput, now time.Time) bool {
 	if cond.Action != "" && cond.Action != input.Action {
 		return false
 	}
@@ -93,6 +98,15 @@ func matchesRule(cond domain.PolicyCondition, input domain.PolicyInput) bool {
 	}
 	if cond.MaxDurationMs != nil && input.DurationMs <= *cond.MaxDurationMs {
 		return false
+	}
+	if cond.Schedule != "" {
+		sched, err := parseSchedule(cond.Schedule)
+		if err != nil {
+			return false
+		}
+		if !matchSchedule(sched, now) {
+			return false
+		}
 	}
 	return true
 }

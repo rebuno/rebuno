@@ -48,6 +48,7 @@ type PolicyCondition struct {
 	Arguments     []ArgumentPredicate `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 	MinStepCount  *int                `json:"min_step_count,omitempty" yaml:"min_step_count,omitempty"`
 	MaxDurationMs *int64              `json:"max_duration_ms,omitempty" yaml:"max_duration_ms,omitempty"`
+	Schedule      string              `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 }
 
 type PolicyAction struct {

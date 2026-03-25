@@ -106,6 +106,20 @@ func validate(cfg *PolicyConfig) error {
 					domain.ErrInvalidConfiguration, r.ID, i, pred.Field)
 			}
 		}
+		if r.When.MinStepCount != nil && *r.When.MinStepCount < 0 {
+			return fmt.Errorf("%w: rule %q min_step_count must be non-negative",
+				domain.ErrInvalidConfiguration, r.ID)
+		}
+		if r.When.MaxDurationMs != nil && *r.When.MaxDurationMs <= 0 {
+			return fmt.Errorf("%w: rule %q max_duration_ms must be positive",
+				domain.ErrInvalidConfiguration, r.ID)
+		}
+		if r.When.Schedule != "" {
+			if _, err := parseSchedule(r.When.Schedule); err != nil {
+				return fmt.Errorf("%w: rule %q has invalid schedule %q: %v",
+					domain.ErrInvalidConfiguration, r.ID, r.When.Schedule, err)
+			}
+		}
 	}
 	if cfg.Default.Decision != "" && cfg.Default.Decision != domain.PolicyAllow && cfg.Default.Decision != domain.PolicyDeny && cfg.Default.Decision != domain.PolicyRequireApproval {
 		return fmt.Errorf("%w: default has invalid decision %q", domain.ErrInvalidConfiguration, cfg.Default.Decision)
