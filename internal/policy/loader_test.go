@@ -681,6 +681,66 @@ func TestLoadDirSubdirectoriesIgnored(t *testing.T) {
 	}
 }
 
+func TestValidateRateLimitInvalidMax(t *testing.T) {
+	_, err := Parse([]byte(`
+rules:
+  - id: bad-rate
+    priority: 1
+    when:
+      action: tool.invoke
+    then:
+      decision: allow
+    rate_limit:
+      max: 0
+      window: 1m
+`))
+	if err == nil {
+		t.Error("expected error for rate_limit.max=0")
+	}
+}
+
+func TestValidateRateLimitInvalidWindow(t *testing.T) {
+	_, err := Parse([]byte(`
+rules:
+  - id: bad-window
+    priority: 1
+    when:
+      action: tool.invoke
+    then:
+      decision: allow
+    rate_limit:
+      max: 10
+      window: invalid
+`))
+	if err == nil {
+		t.Error("expected error for invalid rate_limit.window")
+	}
+}
+
+func TestValidateRateLimitValid(t *testing.T) {
+	cfg, err := Parse([]byte(`
+rules:
+  - id: good-rate
+    priority: 1
+    when:
+      action: tool.invoke
+    then:
+      decision: allow
+    rate_limit:
+      max: 10
+      window: 1m
+`))
+	if err != nil {
+		t.Fatalf("expected valid config, got error: %v", err)
+	}
+	if cfg.Rules[0].RateLimit == nil {
+		t.Fatal("expected rate limit to be parsed")
+	}
+	if cfg.Rules[0].RateLimit.Max != 10 {
+		t.Errorf("expected max=10, got %d", cfg.Rules[0].RateLimit.Max)
+	}
+}
+
 func TestAgentEngineGlobalAgentIDsScoping(t *testing.T) {
 	result := &LoadDirResult{
 		Agents: map[string]*PolicyConfig{},

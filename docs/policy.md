@@ -105,6 +105,86 @@ Each predicate must have `field` set and at least one constraint.
 
 **Type mismatches:** `pattern`, `one_of`, and `max_length` require string values. `min` and `max` require numeric values. A type mismatch fails the predicate.
 
+### Execution State
+
+Match based on how far along the current execution is. These conditions are useful for guardrails that prevent runaway executions.
+
+#### min_step_count
+
+The rule matches when the execution's total step count (completed + in-progress) is at or above this threshold. Use with a `deny` decision to cap how many tool calls an execution can make.
+
+```yaml
+when:
+  action: "tool.invoke"
+  min_step_count: 100   # fires at 100+ steps
+```
+
+#### max_duration_ms
+
+The rule matches when the execution's elapsed time exceeds this value in milliseconds. Use with a `deny` decision to cap execution duration.
+
+```yaml
+when:
+  action: "tool.invoke"
+  max_duration_ms: 3600000   # fires after 1 hour
+```
+
+### schedule
+
+Restrict a rule to specific days and times. The format is `<days> <start>-<end> <timezone>`.
+
+- **Days**: A range (`Mon-Fri`), comma-separated (`Mon,Wed,Fri`), or wrap-around (`Fri-Mon`).
+- **Time**: 24-hour format. The start is inclusive, end is exclusive (`09:00-17:00` means 09:00 through 16:59).
+- **Timezone**: Any IANA timezone (`UTC`, `America/New_York`, `Europe/London`).
+
+```yaml
+when:
+  action: "tool.invoke"
+  schedule: "Mon-Fri 09:00-17:00 America/New_York"
+```
+
+A common pattern is an allow rule with a schedule and a default deny, so tools are only usable during business hours:
+
+```yaml
+rules:
+  - id: "business-hours"
+    priority: 1
+    when:
+      action: "tool.invoke"
+      schedule: "Mon-Fri 09:00-17:00 UTC"
+    then:
+      decision: "allow"
+
+default:
+  decision: "deny"
+  reason: "Outside business hours"
+```
+
+## Rate Limiting
+
+Rules can include a `rate_limit` block to cap how often a tool can be invoked per agent. The kernel enforces rate limits using a sliding window counter after the policy engine returns an `allow` decision.
+
+```yaml
+- id: "rate-limited-shell"
+  priority: 10
+  when:
+    tool_id: "shell.exec"
+  then:
+    decision: "allow"
+  rate_limit:
+    max: 30        # maximum calls allowed
+    window: "1m"   # sliding window (Go duration: "30s", "1m", "1h")
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `max` | int | **Required.** Maximum number of calls allowed in the window. Must be positive. |
+| `window` | string | **Required.** Sliding window duration in Go format (`"30s"`, `"1m"`, `"1h"`). |
+
+Rate limits are scoped per `(agent_id, tool_id)` pair. Different agents hitting the same tool have independent counters. If the limit is exceeded, the intent is denied with an `intent.denied` event and a rate limit exceeded error.
+
+The current implementation uses an in-memory sliding window. Counters reset if the kernel restarts. A Redis-backed implementation can be swapped in for multi-instance deployments.
+
 ## Actions
 
 The `then` block specifies what happens when a rule matches.
@@ -187,7 +267,7 @@ Allow a specific agent to use web tools with a 30-second timeout:
     timeout_ms: 30000
 ```
 
-Allow shell commands only if they start with safe prefixes and have a bounded timeout:
+Allow shell commands only if they start with safe prefixes, with rate limiting and a bounded timeout:
 
 ```yaml
 - id: "allow-safe-shell"
@@ -204,6 +284,9 @@ Allow shell commands only if they start with safe prefixes and have a bounded ti
     decision: "allow"
     reason: "Safe read-only shell commands allowed"
     timeout_ms: 10000
+  rate_limit:
+    max: 30
+    window: "1m"
 
 - id: "deny-shell"
   priority: 40
@@ -213,6 +296,43 @@ Allow shell commands only if they start with safe prefixes and have a bounded ti
   then:
     decision: "deny"
     reason: "Shell commands denied by default"
+```
+
+Global safety guardrails — cap step count, duration, and restrict to business hours:
+
+```yaml
+# _global.yaml
+rules:
+  - id: "deny-runaway-executions"
+    priority: 1
+    when:
+      action: "tool.invoke"
+      min_step_count: 100
+    then:
+      decision: "deny"
+      reason: "Execution exceeded 100 steps"
+
+  - id: "deny-long-executions"
+    priority: 2
+    when:
+      action: "tool.invoke"
+      max_duration_ms: 3600000
+    then:
+      decision: "deny"
+      reason: "Execution exceeded 1 hour"
+
+  - id: "business-hours-only"
+    priority: 3
+    when:
+      action: "tool.invoke"
+      schedule: "Mon-Fri 09:00-17:00 UTC"
+    then:
+      decision: "allow"
+      reason: "Within business hours"
+
+default:
+  decision: "deny"
+  reason: "Outside business hours"
 ```
 
 ## Directory-Based Policy

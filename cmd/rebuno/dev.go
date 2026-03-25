@@ -20,6 +20,7 @@ import (
 	"github.com/rebuno/rebuno/internal/memstore"
 	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/policy"
+	"github.com/rebuno/rebuno/internal/ratelimit"
 )
 
 func devCmd() *cobra.Command {
@@ -124,6 +125,7 @@ func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string)
 		Logger:      logger,
 		Metrics:     metrics,
 		Config:      kcfg,
+		RateLimiter: ratelimit.NewMemoryLimiter(),
 	})
 	defer k.Shutdown()
 

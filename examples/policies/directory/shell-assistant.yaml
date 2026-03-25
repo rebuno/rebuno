@@ -1,5 +1,6 @@
 # Policy for the shell-assistant agent
 # Safe commands are auto-allowed; everything else requires human approval.
+# Rate limited to prevent runaway executions.
 rules:
   - id: "allow-safe-shell"
     priority: 10
@@ -15,6 +16,9 @@ rules:
       decision: "allow"
       reason: "Safe read-only shell commands allowed"
       timeout_ms: 10000
+    rate_limit:
+      max: 30
+      window: "1m"
 
   - id: "require-approval-shell"
     priority: 20
