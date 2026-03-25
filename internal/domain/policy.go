@@ -9,6 +9,8 @@ type PolicyInput struct {
 	ExecutionID string            `json:"execution_id"`
 	AgentID     string            `json:"agent_id,omitempty"`
 	Arguments   json.RawMessage   `json:"arguments,omitempty"`
+	StepCount   int               `json:"step_count"`
+	DurationMs  int64             `json:"duration_ms"`
 }
 
 type PolicyDecision string
@@ -19,11 +21,17 @@ const (
 	PolicyRequireApproval PolicyDecision = "require_approval"
 )
 
+type RateLimitConfig struct {
+	Max    int    `json:"max" yaml:"max"`
+	Window string `json:"window" yaml:"window"` // e.g., "1m", "1h" (Go duration)
+}
+
 type PolicyResult struct {
-	Decision  PolicyDecision `json:"decision"`
-	Reason    string         `json:"reason"`
-	RuleID    string         `json:"rule_id"`
-	TimeoutMs int64          `json:"timeout_ms,omitempty"`
+	Decision  PolicyDecision   `json:"decision"`
+	Reason    string           `json:"reason"`
+	RuleID    string           `json:"rule_id"`
+	TimeoutMs int64            `json:"timeout_ms,omitempty"`
+	RateLimit *RateLimitConfig `json:"rate_limit,omitempty"`
 }
 
 type ArgumentPredicate struct {
@@ -43,7 +51,10 @@ type PolicyCondition struct {
 	AgentID   string              `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	AgentIDs  []string            `json:"agent_ids,omitempty" yaml:"agent_ids,omitempty"`
 	Labels    map[string]string   `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Arguments []ArgumentPredicate `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	Arguments     []ArgumentPredicate `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	MinStepCount  *int                `json:"min_step_count,omitempty" yaml:"min_step_count,omitempty"`
+	MaxDurationMs *int64              `json:"max_duration_ms,omitempty" yaml:"max_duration_ms,omitempty"`
+	Schedule      string              `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 }
 
 type PolicyAction struct {
@@ -53,8 +64,9 @@ type PolicyAction struct {
 }
 
 type PolicyRule struct {
-	ID       string          `json:"id" yaml:"id"`
-	Priority int             `json:"priority" yaml:"priority"`
-	When     PolicyCondition `json:"when" yaml:"when"`
-	Then     PolicyAction    `json:"then" yaml:"then"`
+	ID        string           `json:"id" yaml:"id"`
+	Priority  int              `json:"priority" yaml:"priority"`
+	When      PolicyCondition  `json:"when" yaml:"when"`
+	Then      PolicyAction     `json:"then" yaml:"then"`
+	RateLimit *RateLimitConfig `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
 }

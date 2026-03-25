@@ -14,6 +14,7 @@ import (
 	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/projector"
+	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store"
 	memqueue "github.com/rebuno/rebuno/internal/store/memory"
 )
@@ -52,6 +53,7 @@ type Kernel struct {
 	metrics     *observe.Metrics
 	watcher     *executionWatcher
 	jobQueue    store.JobQueue
+	rateLimiter ratelimit.Limiter
 
 	retryWg   sync.WaitGroup
 	done      chan struct{}
@@ -72,6 +74,7 @@ type Deps struct {
 	Logger      *slog.Logger
 	Metrics     *observe.Metrics
 	JobQueue    store.JobQueue
+	RateLimiter ratelimit.Limiter
 }
 
 func NewKernel(d Deps) *Kernel {
@@ -105,6 +108,11 @@ func NewKernel(d Deps) *Kernel {
 		jobQueue = memqueue.NewJobQueue()
 	}
 
+	rl := d.RateLimiter
+	if rl == nil {
+		rl = ratelimit.NewMemoryLimiter()
+	}
+
 	return &Kernel{
 		events:      d.Events,
 		checkpoints: d.Checkpoints,
@@ -121,6 +129,7 @@ func NewKernel(d Deps) *Kernel {
 		metrics:     d.Metrics,
 		watcher:     newExecutionWatcher(),
 		jobQueue:    jobQueue,
+		rateLimiter: rl,
 		done:        make(chan struct{}),
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
 )
@@ -570,6 +571,184 @@ func TestSecureDefaultEngineUnknownActionWithoutInner(t *testing.T) {
 	})
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for unknown action without inner, got %s", result.Decision)
+	}
+}
+
+func TestRuleEngineStepCountCondition(t *testing.T) {
+	stepLimit := 50
+	engine, err := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "deny-after-50-steps",
+				Priority: 1,
+				When: domain.PolicyCondition{
+					Action:       "tool.invoke",
+					MinStepCount: &stepLimit,
+				},
+				Then: domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "too many steps"},
+			},
+		},
+		Default: domain.PolicyAction{Decision: domain.PolicyAllow},
+	})
+	if err != nil {
+		t.Fatalf("NewRuleEngine: %v", err)
+	}
+
+	// Under limit: should allow (rule doesn't match, falls to default allow)
+	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", StepCount: 10,
+	})
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow for step_count=10, got %s", result.Decision)
+	}
+
+	// At limit: should deny (rule matches)
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", StepCount: 50,
+	})
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny for step_count=50, got %s", result.Decision)
+	}
+
+	// Over limit: should deny
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", StepCount: 100,
+	})
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny for step_count=100, got %s", result.Decision)
+	}
+}
+
+func TestRuleEngineDurationCondition(t *testing.T) {
+	maxDuration := int64(60000) // 60 seconds
+	engine, _ := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "deny-after-60s",
+				Priority: 1,
+				When: domain.PolicyCondition{
+					Action:        "tool.invoke",
+					MaxDurationMs: &maxDuration,
+				},
+				Then: domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "execution too long"},
+			},
+		},
+		Default: domain.PolicyAction{Decision: domain.PolicyAllow},
+	})
+
+	// Over duration: should deny (rule matches)
+	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", DurationMs: 90000,
+	})
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny for duration=90s, got %s", result.Decision)
+	}
+
+	// Under duration: should allow (rule doesn't match, falls to default)
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", DurationMs: 30000,
+	})
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow for duration=30s, got %s", result.Decision)
+	}
+
+	// At boundary: should allow (duration == max means not exceeded)
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", DurationMs: 60000,
+	})
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow for duration=60000 (at boundary, not exceeded), got %s", result.Decision)
+	}
+}
+
+func TestRuleEngineScheduleCondition(t *testing.T) {
+	engine, _ := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "business-hours-only",
+				Priority: 1,
+				When: domain.PolicyCondition{
+					Action:   "tool.invoke",
+					Schedule: "Mon-Fri 09:00-17:00 UTC",
+				},
+				Then: domain.PolicyAction{Decision: domain.PolicyAllow, Reason: "within business hours"},
+			},
+		},
+		Default: domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "outside business hours"},
+	})
+
+	// Wednesday 12:00 UTC - within business hours
+	withinHours := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
+	result, _ := engine.EvaluateAt(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search",
+	}, withinHours)
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow during business hours, got %s", result.Decision)
+	}
+
+	// Saturday 12:00 UTC - outside business hours
+	weekend := time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC)
+	result, _ = engine.EvaluateAt(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search",
+	}, weekend)
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny on weekend, got %s", result.Decision)
+	}
+
+	// Wednesday 22:00 UTC - outside business hours
+	lateNight := time.Date(2026, 3, 25, 22, 0, 0, 0, time.UTC)
+	result, _ = engine.EvaluateAt(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search",
+	}, lateNight)
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny outside hours, got %s", result.Decision)
+	}
+}
+
+func TestRuleEngineRateLimitPropagated(t *testing.T) {
+	engine, _ := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "rate-limited-shell",
+				Priority: 1,
+				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "shell.exec"},
+				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
+				RateLimit: &domain.RateLimitConfig{Max: 10, Window: "1m"},
+			},
+		},
+	})
+
+	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "shell.exec",
+	})
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow, got %s", result.Decision)
+	}
+	if result.RateLimit == nil {
+		t.Fatal("expected rate limit config, got nil")
+	}
+	if result.RateLimit.Max != 10 || result.RateLimit.Window != "1m" {
+		t.Errorf("expected max=10 window=1m, got max=%d window=%s", result.RateLimit.Max, result.RateLimit.Window)
+	}
+}
+
+func TestRuleEngineNoRateLimitWhenNotConfigured(t *testing.T) {
+	engine, _ := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "allow-search",
+				Priority: 1,
+				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web.search"},
+				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
+			},
+		},
+	})
+
+	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search",
+	})
+	if result.RateLimit != nil {
+		t.Errorf("expected nil rate limit, got %+v", result.RateLimit)
 	}
 }
 

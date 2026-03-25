@@ -1,0 +1,33 @@
+# Global policy applied to all agents.
+# Enforces execution-wide safety limits and business hours.
+rules:
+  - id: "deny-runaway-executions"
+    priority: 1
+    when:
+      action: "tool.invoke"
+      min_step_count: 100
+    then:
+      decision: "deny"
+      reason: "Execution exceeded 100 steps"
+
+  - id: "deny-long-executions"
+    priority: 2
+    when:
+      action: "tool.invoke"
+      max_duration_ms: 3600000
+    then:
+      decision: "deny"
+      reason: "Execution exceeded 1 hour"
+
+  - id: "business-hours-only"
+    priority: 3
+    when:
+      action: "tool.invoke"
+      schedule: "Mon-Fri 09:00-17:00 UTC"
+    then:
+      decision: "allow"
+      reason: "Within business hours"
+
+default:
+  decision: "deny"
+  reason: "Outside business hours"

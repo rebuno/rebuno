@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
 	"gopkg.in/yaml.v3"
@@ -104,6 +105,30 @@ func validate(cfg *PolicyConfig) error {
 			if pred.Pattern == "" && len(pred.OneOf) == 0 && pred.Min == nil && pred.Max == nil && pred.MaxLength == nil && !pred.Required {
 				return fmt.Errorf("%w: rule %q argument predicate %d (field %q) has no constraints",
 					domain.ErrInvalidConfiguration, r.ID, i, pred.Field)
+			}
+		}
+		if r.When.MinStepCount != nil && *r.When.MinStepCount < 0 {
+			return fmt.Errorf("%w: rule %q min_step_count must be non-negative",
+				domain.ErrInvalidConfiguration, r.ID)
+		}
+		if r.When.MaxDurationMs != nil && *r.When.MaxDurationMs <= 0 {
+			return fmt.Errorf("%w: rule %q max_duration_ms must be positive",
+				domain.ErrInvalidConfiguration, r.ID)
+		}
+		if r.When.Schedule != "" {
+			if _, err := parseSchedule(r.When.Schedule); err != nil {
+				return fmt.Errorf("%w: rule %q has invalid schedule %q: %v",
+					domain.ErrInvalidConfiguration, r.ID, r.When.Schedule, err)
+			}
+		}
+		if r.RateLimit != nil {
+			if r.RateLimit.Max <= 0 {
+				return fmt.Errorf("%w: rule %q rate_limit.max must be positive",
+					domain.ErrInvalidConfiguration, r.ID)
+			}
+			if _, err := time.ParseDuration(r.RateLimit.Window); err != nil {
+				return fmt.Errorf("%w: rule %q rate_limit.window is invalid: %v",
+					domain.ErrInvalidConfiguration, r.ID, err)
 			}
 		}
 	}

@@ -450,6 +450,108 @@ func TestProcessIntentRejectsTaintedExecution(t *testing.T) {
 	}
 }
 
+func TestProcessIntentPopulatesStepCountAndDuration(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	captor := &capturingPolicyEngine{
+		result: domain.PolicyResult{Decision: domain.PolicyAllow, RuleID: "test"},
+	}
+	k.policy = captor
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("expected accepted, got error: %s", result.Error)
+	}
+
+	captor.mu.Lock()
+	captured := captor.last
+	captor.mu.Unlock()
+
+	// StepCount should be 0 for fresh execution (no prior steps)
+	if captured.StepCount != 0 {
+		t.Errorf("expected step_count=0 for fresh execution, got %d", captured.StepCount)
+	}
+
+	// DurationMs should be positive (execution was just created)
+	if captured.DurationMs < 0 {
+		t.Errorf("expected non-negative duration_ms, got %d", captured.DurationMs)
+	}
+}
+
+func TestProcessIntentRateLimited(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	// Use a policy that allows but with a rate limit of 2 per minute
+	k.policy = &mockRateLimitPolicy{
+		decision:  domain.PolicyAllow,
+		rateLimit: &domain.RateLimitConfig{Max: 2, Window: "1m"},
+	}
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// First two calls should succeed
+	for i := 0; i < 2; i++ {
+		result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+			ExecutionID: execID,
+			SessionID:   sessionID,
+			Intent: domain.Intent{
+				Type:   domain.IntentInvokeTool,
+				ToolID: "web.search",
+			},
+		})
+		if err != nil {
+			t.Fatalf("call %d: unexpected error: %v", i+1, err)
+		}
+		if !result.Accepted {
+			t.Fatalf("call %d: expected accepted, got error: %s", i+1, result.Error)
+		}
+
+		// Complete the step so we can invoke another
+		if result.StepID != "" {
+			k.SubmitStepResult(ctx, StepResultRequest{
+				ExecutionID: execID,
+				StepID:      result.StepID,
+				SessionID:   sessionID,
+				Success:     true,
+				Data:        json.RawMessage(`{"ok":true}`),
+			})
+		}
+	}
+
+	// Third call should be rate limited
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Accepted {
+		t.Fatal("expected rate-limited denial")
+	}
+	if result.Error == "" {
+		t.Fatal("expected error message about rate limit")
+	}
+}
+
 func TestProcessIntentRequireApprovalPolicy(t *testing.T) {
 	k, events, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
