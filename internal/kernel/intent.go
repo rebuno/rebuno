@@ -98,6 +98,39 @@ func (k *Kernel) ProcessIntent(ctx context.Context, req domain.IntentRequest) (d
 			return k.executeRequireApproval(ctx, req, state, result.Reason)
 		}
 		policyTimeoutMs = result.TimeoutMs
+
+		if result.RateLimit != nil {
+			window, err := time.ParseDuration(result.RateLimit.Window)
+			if err != nil {
+				return domain.IntentResult{}, fmt.Errorf("invalid rate limit window: %w", err)
+			}
+			key := session.AgentID + ":" + req.Intent.ToolID
+			allowed, err := k.rateLimiter.Allow(key, result.RateLimit.Max, window)
+			if err != nil {
+				return domain.IntentResult{}, fmt.Errorf("checking rate limit: %w", err)
+			}
+			if !allowed {
+				deniedPayload := domain.IntentDeniedPayload{
+					IntentType:     string(req.Intent.Type),
+					ToolID:         req.Intent.ToolID,
+					Arguments:      req.Intent.Arguments,
+					IdempotencyKey: req.Intent.IdempotencyKey,
+					Reason:         fmt.Sprintf("rate limit exceeded: max %d per %s", result.RateLimit.Max, result.RateLimit.Window),
+					RuleID:         result.RuleID,
+				}
+				_, _ = k.EmitEvent(ctx, req.ExecutionID, "", domain.EventIntentDenied,
+					deniedPayload, uuid.Nil, uuid.Nil)
+
+				if k.metrics != nil {
+					k.metrics.IntentsTotal.WithLabelValues(string(req.Intent.Type), "rate_limited").Inc()
+				}
+
+				return domain.IntentResult{
+					Accepted: false,
+					Error:    fmt.Sprintf("rate limit exceeded: max %d per %s (rule: %s)", result.RateLimit.Max, result.RateLimit.Window, result.RuleID),
+				}, nil
+			}
+		}
 	}
 
 	intentDetails := k.buildIntentDetails(req.Intent)

@@ -21,6 +21,7 @@ import (
 	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/postgres"
+	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store"
 	redisstore "github.com/rebuno/rebuno/internal/store/redis"
 	"github.com/rebuno/rebuno/migrations"
@@ -175,6 +176,7 @@ func runServer(cfg *config.Config) error {
 		Logger:      logger,
 		Metrics:     metrics,
 		JobQueue:    jobQueue,
+		RateLimiter: ratelimit.NewMemoryLimiter(),
 		Config: kernel.KernelConfig{
 			ExecutionTimeout: cfg.ExecutionTimeout,
 			StepTimeout:      cfg.StepTimeout,

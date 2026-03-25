@@ -435,3 +435,17 @@ func (m *capturingPolicyEngine) Evaluate(_ context.Context, input domain.PolicyI
 	m.last = input
 	return m.result, nil
 }
+
+type mockRateLimitPolicy struct {
+	decision  domain.PolicyDecision
+	rateLimit *domain.RateLimitConfig
+}
+
+func (m *mockRateLimitPolicy) Evaluate(_ context.Context, _ domain.PolicyInput) (domain.PolicyResult, error) {
+	return domain.PolicyResult{
+		Decision:  m.decision,
+		Reason:    "test",
+		RuleID:    "test-rate-limit",
+		RateLimit: m.rateLimit,
+	}, nil
+}
