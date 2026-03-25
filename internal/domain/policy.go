@@ -9,6 +9,8 @@ type PolicyInput struct {
 	ExecutionID string            `json:"execution_id"`
 	AgentID     string            `json:"agent_id,omitempty"`
 	Arguments   json.RawMessage   `json:"arguments,omitempty"`
+	StepCount   int               `json:"step_count"`
+	DurationMs  int64             `json:"duration_ms"`
 }
 
 type PolicyDecision string
@@ -43,7 +45,9 @@ type PolicyCondition struct {
 	AgentID   string              `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	AgentIDs  []string            `json:"agent_ids,omitempty" yaml:"agent_ids,omitempty"`
 	Labels    map[string]string   `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Arguments []ArgumentPredicate `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	Arguments     []ArgumentPredicate `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	MinStepCount  *int                `json:"min_step_count,omitempty" yaml:"min_step_count,omitempty"`
+	MaxDurationMs *int64              `json:"max_duration_ms,omitempty" yaml:"max_duration_ms,omitempty"`
 }
 
 type PolicyAction struct {
