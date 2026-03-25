@@ -573,6 +573,93 @@ func TestSecureDefaultEngineUnknownActionWithoutInner(t *testing.T) {
 	}
 }
 
+func TestRuleEngineStepCountCondition(t *testing.T) {
+	stepLimit := 50
+	engine, err := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "deny-after-50-steps",
+				Priority: 1,
+				When: domain.PolicyCondition{
+					Action:       "tool.invoke",
+					MinStepCount: &stepLimit,
+				},
+				Then: domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "too many steps"},
+			},
+		},
+		Default: domain.PolicyAction{Decision: domain.PolicyAllow},
+	})
+	if err != nil {
+		t.Fatalf("NewRuleEngine: %v", err)
+	}
+
+	// Under limit: should allow (rule doesn't match, falls to default allow)
+	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", StepCount: 10,
+	})
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow for step_count=10, got %s", result.Decision)
+	}
+
+	// At limit: should deny (rule matches)
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", StepCount: 50,
+	})
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny for step_count=50, got %s", result.Decision)
+	}
+
+	// Over limit: should deny
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", StepCount: 100,
+	})
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny for step_count=100, got %s", result.Decision)
+	}
+}
+
+func TestRuleEngineDurationCondition(t *testing.T) {
+	maxDuration := int64(60000) // 60 seconds
+	engine, _ := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "deny-after-60s",
+				Priority: 1,
+				When: domain.PolicyCondition{
+					Action:        "tool.invoke",
+					MaxDurationMs: &maxDuration,
+				},
+				Then: domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "execution too long"},
+			},
+		},
+		Default: domain.PolicyAction{Decision: domain.PolicyAllow},
+	})
+
+	// Over duration: should deny (rule matches)
+	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", DurationMs: 90000,
+	})
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny for duration=90s, got %s", result.Decision)
+	}
+
+	// Under duration: should allow (rule doesn't match, falls to default)
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", DurationMs: 30000,
+	})
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow for duration=30s, got %s", result.Decision)
+	}
+
+	// At boundary: should allow (duration == max means not exceeded)
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", DurationMs: 60000,
+	})
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow for duration=60000 (at boundary, not exceeded), got %s", result.Decision)
+	}
+}
+
 func TestRuleEngineArgumentPredicateWithToolID(t *testing.T) {
 	engine, err := NewRuleEngine(PolicyConfig{
 		Rules: []domain.PolicyRule{

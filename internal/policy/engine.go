@@ -88,6 +88,12 @@ func matchesRule(cond domain.PolicyCondition, input domain.PolicyInput) bool {
 	if len(cond.Arguments) > 0 && !matchArguments(cond.Arguments, input.Arguments) {
 		return false
 	}
+	if cond.MinStepCount != nil && input.StepCount < *cond.MinStepCount {
+		return false
+	}
+	if cond.MaxDurationMs != nil && input.DurationMs <= *cond.MaxDurationMs {
+		return false
+	}
 	return true
 }
 
