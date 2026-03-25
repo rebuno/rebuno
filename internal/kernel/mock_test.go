@@ -422,3 +422,16 @@ func (m *mockPolicyEngine) Evaluate(_ context.Context, _ domain.PolicyInput) (do
 		RuleID:   m.ruleID,
 	}, nil
 }
+
+type capturingPolicyEngine struct {
+	result domain.PolicyResult
+	mu     sync.Mutex
+	last   domain.PolicyInput
+}
+
+func (m *capturingPolicyEngine) Evaluate(_ context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.last = input
+	return m.result, nil
+}

@@ -59,6 +59,8 @@ func (k *Kernel) ProcessIntent(ctx context.Context, req domain.IntentRequest) (d
 			ExecutionID: req.ExecutionID,
 			AgentID:     session.AgentID,
 			Arguments:   req.Intent.Arguments,
+			StepCount:   len(state.Steps),
+			DurationMs:  time.Since(state.Execution.CreatedAt).Milliseconds(),
 		}
 
 		policyStart := time.Now()

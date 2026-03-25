@@ -450,6 +450,47 @@ func TestProcessIntentRejectsTaintedExecution(t *testing.T) {
 	}
 }
 
+func TestProcessIntentPopulatesStepCountAndDuration(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	captor := &capturingPolicyEngine{
+		result: domain.PolicyResult{Decision: domain.PolicyAllow, RuleID: "test"},
+	}
+	k.policy = captor
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("expected accepted, got error: %s", result.Error)
+	}
+
+	captor.mu.Lock()
+	captured := captor.last
+	captor.mu.Unlock()
+
+	// StepCount should be 0 for fresh execution (no prior steps)
+	if captured.StepCount != 0 {
+		t.Errorf("expected step_count=0 for fresh execution, got %d", captured.StepCount)
+	}
+
+	// DurationMs should be positive (execution was just created)
+	if captured.DurationMs < 0 {
+		t.Errorf("expected non-negative duration_ms, got %d", captured.DurationMs)
+	}
+}
+
 func TestProcessIntentRequireApprovalPolicy(t *testing.T) {
 	k, events, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
