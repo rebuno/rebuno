@@ -705,6 +705,53 @@ func TestRuleEngineScheduleCondition(t *testing.T) {
 	}
 }
 
+func TestRuleEngineRateLimitPropagated(t *testing.T) {
+	engine, _ := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "rate-limited-shell",
+				Priority: 1,
+				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "shell.exec"},
+				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
+				RateLimit: &domain.RateLimitConfig{Max: 10, Window: "1m"},
+			},
+		},
+	})
+
+	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "shell.exec",
+	})
+	if result.Decision != domain.PolicyAllow {
+		t.Errorf("expected allow, got %s", result.Decision)
+	}
+	if result.RateLimit == nil {
+		t.Fatal("expected rate limit config, got nil")
+	}
+	if result.RateLimit.Max != 10 || result.RateLimit.Window != "1m" {
+		t.Errorf("expected max=10 window=1m, got max=%d window=%s", result.RateLimit.Max, result.RateLimit.Window)
+	}
+}
+
+func TestRuleEngineNoRateLimitWhenNotConfigured(t *testing.T) {
+	engine, _ := NewRuleEngine(PolicyConfig{
+		Rules: []domain.PolicyRule{
+			{
+				ID:       "allow-search",
+				Priority: 1,
+				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web.search"},
+				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
+			},
+		},
+	})
+
+	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search",
+	})
+	if result.RateLimit != nil {
+		t.Errorf("expected nil rate limit, got %+v", result.RateLimit)
+	}
+}
+
 func TestRuleEngineArgumentPredicateWithToolID(t *testing.T) {
 	engine, err := NewRuleEngine(PolicyConfig{
 		Rules: []domain.PolicyRule{

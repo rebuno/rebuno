@@ -21,11 +21,17 @@ const (
 	PolicyRequireApproval PolicyDecision = "require_approval"
 )
 
+type RateLimitConfig struct {
+	Max    int    `json:"max" yaml:"max"`
+	Window string `json:"window" yaml:"window"` // e.g., "1m", "1h" (Go duration)
+}
+
 type PolicyResult struct {
-	Decision  PolicyDecision `json:"decision"`
-	Reason    string         `json:"reason"`
-	RuleID    string         `json:"rule_id"`
-	TimeoutMs int64          `json:"timeout_ms,omitempty"`
+	Decision  PolicyDecision   `json:"decision"`
+	Reason    string           `json:"reason"`
+	RuleID    string           `json:"rule_id"`
+	TimeoutMs int64            `json:"timeout_ms,omitempty"`
+	RateLimit *RateLimitConfig `json:"rate_limit,omitempty"`
 }
 
 type ArgumentPredicate struct {
@@ -58,8 +64,9 @@ type PolicyAction struct {
 }
 
 type PolicyRule struct {
-	ID       string          `json:"id" yaml:"id"`
-	Priority int             `json:"priority" yaml:"priority"`
-	When     PolicyCondition `json:"when" yaml:"when"`
-	Then     PolicyAction    `json:"then" yaml:"then"`
+	ID        string           `json:"id" yaml:"id"`
+	Priority  int              `json:"priority" yaml:"priority"`
+	When      PolicyCondition  `json:"when" yaml:"when"`
+	Then      PolicyAction     `json:"then" yaml:"then"`
+	RateLimit *RateLimitConfig `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
 }

@@ -59,6 +59,7 @@ func (e *RuleEngine) EvaluateAt(_ context.Context, input domain.PolicyInput, now
 				Reason:    rule.Then.Reason,
 				RuleID:    rule.ID,
 				TimeoutMs: rule.Then.TimeoutMs,
+				RateLimit: rule.RateLimit,
 			}, nil
 		}
 	}

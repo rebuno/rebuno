@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
 	"gopkg.in/yaml.v3"
@@ -118,6 +119,16 @@ func validate(cfg *PolicyConfig) error {
 			if _, err := parseSchedule(r.When.Schedule); err != nil {
 				return fmt.Errorf("%w: rule %q has invalid schedule %q: %v",
 					domain.ErrInvalidConfiguration, r.ID, r.When.Schedule, err)
+			}
+		}
+		if r.RateLimit != nil {
+			if r.RateLimit.Max <= 0 {
+				return fmt.Errorf("%w: rule %q rate_limit.max must be positive",
+					domain.ErrInvalidConfiguration, r.ID)
+			}
+			if _, err := time.ParseDuration(r.RateLimit.Window); err != nil {
+				return fmt.Errorf("%w: rule %q rate_limit.window is invalid: %v",
+					domain.ErrInvalidConfiguration, r.ID, err)
 			}
 		}
 	}
