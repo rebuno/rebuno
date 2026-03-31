@@ -40,6 +40,10 @@ func (k *Kernel) buildClaimResult(ctx context.Context, executionID, agentID, con
 	if err != nil {
 		return nil, fmt.Errorf("projecting execution %s: %w", executionID, err)
 	}
+	if state.Execution.Status != domain.ExecutionPending {
+		return nil, fmt.Errorf("%w: execution %s is %s, not pending",
+			domain.ErrConflict, executionID, state.Execution.Status)
+	}
 
 	sessionID := uuid.Must(uuid.NewV7()).String()
 	session := domain.Session{
