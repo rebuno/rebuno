@@ -25,19 +25,20 @@ import (
 
 func devCmd() *cobra.Command {
 	var (
-		port        int
-		bind        string
-		policyFile  string
-		corsOrigins string
-		logLevel    string
-		logFormat   string
+		port         int
+		bind         string
+		policyFile   string
+		corsOrigins  string
+		logLevel     string
+		logFormat    string
+		agentTimeout time.Duration
 	)
 
 	cmd := &cobra.Command{
 		Use:   "dev",
 		Short: "Start a development kernel (in-memory, no dependencies)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDev(port, bind, policyFile, corsOrigins, logLevel, logFormat)
+			return runDev(port, bind, policyFile, corsOrigins, logLevel, logFormat, agentTimeout)
 		},
 	}
 
@@ -47,11 +48,12 @@ func devCmd() *cobra.Command {
 	cmd.Flags().StringVar(&corsOrigins, "cors-origins", "*", "CORS origins")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level")
 	cmd.Flags().StringVar(&logFormat, "log-format", "text", "Log format (json, text)")
+	cmd.Flags().DurationVar(&agentTimeout, "agent-timeout", 30*time.Second, "Agent session timeout")
 
 	return cmd
 }
 
-func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string) error {
+func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string, agentTimeout time.Duration) error {
 	logger := observe.NewLogger(logLevel, logFormat)
 	slog.SetDefault(logger)
 
@@ -111,6 +113,9 @@ func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string)
 
 	metrics := observe.NewMetrics()
 	kcfg := kernel.DefaultKernelConfig()
+	if agentTimeout > 0 {
+		kcfg.AgentTimeout = agentTimeout
+	}
 
 	k := kernel.NewKernel(kernel.Deps{
 		Events:      eventStore,
