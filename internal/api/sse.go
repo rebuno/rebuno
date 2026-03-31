@@ -80,12 +80,12 @@ func (h *sseHandlers) connect(w http.ResponseWriter, r *http.Request) {
 	conn := h.hub.Register(agentID, consumerID)
 	connGen := conn.Generation()
 	defer func() {
-		sessionID := h.hub.GetSessionID(agentID, consumerID, connGen)
+		sessionIDs := h.hub.GetSessionIDs(agentID, consumerID, connGen)
 		h.hub.Unregister(agentID, consumerID, connGen)
-		if sessionID != "" {
+		for _, sessionID := range sessionIDs {
 			disconnectCtx, disconnectCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer disconnectCancel()
 			h.kernel.HandleAgentDisconnect(disconnectCtx, sessionID)
+			disconnectCancel()
 		}
 	}()
 

@@ -9,7 +9,6 @@ type AgentMessage struct {
 
 type ConnInfo struct {
 	ConsumerID string
-	SessionID  string
 }
 
 type AgentHub interface {

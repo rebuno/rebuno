@@ -163,7 +163,7 @@ func newConnectedMockAgentHub() *mockAgentHub {
 	return &mockAgentHub{
 		sessions: make(map[string]store.AgentMessage),
 		hasConn:  true,
-		connInfo: store.ConnInfo{ConsumerID: "test-consumer", SessionID: ""},
+		connInfo: store.ConnInfo{ConsumerID: "test-consumer"},
 	}
 }
 

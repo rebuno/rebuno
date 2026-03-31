@@ -13,9 +13,9 @@ var epoch atomic.Uint64
 type Conn struct {
 	AgentID    string
 	ConsumerID string
-	SessionID  string
 	EventCh    chan store.AgentMessage
 	generation uint64
+	sessionIDs map[string]struct{}
 }
 
 func NewConn(agentID, consumerID string) *Conn {
@@ -24,6 +24,7 @@ func NewConn(agentID, consumerID string) *Conn {
 		ConsumerID: consumerID,
 		EventCh:    make(chan store.AgentMessage, eventChannelSize),
 		generation: epoch.Add(1),
+		sessionIDs: make(map[string]struct{}),
 	}
 }
 

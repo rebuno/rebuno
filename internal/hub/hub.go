@@ -40,8 +40,8 @@ func (h *Hub) Register(agentID, consumerID string) *Conn {
 
 	if old, ok := h.agents[agentID][consumerID]; ok {
 		close(old.EventCh)
-		if old.SessionID != "" {
-			delete(h.sessions, old.SessionID)
+		for sid := range old.sessionIDs {
+			delete(h.sessions, sid)
 		}
 	}
 
@@ -73,8 +73,8 @@ func (h *Hub) Unregister(agentID, consumerID string, generation uint64) {
 		return
 	}
 
-	if conn.SessionID != "" {
-		delete(h.sessions, conn.SessionID)
+	for sid := range conn.sessionIDs {
+		delete(h.sessions, sid)
 	}
 	close(conn.EventCh)
 	delete(consumers, consumerID)
@@ -90,22 +90,26 @@ func (h *Hub) Unregister(agentID, consumerID string, generation uint64) {
 	)
 }
 
-func (h *Hub) GetSessionID(agentID, consumerID string, generation uint64) string {
+func (h *Hub) GetSessionIDs(agentID, consumerID string, generation uint64) []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	consumers, ok := h.agents[agentID]
 	if !ok {
-		return ""
+		return nil
 	}
 	conn, ok := consumers[consumerID]
 	if !ok {
-		return ""
+		return nil
 	}
 	if conn.generation != generation {
-		return ""
+		return nil
 	}
-	return conn.SessionID
+	ids := make([]string, 0, len(conn.sessionIDs))
+	for sid := range conn.sessionIDs {
+		ids = append(ids, sid)
+	}
+	return ids
 }
 
 func (h *Hub) SetSession(agentID, consumerID, sessionID string) {
@@ -121,12 +125,25 @@ func (h *Hub) SetSession(agentID, consumerID, sessionID string) {
 		return
 	}
 
-	if conn.SessionID != "" {
-		delete(h.sessions, conn.SessionID)
+	conn.sessionIDs[sessionID] = struct{}{}
+	h.sessions[sessionID] = conn
+}
+
+func (h *Hub) RemoveSession(agentID, consumerID, sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	consumers, ok := h.agents[agentID]
+	if !ok {
+		return
+	}
+	conn, ok := consumers[consumerID]
+	if !ok {
+		return
 	}
 
-	conn.SessionID = sessionID
-	h.sessions[sessionID] = conn
+	delete(conn.sessionIDs, sessionID)
+	delete(h.sessions, sessionID)
 }
 
 func (h *Hub) Send(agentID string, msg store.AgentMessage) bool {
@@ -143,8 +160,8 @@ func (h *Hub) Send(agentID string, msg store.AgentMessage) bool {
 			slog.String("agent_id", agentID),
 			slog.String("consumer_id", conn.ConsumerID),
 		)
-		if conn.SessionID != "" {
-			delete(h.sessions, conn.SessionID)
+		for sid := range conn.sessionIDs {
+			delete(h.sessions, sid)
 		}
 		close(conn.EventCh)
 		delete(h.agents[agentID], conn.ConsumerID)
@@ -194,7 +211,6 @@ func (h *Hub) PickConnection(agentID string) (store.ConnInfo, bool) {
 
 	return store.ConnInfo{
 		ConsumerID: conn.ConsumerID,
-		SessionID:  conn.SessionID,
 	}, true
 }
 
