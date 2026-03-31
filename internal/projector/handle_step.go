@@ -15,7 +15,7 @@ func registerStepHandlers(p *Projector) {
 	p.Register(domain.EventStepFailed, applyStepFailed)
 	p.Register(domain.EventStepTimedOut, applyStepTimedOut)
 	p.Register(domain.EventStepCancelled, applyStepCancelled)
-	p.Register(domain.EventStepRetried, noOp)
+	p.Register(domain.EventStepRetried, applyStepRetried)
 }
 
 func applyStepCreated(state *domain.ExecutionState, evt *domain.Event) error {
@@ -148,6 +148,25 @@ func applyStepTimedOut(state *domain.ExecutionState, evt *domain.Event) error {
 		CompletedAt: step.CompletedAt,
 	}
 	state.History = append(state.History, entry)
+	return nil
+}
+
+func applyStepRetried(state *domain.ExecutionState, evt *domain.Event) error {
+	step := state.Steps[evt.StepID]
+	if step == nil {
+		return fmt.Errorf("step.retried for unknown step %s", evt.StepID)
+	}
+
+	var payload domain.StepRetriedPayload
+	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+		return fmt.Errorf("unmarshal step.retried payload: %w", err)
+	}
+
+	step.Status = domain.StepPending
+	step.Attempt = payload.NextAttempt
+	step.Error = ""
+	step.CompletedAt = nil
+	step.Retryable = false
 	return nil
 }
 

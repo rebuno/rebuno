@@ -111,6 +111,78 @@ func TestSubmitJobResultFailureWithRetry(t *testing.T) {
 	}
 }
 
+func TestSubmitJobResultRetryRoundTrip(t *testing.T) {
+	k, _, _, runnerHub, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+			Remote: true,
+		},
+	})
+
+	retryCh := make(chan struct{}, 1)
+	runnerHub.mu.Lock()
+	runnerHub.dispatched = nil
+	runnerHub.onDispatch = func() {
+		select {
+		case retryCh <- struct{}{}:
+		default:
+		}
+	}
+	runnerHub.mu.Unlock()
+
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		Success:     false,
+		Error:       "timeout",
+		Retryable:   true,
+	})
+	if err != nil {
+		t.Fatalf("submit retryable failure: %v", err)
+	}
+
+	select {
+	case <-retryCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for retry dispatch")
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepPending {
+		t.Fatalf("expected step pending after retry, got %s", step.Status)
+	}
+	if step.Attempt != 2 {
+		t.Fatalf("expected attempt 2, got %d", step.Attempt)
+	}
+
+	err = k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		Success:     true,
+		Data:        json.RawMessage(`{"results":["a","b"]}`),
+	})
+	if err != nil {
+		t.Fatalf("submit retry result: %v", err)
+	}
+
+	state, _ = k.GetExecution(ctx, execID)
+	step = state.Steps[result.StepID]
+	if step.Status != domain.StepSucceeded {
+		t.Fatalf("expected step succeeded after retry, got %s", step.Status)
+	}
+}
+
 func TestSubmitJobResultFailureNoRetry(t *testing.T) {
 	k, _, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
