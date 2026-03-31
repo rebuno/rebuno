@@ -506,6 +506,79 @@ func TestReapSessionsOrphanedPendingExecutionNotReassigned(t *testing.T) {
 	}
 }
 
+func stepCreatedEvent(stepID string, seq int64) domain.Event {
+	return domain.Event{
+		StepID:   stepID,
+		Type:     domain.EventStepCreated,
+		Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local.tool", Attempt: 1}),
+		Sequence: seq,
+	}
+}
+
+func TestRecoverActiveExecutionsCancelsOrphanedSteps(t *testing.T) {
+	f := newTestFixture()
+
+	execID := "exec-orphan-step"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+		stepCreatedEvent("step-1", 3),
+	}
+
+	m := f.manager(time.Hour)
+	m.RecoverActiveExecutions(context.Background())
+
+	f.emitter.mu.Lock()
+	defer f.emitter.mu.Unlock()
+
+	foundStepCancelled := false
+	for _, e := range f.emitter.events {
+		if e.EventType == domain.EventStepCancelled && e.StepID == "step-1" {
+			foundStepCancelled = true
+		}
+	}
+	if !foundStepCancelled {
+		t.Error("expected step.cancelled event for orphaned step during recovery")
+	}
+
+	status, ok := f.events.statusUpdates[execID]
+	if !ok {
+		t.Fatal("expected status update for orphaned execution")
+	}
+	if status != domain.ExecutionPending {
+		t.Fatalf("expected status pending, got %s", status)
+	}
+}
+
+func TestReapSessionsCancelsOrphanedSteps(t *testing.T) {
+	f := newTestFixture()
+	f.sessions.deletedExpired = 1
+	execID := "exec-orphan-step"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+		stepCreatedEvent("step-1", 3),
+	}
+
+	m := f.manager(time.Hour)
+	m.reapSessions(context.Background())
+
+	f.emitter.mu.Lock()
+	defer f.emitter.mu.Unlock()
+
+	foundStepCancelled := false
+	for _, e := range f.emitter.events {
+		if e.EventType == domain.EventStepCancelled && e.StepID == "step-1" {
+			foundStepCancelled = true
+		}
+	}
+	if !foundStepCancelled {
+		t.Error("expected step.cancelled event for orphaned step during session reaping")
+	}
+}
+
 func mustMarshal(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
