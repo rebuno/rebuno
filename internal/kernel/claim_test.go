@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/rebuno/rebuno/internal/domain"
@@ -41,6 +42,27 @@ func TestBuildClaimResult(t *testing.T) {
 	}
 	if !foundStarted {
 		t.Fatal("expected execution.started event")
+	}
+}
+
+func TestBuildClaimResultRejectsNonPending(t *testing.T) {
+	k, _, _, _, _, _ := newConnectedTestKernel()
+	ctx := context.Background()
+
+	execID, err := k.CreateExecution(ctx, CreateExecutionRequest{
+		AgentID: "agent-1",
+		Input:   json.RawMessage(`{"query":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = k.buildClaimResult(ctx, execID, "agent-2", "consumer-2")
+	if err == nil {
+		t.Fatal("expected error when claiming an already-running execution")
+	}
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("expected ErrConflict, got: %v", err)
 	}
 }
 
