@@ -829,3 +829,67 @@ func TestResumedClearsPendingApproval(t *testing.T) {
 		t.Fatal("expected PendingApproval cleared after resume")
 	}
 }
+
+func TestResetClearsCurrentStepAndPendingApproval(t *testing.T) {
+	state := emptyState()
+	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+		domain.ExecutionCreatedPayload{AgentID: "a1"}))
+	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	applyStepCreated(state, makeStepEvent("e1", "s1", 3, domain.EventStepCreated,
+		domain.StepCreatedPayload{ToolID: "tool-a", Attempt: 1}))
+
+	if state.CurrentStep == nil {
+		t.Fatal("expected CurrentStep to be set before reset")
+	}
+
+	applyStepCancelled(state, makeStepEvent("e1", "s1", 4, domain.EventStepCancelled,
+		domain.StepCancelledPayload{Reason: "agent disconnected"}))
+	applyExecutionReset(state, makeEvent("e1", 5, domain.EventExecutionReset,
+		domain.ExecutionResetPayload{Reason: "agent_disconnect", FromStatus: "running"}))
+
+	if state.Execution.Status != domain.ExecutionPending {
+		t.Fatalf("expected pending after reset, got %s", state.Execution.Status)
+	}
+	if state.CurrentStep != nil {
+		t.Fatal("expected CurrentStep to be nil after reset")
+	}
+	if state.PendingApproval != nil {
+		t.Fatal("expected PendingApproval to be nil after reset")
+	}
+}
+
+func TestResetClearsBlockedApprovalState(t *testing.T) {
+	state := emptyState()
+	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+		domain.ExecutionCreatedPayload{AgentID: "a1"}))
+	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	applyStepCreated(state, makeStepEvent("e1", "s1", 3, domain.EventStepCreated,
+		domain.StepCreatedPayload{ToolID: "tool-a", Attempt: 1}))
+	applyExecutionBlocked(state, makeEvent("e1", 4, domain.EventExecutionBlocked,
+		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "s1", ToolID: "tool-a"}))
+
+	if state.PendingApproval == nil {
+		t.Fatal("expected PendingApproval set before reset")
+	}
+	if state.CurrentStep == nil {
+		t.Fatal("expected CurrentStep set before reset")
+	}
+
+	applyStepCancelled(state, makeStepEvent("e1", "s1", 5, domain.EventStepCancelled,
+		domain.StepCancelledPayload{Reason: "agent disconnected"}))
+	applyExecutionReset(state, makeEvent("e1", 6, domain.EventExecutionReset,
+		domain.ExecutionResetPayload{Reason: "recovery", FromStatus: "blocked"}))
+
+	if state.Execution.Status != domain.ExecutionPending {
+		t.Fatalf("expected pending, got %s", state.Execution.Status)
+	}
+	if state.CurrentStep != nil {
+		t.Fatal("expected CurrentStep nil after reset")
+	}
+	if state.PendingApproval != nil {
+		t.Fatal("expected PendingApproval nil after reset")
+	}
+	if state.BlockedReason != "" {
+		t.Fatalf("expected empty blocked reason, got %s", state.BlockedReason)
+	}
+}

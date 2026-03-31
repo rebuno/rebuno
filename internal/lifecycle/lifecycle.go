@@ -202,6 +202,19 @@ func (m *Manager) reassignIfNeeded(ctx context.Context, executionID, agentID, ca
 
 	switch state.Execution.Status {
 	case domain.ExecutionRunning, domain.ExecutionBlocked:
+		for stepID, step := range state.Steps {
+			if step.Status.IsTerminal() {
+				continue
+			}
+			if _, err := m.emitter.EmitEvent(ctx, executionID, stepID, domain.EventStepCancelled,
+				domain.StepCancelledPayload{Reason: "agent disconnected"}, uuid.Nil, uuid.Nil); err != nil {
+				m.logger.Warn(caller+": failed to cancel orphaned step",
+					slog.String("execution_id", executionID),
+					slog.String("step_id", stepID),
+					slog.String("error", err.Error()),
+				)
+			}
+		}
 		if _, err := m.emitter.EmitEvent(ctx, executionID, "", domain.EventAgentTimeout,
 			domain.AgentTimeoutPayload{SessionID: ""}, uuid.Nil, uuid.Nil); err != nil {
 			m.logger.Warn(caller+": failed to emit agent.timeout for reassignment",

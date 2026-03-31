@@ -1,0 +1,190 @@
+package kernel
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/rebuno/rebuno/internal/domain"
+)
+
+func TestHandleAgentDisconnectCancelsOrphanedSteps(t *testing.T) {
+	k, events, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "local.tool",
+		},
+	})
+	if err != nil {
+		t.Fatalf("invoke tool: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("expected accepted, got error: %s", result.Error)
+	}
+	stepID := result.StepID
+
+	state, err := k.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if state.CurrentStep == nil || state.CurrentStep.Status.IsTerminal() {
+		t.Fatal("expected non-terminal current step before disconnect")
+	}
+
+	k.HandleAgentDisconnect(ctx, sessionID)
+
+	events.mu.Lock()
+	var foundStepCancelled bool
+	for _, evt := range events.events[execID] {
+		if evt.Type == domain.EventStepCancelled && evt.StepID == stepID {
+			foundStepCancelled = true
+		}
+	}
+	events.mu.Unlock()
+
+	if !foundStepCancelled {
+		t.Fatal("expected step.cancelled event for orphaned step after disconnect")
+	}
+
+	state, err = k.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatalf("get execution after disconnect: %v", err)
+	}
+	if state.Execution.Status != domain.ExecutionPending {
+		t.Fatalf("expected pending, got %s", state.Execution.Status)
+	}
+	if state.CurrentStep != nil {
+		t.Fatal("expected CurrentStep to be nil after reset")
+	}
+}
+
+func TestHandleAgentDisconnectAllowsNewToolAfterReassignment(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "local.tool",
+		},
+	})
+	if err != nil {
+		t.Fatalf("invoke tool: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("expected accepted, got error: %s", result.Error)
+	}
+
+	k.HandleAgentDisconnect(ctx, sessionID)
+
+	newSessionID := "new-session-" + execID[:8]
+	sessions.Create(ctx, domain.Session{
+		ID:          newSessionID,
+		ExecutionID: execID,
+		AgentID:     "agent-1",
+		ConsumerID:  "consumer-2",
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(2 * time.Minute),
+	})
+	k.EmitEvent(ctx, execID, "", domain.EventExecutionStarted, nil, uuid.Nil, uuid.Nil)
+	k.events.UpdateExecutionStatus(ctx, execID, domain.ExecutionRunning)
+
+	result, err = k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   newSessionID,
+		Intent: domain.Intent{
+			Type:      domain.IntentInvokeTool,
+			ToolID:    "another.tool",
+			Arguments: json.RawMessage(`{}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("new agent invoke tool after reassignment: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("expected accepted after reassignment, got error: %s", result.Error)
+	}
+}
+
+func TestHandleAgentDisconnectSkipsTerminalSteps(t *testing.T) {
+	k, events, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "local.tool",
+		},
+	})
+	if err != nil {
+		t.Fatalf("invoke tool: %v", err)
+	}
+
+	k.SubmitStepResult(ctx, StepResultRequest{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		SessionID:   sessionID,
+		Success:     true,
+		Data:        json.RawMessage(`{"ok":true}`),
+	})
+
+	k.HandleAgentDisconnect(ctx, sessionID)
+
+	events.mu.Lock()
+	cancelCount := 0
+	for _, evt := range events.events[execID] {
+		if evt.Type == domain.EventStepCancelled {
+			cancelCount++
+		}
+	}
+	events.mu.Unlock()
+
+	if cancelCount != 0 {
+		t.Fatalf("expected no step.cancelled events for already-terminal step, got %d", cancelCount)
+	}
+}
+
+func TestHandleAgentDisconnectTerminalExecutionNoOp(t *testing.T) {
+	k, events, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent:      domain.Intent{Type: domain.IntentComplete, Output: json.RawMessage(`{}`)},
+	})
+
+	events.mu.Lock()
+	countBefore := len(events.events[execID])
+	events.mu.Unlock()
+
+	k.HandleAgentDisconnect(ctx, sessionID)
+
+	events.mu.Lock()
+	countAfter := len(events.events[execID])
+	events.mu.Unlock()
+
+	if countAfter != countBefore {
+		t.Fatalf("expected no new events after disconnect on terminal execution, before=%d after=%d", countBefore, countAfter)
+	}
+}

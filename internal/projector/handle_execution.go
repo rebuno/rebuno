@@ -104,5 +104,7 @@ func applyExecutionReset(state *domain.ExecutionState, evt *domain.Event) error 
 	state.Execution.UpdatedAt = evt.Timestamp
 	state.BlockedReason = ""
 	state.BlockedRef = ""
+	state.CurrentStep = nil
+	state.PendingApproval = nil
 	return nil
 }

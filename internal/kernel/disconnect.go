@@ -67,6 +67,19 @@ func (k *Kernel) HandleAgentDisconnect(ctx context.Context, sessionID string) {
 
 	switch state.Execution.Status {
 	case domain.ExecutionRunning:
+		for stepID, step := range state.Steps {
+			if step.Status.IsTerminal() {
+				continue
+			}
+			if _, err := k.EmitEvent(ctx, executionID, stepID, domain.EventStepCancelled,
+				domain.StepCancelledPayload{Reason: "agent disconnected"}, uuid.Nil, correlationID); err != nil {
+				k.logger.Warn("disconnect: failed to cancel orphaned step",
+					slog.String("execution_id", executionID),
+					slog.String("step_id", stepID),
+					slog.String("error", err.Error()),
+				)
+			}
+		}
 		_, err = k.EmitEvent(ctx, executionID, "", domain.EventExecutionReset,
 			domain.ExecutionResetPayload{
 				Reason:     "agent_disconnect",
