@@ -340,6 +340,14 @@ func (m *mockSessionStore) Delete(_ context.Context, sessionID string) error {
 	return nil
 }
 
+func (m *mockSessionStore) DeleteAll(_ context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := len(m.sessions)
+	m.sessions = make(map[string]*domain.Session)
+	return count, nil
+}
+
 func (m *mockSessionStore) DeleteExpired(_ context.Context, _ time.Duration) (int, error) {
 	return 0, nil
 }

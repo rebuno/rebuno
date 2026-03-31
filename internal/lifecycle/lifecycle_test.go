@@ -304,7 +304,7 @@ func TestRecoverActiveExecutions(t *testing.T) {
 		}
 	})
 
-	t.Run("execution with active session is not reassigned", func(t *testing.T) {
+	t.Run("execution with stale session is recovered after purge", func(t *testing.T) {
 		f := newTestFixture()
 
 		execID := "exec-active"
@@ -322,8 +322,16 @@ func TestRecoverActiveExecutions(t *testing.T) {
 		m := f.manager(time.Hour)
 		m.RecoverActiveExecutions(context.Background())
 
-		if _, ok := f.events.statusUpdates[execID]; ok {
-			t.Fatal("did not expect status update for execution with active session")
+		status, ok := f.events.statusUpdates[execID]
+		if !ok {
+			t.Fatal("expected status update after stale session purge")
+		}
+		if status != domain.ExecutionPending {
+			t.Fatalf("expected status pending, got %s", status)
+		}
+
+		if len(f.sessions.sessions) != 0 {
+			t.Fatal("expected all sessions to be purged")
 		}
 	})
 

@@ -109,11 +109,9 @@ func (m *Manager) reapSessions(ctx context.Context) {
 		return
 	}
 
-	if deleted == 0 {
-		return
+	if deleted > 0 {
+		m.logger.Info("session reaper: deleted expired sessions", slog.Int("count", deleted))
 	}
-
-	m.logger.Info("session reaper: deleted expired sessions", slog.Int("count", deleted))
 
 	activeIDs, err := m.events.ListActiveExecutionIDs(ctx)
 	if err != nil {
@@ -545,6 +543,14 @@ func (m *Manager) cleanupTerminalExecutions(ctx context.Context, retentionPeriod
 }
 
 func (m *Manager) RecoverActiveExecutions(ctx context.Context) {
+	if purged, err := m.sessions.DeleteAll(ctx); err != nil {
+		m.logger.Error("recovery: failed to purge stale sessions",
+			slog.String("error", err.Error()),
+		)
+	} else if purged > 0 {
+		m.logger.Info("recovery: purged stale sessions", slog.Int("count", purged))
+	}
+
 	ids, err := m.events.ListActiveExecutionIDs(ctx)
 	if err != nil {
 		m.logger.Error("recovery: failed to list active execution IDs",
@@ -569,7 +575,6 @@ func (m *Manager) RecoverActiveExecutions(ctx context.Context) {
 		}
 
 		if state.Execution.Status.IsTerminal() {
-			// Reconcile stale status column with the event-sourced state.
 			if err := m.events.UpdateExecutionStatus(ctx, execID, state.Execution.Status); err != nil {
 				m.logger.Warn("recovery: failed to reconcile terminal status",
 					slog.String("execution_id", execID),
@@ -577,18 +582,6 @@ func (m *Manager) RecoverActiveExecutions(ctx context.Context) {
 					slog.String("error", err.Error()),
 				)
 			}
-			continue
-		}
-
-		_, found, err := m.sessions.GetByExecution(ctx, execID)
-		if err != nil {
-			m.logger.Warn("recovery: failed to check session",
-				slog.String("execution_id", execID),
-				slog.String("error", err.Error()),
-			)
-			continue
-		}
-		if found {
 			continue
 		}
 

@@ -97,6 +97,14 @@ func (s *SessionStore) Delete(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+func (s *SessionStore) DeleteAll(ctx context.Context) (int, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM sessions`)
+	if err != nil {
+		return 0, fmt.Errorf("delete all sessions: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (s *SessionStore) DeleteExpired(ctx context.Context, gracePeriod time.Duration) (int, error) {
 	tag, err := s.pool.Exec(ctx,
 		`DELETE FROM sessions WHERE expires_at < now() - $1::interval`,
