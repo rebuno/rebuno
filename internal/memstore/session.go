@@ -80,6 +80,15 @@ func (s *SessionStore) Delete(_ context.Context, sessionID string) error {
 	return nil
 }
 
+func (s *SessionStore) DeleteAll(_ context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := len(s.sessions)
+	s.sessions = make(map[string]domain.Session)
+	s.byExec = make(map[string]string)
+	return count, nil
+}
+
 func (s *SessionStore) DeleteExpired(_ context.Context, gracePeriod time.Duration) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

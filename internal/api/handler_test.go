@@ -193,6 +193,12 @@ func (s *stubSessionStore) Delete(_ context.Context, id string) error {
 	delete(s.sessions, id)
 	return nil
 }
+func (s *stubSessionStore) DeleteAll(_ context.Context) (int, error) {
+	count := len(s.sessions)
+	s.sessions = make(map[string]*domain.Session)
+	return count, nil
+}
+
 func (s *stubSessionStore) DeleteExpired(_ context.Context, _ time.Duration) (int, error) {
 	return 0, nil
 }

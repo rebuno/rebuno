@@ -14,4 +14,5 @@ type SessionStore interface {
 	Extend(ctx context.Context, sessionID string, duration time.Duration) error
 	Delete(ctx context.Context, sessionID string) error
 	DeleteExpired(ctx context.Context, gracePeriod time.Duration) (int, error)
+	DeleteAll(ctx context.Context) (int, error)
 }
