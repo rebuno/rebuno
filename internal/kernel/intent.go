@@ -188,6 +188,7 @@ func (k *Kernel) executeInvokeTool(
 		Arguments:   req.Intent.Arguments,
 		MaxAttempts: 1,
 		Attempt:     1,
+		Deadline:    deadline,
 	}
 
 	if req.Intent.Remote {
