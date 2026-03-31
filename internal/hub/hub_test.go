@@ -329,52 +329,107 @@ func TestSendFullChannelEvictsSessionToo(t *testing.T) {
 	}
 }
 
-func TestSetSessionReplacePrevious(t *testing.T) {
+func TestMultipleSessionsPerConnection(t *testing.T) {
 	h := New(nil)
 	defer h.Close()
 
-	h.Register("agent-1", "c1")
-	h.SetSession("agent-1", "c1", "session-old")
+	conn := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+	h.SetSession("agent-1", "c1", "session-2")
 
-	if ok := h.SendToSession("session-old", testMsg("test")); !ok {
-		t.Fatal("expected old session to be reachable")
+	if ok := h.SendToSession("session-1", testMsg("msg-1")); !ok {
+		t.Fatal("expected session-1 to be reachable")
+	}
+	if ok := h.SendToSession("session-2", testMsg("msg-2")); !ok {
+		t.Fatal("expected session-2 to be reachable")
 	}
 
-	h.SetSession("agent-1", "c1", "session-new")
-
-	if ok := h.SendToSession("session-old", testMsg("test")); ok {
-		t.Fatal("expected old session to be unreachable after replacement")
+	// Both messages should arrive on the same connection channel
+	received := 0
+	for i := 0; i < 2; i++ {
+		select {
+		case <-conn.EventCh:
+			received++
+		default:
+		}
 	}
-	if ok := h.SendToSession("session-new", testMsg("test")); !ok {
-		t.Fatal("expected new session to be reachable")
+	if received != 2 {
+		t.Fatalf("expected 2 messages, got %d", received)
 	}
 }
 
-func TestGetSessionID(t *testing.T) {
+func TestMultipleSessionsClearedOnUnregister(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	conn := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+	h.SetSession("agent-1", "c1", "session-2")
+
+	h.Unregister("agent-1", "c1", conn.Generation())
+
+	if ok := h.SendToSession("session-1", testMsg("test")); ok {
+		t.Fatal("expected session-1 to be unreachable after unregister")
+	}
+	if ok := h.SendToSession("session-2", testMsg("test")); ok {
+		t.Fatal("expected session-2 to be unreachable after unregister")
+	}
+}
+
+func TestGetSessionIDs(t *testing.T) {
 	h := New(nil)
 	defer h.Close()
 
 	conn := h.Register("agent-1", "c1")
 	gen := conn.Generation()
 
-	if s := h.GetSessionID("agent-1", "c1", gen); s != "" {
-		t.Fatalf("expected empty session before SetSession, got %q", s)
+	ids := h.GetSessionIDs("agent-1", "c1", gen)
+	if len(ids) != 0 {
+		t.Fatalf("expected empty session IDs before SetSession, got %v", ids)
 	}
 
 	h.SetSession("agent-1", "c1", "session-1")
+	h.SetSession("agent-1", "c1", "session-2")
 
-	if s := h.GetSessionID("agent-1", "c1", gen); s != "session-1" {
-		t.Fatalf("expected 'session-1', got %q", s)
+	ids = h.GetSessionIDs("agent-1", "c1", gen)
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 session IDs, got %d", len(ids))
 	}
 
-	// Stale generation returns empty
-	if s := h.GetSessionID("agent-1", "c1", gen-1); s != "" {
-		t.Fatalf("expected empty for stale generation, got %q", s)
+	found := make(map[string]bool)
+	for _, id := range ids {
+		found[id] = true
+	}
+	if !found["session-1"] || !found["session-2"] {
+		t.Fatalf("expected session-1 and session-2, got %v", ids)
 	}
 
-	// Missing agent returns empty
-	if s := h.GetSessionID("nonexistent", "c1", gen); s != "" {
-		t.Fatalf("expected empty for missing agent, got %q", s)
+	// Stale generation returns nil
+	if ids := h.GetSessionIDs("agent-1", "c1", gen-1); len(ids) != 0 {
+		t.Fatalf("expected nil for stale generation, got %v", ids)
+	}
+
+	// Missing agent returns nil
+	if ids := h.GetSessionIDs("nonexistent", "c1", gen); len(ids) != 0 {
+		t.Fatalf("expected nil for missing agent, got %v", ids)
+	}
+}
+
+func TestRemoveSession(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+	h.SetSession("agent-1", "c1", "session-2")
+
+	h.RemoveSession("agent-1", "c1", "session-1")
+
+	if ok := h.SendToSession("session-1", testMsg("test")); ok {
+		t.Fatal("expected session-1 to be unreachable after removal")
+	}
+	if ok := h.SendToSession("session-2", testMsg("test")); !ok {
+		t.Fatal("expected session-2 to still be reachable")
 	}
 }
 
@@ -471,4 +526,44 @@ func TestConcurrentRegisterUnregisterSameAgent(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestMultipleSessionsOverflowEvictsAll(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	conn := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+	h.SetSession("agent-1", "c1", "session-2")
+
+	for i := 0; i < eventChannelSize; i++ {
+		conn.EventCh <- testMsg("fill")
+	}
+
+	h.Send("agent-1", testMsg("overflow"))
+
+	if ok := h.SendToSession("session-1", testMsg("test")); ok {
+		t.Fatal("expected session-1 to be cleaned up after overflow")
+	}
+	if ok := h.SendToSession("session-2", testMsg("test")); ok {
+		t.Fatal("expected session-2 to be cleaned up after overflow")
+	}
+}
+
+func TestReRegisterClearsAllSessions(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+	h.SetSession("agent-1", "c1", "session-2")
+
+	h.Register("agent-1", "c1")
+
+	if ok := h.SendToSession("session-1", testMsg("test")); ok {
+		t.Fatal("expected session-1 to be gone after re-register")
+	}
+	if ok := h.SendToSession("session-2", testMsg("test")); ok {
+		t.Fatal("expected session-2 to be gone after re-register")
+	}
 }
