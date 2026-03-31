@@ -177,6 +177,42 @@ func TestProcessIntentInvokeTool(t *testing.T) {
 	}
 }
 
+func TestProcessIntentInvokeToolLocalStepHasDeadline(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+	before := time.Now()
+
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("expected accepted, got error: %s", result.Error)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step == nil {
+		t.Fatal("expected step to exist")
+	}
+	if step.Deadline == nil {
+		t.Fatal("expected local step to have a deadline set")
+	}
+	expectedMin := before.Add(k.config.StepTimeout)
+	if step.Deadline.Before(expectedMin) {
+		t.Fatalf("deadline %v is before expected minimum %v", *step.Deadline, expectedMin)
+	}
+}
+
 func TestProcessIntentInvokeToolRemote(t *testing.T) {
 	k, _, _, runnerHub, sessions, _ := newTestKernel()
 	ctx := context.Background()

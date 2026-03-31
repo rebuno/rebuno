@@ -116,6 +116,7 @@ type StepCreatedPayload struct {
 	Arguments   json.RawMessage `json:"arguments"`
 	MaxAttempts int             `json:"max_attempts"`
 	Attempt     int             `json:"attempt"`
+	Deadline    time.Time       `json:"deadline,omitempty"`
 }
 
 type StepDispatchedPayload struct {

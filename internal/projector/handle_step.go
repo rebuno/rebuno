@@ -35,6 +35,9 @@ func applyStepCreated(state *domain.ExecutionState, evt *domain.Event) error {
 		Arguments:   payload.Arguments,
 		CreatedAt:   evt.Timestamp,
 	}
+	if !payload.Deadline.IsZero() {
+		step.Deadline = &payload.Deadline
+	}
 	if state.Steps == nil {
 		state.Steps = make(map[string]*domain.Step)
 	}
