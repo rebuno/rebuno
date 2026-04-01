@@ -82,19 +82,20 @@ rebuno dev --policy examples/policies/hello.yaml
 
 Now `reverse` and `word_count` are allowed, but any other tool will be denied. To see a denial, you can modify the hello agent to call an unlisted tool — the kernel will reject the intent and the agent will receive a `PolicyError`.
 
-### Add the Explorer
+### Add the Dashboard
 
 **Requires:** Node.js 18+
 
 To also start the web-based execution viewer:
 
 ```bash
-cd explorer
+git clone https://github.com/rebuno/dashboard.git
+cd dashboard
 npm install
 npm run dev
 ```
 
-The explorer is available at `http://localhost:3000`. It connects to the kernel at `http://localhost:8080` by default. It shows executions, event timelines, and step details.
+The dashboard is available at `http://localhost:3000`. It connects to the kernel at `http://localhost:8080` by default. It shows executions, event timelines, and step details.
 
 ## Next Steps
 
