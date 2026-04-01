@@ -1,12 +1,10 @@
 name: rebuno
 
-# Core stack: postgres + kernel (always), explorer (opt-in via --profile)
+# Core stack: postgres + kernel
 # For production, set POSTGRES_PASSWORD and other env vars to secure values
 #
-# Kernel only:
+# Usage:
 #   docker compose -f deploy/docker-compose.yaml up
-# With explorer:
-#   docker compose -f deploy/docker-compose.yaml --profile explorer up
 services:
   postgres:
     image: postgres:16-alpine
@@ -18,6 +16,8 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - rebuno
     command:
       - "postgres"
       - "-c"
@@ -47,6 +47,8 @@ services:
       # - "--redis-url=redis://localhost:6379"
     volumes:
       # - ./path/to/your/policies:/app/policies:ro
+    networks:
+      - rebuno
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,24 +59,10 @@ services:
       retries: 10
       start_period: 10s
 
-  explorer:
-    profiles: ["explorer"]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.explorer
-    ports:
-      - "3000:3000"
-    environment:
-      KERNEL_URL: http://kernel:8080
-      # KERNEL_API_KEY: your-secret-token
-    depends_on:
-      kernel:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
 volumes:
   pgdata:
+
+networks:
+  rebuno:
+    name: rebuno
+    driver: bridge
