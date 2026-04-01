@@ -1,6 +1,6 @@
 # rebuno CLI
 
-The `rebuno` binary includes built-in commands for operational visibility into the kernel. These inspection commands communicate through the kernel's HTTP API, making them a terminal-based counterpart to the Explorer web UI.
+The `rebuno` binary includes built-in commands for operational visibility into the kernel. These inspection commands communicate through the kernel's HTTP API, making them a terminal-based counterpart to the Dashboard web UI.
 
 ## Installation
 

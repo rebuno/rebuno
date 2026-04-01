@@ -24,18 +24,6 @@ Integration tests use build tag `integration` and testcontainers for ephemeral P
 go test -tags integration -count=1 -v ./tests/integration/...
 ```
 
-SDK tests:
-```bash
-cd sdk/python && pytest
-cd sdk/typescript && npm test   # vitest
-```
-
-Explorer (Next.js web UI):
-```bash
-cd explorer && npm run dev      # Development
-cd explorer && npm run build    # Production build
-```
-
 ### Core execution flow
 
 1. Agent connects via SSE, registers tools
@@ -67,8 +55,3 @@ cd explorer && npm run build    # Production build
 ### Entry point
 
 `cmd/rebuno/main.go` — Cobra CLI with commands: `dev`, `server`, `version`, plus inspection commands (events, executions)
-
-### SDKs
-
-- **Python** (`sdk/python/`)
-- **TypeScript** (`sdk/typescript/`)
