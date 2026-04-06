@@ -95,10 +95,14 @@ func (s *stubEventStore) GetExecution(_ context.Context, executionID string) (*d
 	return e, nil
 }
 
-func (s *stubEventStore) CreateExecution(_ context.Context, id, agentID string) error {
+func (s *stubEventStore) CreateExecution(_ context.Context, id, agentID string, labels map[string]string) error {
+	if labels == nil {
+		labels = map[string]string{}
+	}
 	s.executions[id] = &domain.ExecutionSummary{
 		ID:      id,
 		AgentID: agentID,
+		Labels:  labels,
 		Status:  domain.ExecutionPending,
 	}
 	return nil

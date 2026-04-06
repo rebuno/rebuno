@@ -26,7 +26,9 @@ func (s stubEventStore) ListExecutions(context.Context, domain.ExecutionFilter, 
 func (s stubEventStore) GetExecution(context.Context, string) (*domain.ExecutionSummary, error) {
 	return nil, nil
 }
-func (s stubEventStore) CreateExecution(context.Context, string, string) error { return nil }
+func (s stubEventStore) CreateExecution(context.Context, string, string, map[string]string) error {
+	return nil
+}
 func (s stubEventStore) UpdateExecutionStatus(context.Context, string, domain.ExecutionStatus) error {
 	return nil
 }

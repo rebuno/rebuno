@@ -157,11 +157,14 @@ func (s *EventStore) GetLatestSequence(ctx context.Context, executionID string) 
 	return nextSeq - 1, nil
 }
 
-func (s *EventStore) CreateExecution(ctx context.Context, id, agentID string) error {
+func (s *EventStore) CreateExecution(ctx context.Context, id, agentID string, labels map[string]string) error {
+	if labels == nil {
+		labels = map[string]string{}
+	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO executions (id, agent_id, status, next_sequence, created_at, updated_at)
-		VALUES ($1, $2, 'pending', 1, now(), now())
-	`, id, agentID)
+		INSERT INTO executions (id, agent_id, status, next_sequence, labels, created_at, updated_at)
+		VALUES ($1, $2, 'pending', 1, $3, now(), now())
+	`, id, agentID, labels)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -189,11 +192,11 @@ func (s *EventStore) UpdateExecutionStatus(ctx context.Context, executionID stri
 func (s *EventStore) GetExecution(ctx context.Context, executionID string) (*domain.ExecutionSummary, error) {
 	var es domain.ExecutionSummary
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, status, agent_id, created_at, updated_at
+		SELECT id, status, agent_id, labels, created_at, updated_at
 		FROM executions
 		WHERE id = $1
 	`, executionID).Scan(
-		&es.ID, &es.Status, &es.AgentID,
+		&es.ID, &es.Status, &es.AgentID, &es.Labels,
 		&es.CreatedAt, &es.UpdatedAt,
 	)
 	if err != nil {
@@ -226,6 +229,12 @@ func (s *EventStore) ListExecutions(ctx context.Context, filter domain.Execution
 		argIdx++
 	}
 
+	if len(filter.Labels) > 0 {
+		conditions = append(conditions, fmt.Sprintf("labels @> $%d", argIdx))
+		args = append(args, filter.Labels)
+		argIdx++
+	}
+
 	if cursor != "" {
 		cursorTime, cursorID, err := decodeCursor(cursor)
 		if err != nil {
@@ -244,7 +253,7 @@ func (s *EventStore) ListExecutions(ctx context.Context, filter domain.Execution
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, status, agent_id, created_at, updated_at
+		SELECT id, status, agent_id, labels, created_at, updated_at
 		FROM executions
 		%s
 		ORDER BY created_at DESC, id DESC
@@ -262,7 +271,7 @@ func (s *EventStore) ListExecutions(ctx context.Context, filter domain.Execution
 	for rows.Next() {
 		var es domain.ExecutionSummary
 		if err := rows.Scan(
-			&es.ID, &es.Status, &es.AgentID,
+			&es.ID, &es.Status, &es.AgentID, &es.Labels,
 			&es.CreatedAt, &es.UpdatedAt,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan execution: %w", err)

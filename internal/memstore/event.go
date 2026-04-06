@@ -86,14 +86,18 @@ func (s *EventStore) GetLatestSequence(_ context.Context, executionID string) (i
 	return s.sequences[executionID], nil
 }
 
-func (s *EventStore) CreateExecution(_ context.Context, id, agentID string) error {
+func (s *EventStore) CreateExecution(_ context.Context, id, agentID string, labels map[string]string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if labels == nil {
+		labels = map[string]string{}
+	}
 	now := time.Now()
 	s.executions[id] = domain.ExecutionSummary{
 		ID:        id,
 		Status:    domain.ExecutionPending,
 		AgentID:   agentID,
+		Labels:    labels,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -138,6 +142,18 @@ func (s *EventStore) ListExecutions(_ context.Context, filter domain.ExecutionFi
 		}
 		if filter.AgentID != "" && exec.AgentID != filter.AgentID {
 			continue
+		}
+		if len(filter.Labels) > 0 {
+			match := true
+			for k, v := range filter.Labels {
+				if exec.Labels[k] != v {
+					match = false
+					break
+				}
+			}
+			if !match {
+				continue
+			}
 		}
 		all = append(all, exec)
 	}

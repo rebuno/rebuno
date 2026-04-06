@@ -88,14 +88,16 @@ type Checkpoint struct {
 }
 
 type ExecutionSummary struct {
-	ID        string          `json:"id"`
-	Status    ExecutionStatus `json:"status"`
-	AgentID   string          `json:"agent_id"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID        string            `json:"id"`
+	Status    ExecutionStatus   `json:"status"`
+	AgentID   string            `json:"agent_id"`
+	Labels    map[string]string `json:"labels"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
 }
 
 type ExecutionFilter struct {
-	Status  ExecutionStatus `json:"status,omitempty"`
-	AgentID string          `json:"agent_id,omitempty"`
+	Status  ExecutionStatus   `json:"status,omitempty"`
+	AgentID string            `json:"agent_id,omitempty"`
+	Labels  map[string]string `json:"labels,omitempty"`
 }
