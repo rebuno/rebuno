@@ -89,12 +89,16 @@ func (m *mockEventStore) GetExecution(_ context.Context, executionID string) (*d
 	return nil, nil
 }
 
-func (m *mockEventStore) CreateExecution(_ context.Context, id, agentID string) error {
+func (m *mockEventStore) CreateExecution(_ context.Context, id, agentID string, labels map[string]string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if labels == nil {
+		labels = map[string]string{}
+	}
 	m.executions[id] = &domain.ExecutionSummary{
 		ID:      id,
 		AgentID: agentID,
+		Labels:  labels,
 		Status:  domain.ExecutionPending,
 	}
 	return nil

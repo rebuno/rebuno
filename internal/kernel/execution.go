@@ -24,7 +24,7 @@ func (k *Kernel) CreateExecution(ctx context.Context, req CreateExecutionRequest
 	}
 	executionID := uuid.Must(uuid.NewV7()).String()
 
-	if err := k.events.CreateExecution(ctx, executionID, req.AgentID); err != nil {
+	if err := k.events.CreateExecution(ctx, executionID, req.AgentID, req.Labels); err != nil {
 		return "", fmt.Errorf("creating execution row: %w", err)
 	}
 

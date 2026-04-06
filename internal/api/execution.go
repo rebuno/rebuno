@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -76,9 +77,19 @@ func (h *executionHandlers) list(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	labels := make(map[string]string)
+	for _, lbl := range r.URL.Query()["label"] {
+		k, v, ok := strings.Cut(lbl, ":")
+		if !ok || k == "" {
+			writeErrorFromErr(w, fmt.Errorf("%w: invalid label filter %q, expected key:value", domain.ErrValidation, lbl))
+			return
+		}
+		labels[k] = v
+	}
 	filter := domain.ExecutionFilter{
 		Status:  domain.ExecutionStatus(statusStr),
 		AgentID: queryString(r, "agent_id"),
+		Labels:  labels,
 	}
 	cursor := queryString(r, "cursor")
 	limit := queryInt(r, "limit", 50)

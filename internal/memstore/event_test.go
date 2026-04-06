@@ -16,7 +16,7 @@ func TestEventStore_CreateAndGetExecution(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	if err := s.CreateExecution(ctx, "exec-1", "agent-1"); err != nil {
+	if err := s.CreateExecution(ctx, "exec-1", "agent-1", nil); err != nil {
 		t.Fatalf("CreateExecution: %v", err)
 	}
 
@@ -49,7 +49,7 @@ func TestEventStore_AppendAndGetByExecution(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 
 	ev := domain.Event{
 		ID:             uuid.New(),
@@ -83,7 +83,7 @@ func TestEventStore_AppendIdempotent(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 
 	ev := domain.Event{
 		ID:             uuid.New(),
@@ -107,7 +107,7 @@ func TestEventStore_AppendBatch(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 
 	events := make([]domain.Event, 3)
 	for i := range events {
@@ -135,7 +135,7 @@ func TestEventStore_GetByExecutionPagination(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 
 	for i := range 5 {
 		_ = s.Append(ctx, domain.Event{
@@ -159,7 +159,7 @@ func TestEventStore_GetLatestSequence(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 
 	seq, _ := s.GetLatestSequence(ctx, "exec-1")
 	if seq != 0 {
@@ -178,7 +178,7 @@ func TestEventStore_UpdateExecutionStatus(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 	_ = s.UpdateExecutionStatus(ctx, "exec-1", domain.ExecutionRunning)
 
 	got, _ := s.GetExecution(ctx, "exec-1")
@@ -191,9 +191,9 @@ func TestEventStore_ListActiveExecutionIDs(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "a")
-	_ = s.CreateExecution(ctx, "exec-2", "a")
-	_ = s.CreateExecution(ctx, "exec-3", "a")
+	_ = s.CreateExecution(ctx, "exec-1", "a", nil)
+	_ = s.CreateExecution(ctx, "exec-2", "a", nil)
+	_ = s.CreateExecution(ctx, "exec-3", "a", nil)
 	_ = s.UpdateExecutionStatus(ctx, "exec-2", domain.ExecutionCompleted)
 
 	ids, _ := s.ListActiveExecutionIDs(ctx)
@@ -207,7 +207,7 @@ func TestEventStore_ListExecutionsCursorPagination(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 5 {
-		_ = s.CreateExecution(ctx, fmt.Sprintf("exec-%d", i), "agent-1")
+		_ = s.CreateExecution(ctx, fmt.Sprintf("exec-%d", i), "agent-1", nil)
 		time.Sleep(time.Millisecond) // ensure distinct timestamps
 	}
 
@@ -234,8 +234,8 @@ func TestEventStore_ListExecutionsFilter(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-a")
-	_ = s.CreateExecution(ctx, "exec-2", "agent-b")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-a", nil)
+	_ = s.CreateExecution(ctx, "exec-2", "agent-b", nil)
 	_ = s.UpdateExecutionStatus(ctx, "exec-1", domain.ExecutionRunning)
 
 	// Filter by status
@@ -255,7 +255,7 @@ func TestEventStore_DeleteExecution(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 	_ = s.Append(ctx, domain.Event{ID: uuid.New(), ExecutionID: "exec-1", Type: domain.EventExecutionCreated, Timestamp: time.Now(), Payload: json.RawMessage(`{}`), IdempotencyKey: "k1"})
 
 	_ = s.DeleteExecution(ctx, "exec-1")
@@ -275,7 +275,7 @@ func TestEventStore_ListTerminalExecutions(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "a")
+	_ = s.CreateExecution(ctx, "exec-1", "a", nil)
 	_ = s.UpdateExecutionStatus(ctx, "exec-1", domain.ExecutionCompleted)
 
 	// Not old enough
@@ -295,9 +295,9 @@ func TestEventStore_CreateExecutionDuplicate(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 	// Second create overwrites — verify it doesn't error and updates agent
-	_ = s.CreateExecution(ctx, "exec-1", "agent-2")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-2", nil)
 
 	got, err := s.GetExecution(ctx, "exec-1")
 	if err != nil {
@@ -325,7 +325,7 @@ func TestEventStore_AppendBatchWithDuplicateKeys(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 
 	// First append
 	_ = s.Append(ctx, domain.Event{
@@ -358,7 +358,7 @@ func TestEventStore_DeleteExecutionCleansIdempotencyKeys(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 	_ = s.Append(ctx, domain.Event{
 		ID: uuid.New(), ExecutionID: "exec-1", Type: domain.EventExecutionCreated,
 		Timestamp: time.Now(), Payload: json.RawMessage(`{}`),
@@ -368,7 +368,7 @@ func TestEventStore_DeleteExecutionCleansIdempotencyKeys(t *testing.T) {
 	_ = s.DeleteExecution(ctx, "exec-1")
 
 	// After deletion, the idempotency key should be freed
-	_ = s.CreateExecution(ctx, "exec-2", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-2", "agent-1", nil)
 	err := s.Append(ctx, domain.Event{
 		ID: uuid.New(), ExecutionID: "exec-2", Type: domain.EventExecutionCreated,
 		Timestamp: time.Now(), Payload: json.RawMessage(`{}`),
@@ -400,7 +400,7 @@ func TestEventStore_ListTerminalExecutionsRespectsLimit(t *testing.T) {
 
 	for i := range 5 {
 		id := fmt.Sprintf("exec-%d", i)
-		_ = s.CreateExecution(ctx, id, "agent-1")
+		_ = s.CreateExecution(ctx, id, "agent-1", nil)
 		_ = s.UpdateExecutionStatus(ctx, id, domain.ExecutionCompleted)
 	}
 
@@ -414,7 +414,7 @@ func TestEventStore_SequenceMonotonicallyIncreases(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 
 	for i := range 10 {
 		_ = s.Append(ctx, domain.Event{
@@ -437,7 +437,7 @@ func TestEventStore_AppendWithoutIdempotencyKey(t *testing.T) {
 	s := NewEventStore()
 	ctx := context.Background()
 
-	_ = s.CreateExecution(ctx, "exec-1", "agent-1")
+	_ = s.CreateExecution(ctx, "exec-1", "agent-1", nil)
 
 	ev := domain.Event{
 		ID: uuid.New(), ExecutionID: "exec-1", Type: domain.EventStepCreated,
