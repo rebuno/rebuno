@@ -3,6 +3,7 @@ package projector
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/rebuno/rebuno/internal/domain"
 )
@@ -69,12 +70,27 @@ func applyExecutionBlocked(state *domain.ExecutionState, evt *domain.Event) erro
 }
 
 func applyExecutionResumed(state *domain.ExecutionState, evt *domain.Event) error {
+	var payload domain.ExecutionResumedPayload
+	if err := json.Unmarshal(evt.Payload, &payload); err == nil {
+		if sigType, ok := strings.CutPrefix(payload.Reason, "signal received: "); ok {
+			state.PendingSignals = removeSignalByType(state.PendingSignals, sigType)
+		}
+	}
 	state.Execution.Status = domain.ExecutionRunning
 	state.Execution.UpdatedAt = evt.Timestamp
 	state.BlockedReason = ""
 	state.BlockedRef = ""
 	state.PendingApprovals = nil
 	return nil
+}
+
+func removeSignalByType(signals []domain.Signal, signalType string) []domain.Signal {
+	for i, s := range signals {
+		if s.SignalType == signalType {
+			return append(signals[:i], signals[i+1:]...)
+		}
+	}
+	return signals
 }
 
 func applyExecutionCompleted(state *domain.ExecutionState, evt *domain.Event) error {
@@ -85,18 +101,21 @@ func applyExecutionCompleted(state *domain.ExecutionState, evt *domain.Event) er
 	state.Execution.Status = domain.ExecutionCompleted
 	state.Execution.Output = payload.Output
 	state.Execution.UpdatedAt = evt.Timestamp
+	state.PendingSignals = nil
 	return nil
 }
 
 func applyExecutionFailed(state *domain.ExecutionState, evt *domain.Event) error {
 	state.Execution.Status = domain.ExecutionFailed
 	state.Execution.UpdatedAt = evt.Timestamp
+	state.PendingSignals = nil
 	return nil
 }
 
 func applyExecutionCancelled(state *domain.ExecutionState, evt *domain.Event) error {
 	state.Execution.Status = domain.ExecutionCancelled
 	state.Execution.UpdatedAt = evt.Timestamp
+	state.PendingSignals = nil
 	return nil
 }
 
@@ -107,5 +126,6 @@ func applyExecutionReset(state *domain.ExecutionState, evt *domain.Event) error 
 	state.BlockedRef = ""
 	state.ActiveSteps = nil
 	state.PendingApprovals = nil
+	state.PendingSignals = nil
 	return nil
 }
