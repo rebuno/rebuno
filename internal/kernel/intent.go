@@ -251,12 +251,14 @@ func (k *Kernel) executeRequireApproval(
 	reason string,
 ) (domain.IntentResult, error) {
 	stepID := uuid.Must(uuid.NewV7()).String()
+	deadline := time.Now().Add(k.config.StepTimeout)
 
 	stepCreatedPayload := domain.StepCreatedPayload{
 		ToolID:      req.Intent.ToolID,
 		Arguments:   req.Intent.Arguments,
 		MaxAttempts: 1,
 		Attempt:     1,
+		Deadline:    deadline,
 	}
 
 	approvalPayload := domain.StepApprovalRequiredPayload{

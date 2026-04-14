@@ -706,3 +706,46 @@ func TestProcessIntentRequireApprovalPolicy(t *testing.T) {
 		t.Fatalf("expected blocked ref %s, got %s", result.StepID, state.BlockedRef)
 	}
 }
+
+func TestProcessIntentRequireApprovalStepHasDeadline(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	k.policy = &mockPolicyEngine{
+		decision: domain.PolicyRequireApproval,
+		reason:   "needs human review",
+		ruleID:   "test-require-approval",
+	}
+
+	before := time.Now()
+
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "dangerous.tool",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatalf("expected accepted, got error: %s", result.Error)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step == nil {
+		t.Fatal("expected step to exist")
+	}
+	if step.Deadline == nil {
+		t.Fatal("expected approval-pending step to have a deadline set")
+	}
+	expectedMin := before.Add(k.config.StepTimeout)
+	if step.Deadline.Before(expectedMin) {
+		t.Fatalf("deadline %v is before expected minimum %v", *step.Deadline, expectedMin)
+	}
+}
