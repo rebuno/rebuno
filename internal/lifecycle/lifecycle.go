@@ -328,7 +328,6 @@ func (m *Manager) checkTimeouts(ctx context.Context) {
 			if step.Deadline != nil && now.After(*step.Deadline) {
 				m.failStepTimeout(ctx, execID, stepID)
 				stepTimedOut = true
-				break
 			}
 		}
 		if stepTimedOut {

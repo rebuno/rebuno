@@ -171,11 +171,6 @@ func (k *Kernel) executeInvokeTool(
 	correlationID uuid.UUID,
 	policyTimeoutMs int64,
 ) (domain.IntentResult, error) {
-	if state.CurrentStep != nil && !state.CurrentStep.Status.IsTerminal() {
-		return domain.IntentResult{}, fmt.Errorf("%w: a tool is already in progress (step %s), cannot invoke another",
-			domain.ErrConflict, state.CurrentStep.ID)
-	}
-
 	stepID := uuid.Must(uuid.NewV7()).String()
 	stepTimeout := k.config.StepTimeout
 	if policyTimeoutMs > 0 {
@@ -255,11 +250,6 @@ func (k *Kernel) executeRequireApproval(
 	state *domain.ExecutionState,
 	reason string,
 ) (domain.IntentResult, error) {
-	if state.CurrentStep != nil && !state.CurrentStep.Status.IsTerminal() {
-		return domain.IntentResult{}, fmt.Errorf("%w: a tool is already in progress (step %s), cannot invoke another",
-			domain.ErrConflict, state.CurrentStep.ID)
-	}
-
 	stepID := uuid.Must(uuid.NewV7()).String()
 
 	stepCreatedPayload := domain.StepCreatedPayload{
@@ -327,6 +317,11 @@ func (k *Kernel) executeComplete(
 			domain.ErrTerminalExecution, req.ExecutionID, state.Execution.Status)
 	}
 
+	if state.HasActiveSteps() {
+		return domain.IntentResult{}, fmt.Errorf("%w: cannot complete with active steps in progress",
+			domain.ErrConflict)
+	}
+
 	payload := domain.ExecutionCompletedPayload{
 		Output: req.Intent.Output,
 	}
@@ -366,6 +361,11 @@ func (k *Kernel) executeFail(
 	if state.Execution.Status.IsTerminal() {
 		return domain.IntentResult{}, fmt.Errorf("%w: execution %s is already %s",
 			domain.ErrTerminalExecution, req.ExecutionID, state.Execution.Status)
+	}
+
+	if state.HasActiveSteps() {
+		return domain.IntentResult{}, fmt.Errorf("%w: cannot fail with active steps in progress",
+			domain.ErrConflict)
 	}
 
 	payload := domain.ExecutionFailedPayload{
