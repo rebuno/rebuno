@@ -97,7 +97,7 @@ func matchesRule(cond domain.PolicyCondition, input domain.PolicyInput, now time
 	if cond.MinStepCount != nil && input.StepCount < *cond.MinStepCount {
 		return false
 	}
-	if cond.MaxDurationMs != nil && input.DurationMs <= *cond.MaxDurationMs {
+	if cond.MaxDurationMs != nil && input.DurationMs < *cond.MaxDurationMs {
 		return false
 	}
 	if cond.Schedule != "" {

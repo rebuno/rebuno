@@ -652,12 +652,28 @@ func TestRuleEngineDurationCondition(t *testing.T) {
 		t.Errorf("expected allow for duration=30s, got %s", result.Decision)
 	}
 
-	// At boundary: should allow (duration == max means not exceeded)
+	// At boundary: should deny (rule matches, inclusive threshold like MinStepCount)
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action: "tool.invoke", ToolID: "web.search", DurationMs: 60000,
 	})
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny for duration=60000 (at boundary, inclusive), got %s", result.Decision)
+	}
+
+	// One below boundary: should allow (rule doesn't match)
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", DurationMs: 59999,
+	})
 	if result.Decision != domain.PolicyAllow {
-		t.Errorf("expected allow for duration=60000 (at boundary, not exceeded), got %s", result.Decision)
+		t.Errorf("expected allow for duration=59999 (below boundary), got %s", result.Decision)
+	}
+
+	// One above boundary: should deny
+	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
+		Action: "tool.invoke", ToolID: "web.search", DurationMs: 60001,
+	})
+	if result.Decision != domain.PolicyDeny {
+		t.Errorf("expected deny for duration=60001 (above boundary), got %s", result.Decision)
 	}
 }
 
