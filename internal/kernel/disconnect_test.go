@@ -37,8 +37,8 @@ func TestHandleAgentDisconnectCancelsOrphanedSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get execution: %v", err)
 	}
-	if state.CurrentStep == nil || state.CurrentStep.Status.IsTerminal() {
-		t.Fatal("expected non-terminal current step before disconnect")
+	if !state.HasActiveSteps() {
+		t.Fatal("expected active steps before disconnect")
 	}
 
 	k.HandleAgentDisconnect(ctx, sessionID)
@@ -63,8 +63,8 @@ func TestHandleAgentDisconnectCancelsOrphanedSteps(t *testing.T) {
 	if state.Execution.Status != domain.ExecutionPending {
 		t.Fatalf("expected pending, got %s", state.Execution.Status)
 	}
-	if state.CurrentStep != nil {
-		t.Fatal("expected CurrentStep to be nil after reset")
+	if state.HasActiveSteps() {
+		t.Fatal("expected no active steps after reset")
 	}
 }
 

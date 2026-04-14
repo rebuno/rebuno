@@ -169,11 +169,13 @@ func TestProcessIntentInvokeTool(t *testing.T) {
 	if state.Execution.Status != domain.ExecutionRunning {
 		t.Fatalf("expected running, got %s", state.Execution.Status)
 	}
-	if state.CurrentStep == nil {
-		t.Fatal("expected CurrentStep to be set")
+	if len(state.ActiveSteps) == 0 {
+		t.Fatal("expected ActiveSteps to be non-empty")
 	}
-	if state.CurrentStep.Status.IsTerminal() {
-		t.Fatal("expected CurrentStep to be non-terminal")
+	for _, step := range state.ActiveSteps {
+		if step.Status.IsTerminal() {
+			t.Fatal("expected active step to be non-terminal")
+		}
 	}
 }
 
@@ -437,14 +439,14 @@ func TestProcessIntentSessionExecutionMismatch(t *testing.T) {
 	}
 }
 
-func TestProcessIntentConcurrentStepConflict(t *testing.T) {
+func TestProcessIntentParallelSteps(t *testing.T) {
 	k, _, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
 
 	execID, sessionID := setupRunningExecution(t, k, sessions)
 
-	// Invoke a local tool (step stays non-terminal until result is submitted).
-	_, err := k.ProcessIntent(ctx, domain.IntentRequest{
+	// Invoke first tool.
+	resultA, err := k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
 		SessionID:   sessionID,
 		Intent: domain.Intent{
@@ -456,8 +458,8 @@ func TestProcessIntentConcurrentStepConflict(t *testing.T) {
 		t.Fatalf("first invoke: %v", err)
 	}
 
-	// Attempting a second tool invoke while the first step is still active should fail.
-	_, err = k.ProcessIntent(ctx, domain.IntentRequest{
+	// Invoke second tool while first is still active — should succeed.
+	resultB, err := k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
 		SessionID:   sessionID,
 		Intent: domain.Intent{
@@ -465,8 +467,52 @@ func TestProcessIntentConcurrentStepConflict(t *testing.T) {
 			ToolID: "tool-b",
 		},
 	})
+	if err != nil {
+		t.Fatalf("second invoke should succeed for parallel steps: %v", err)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	if len(state.ActiveSteps) != 2 {
+		t.Fatalf("expected 2 active steps, got %d", len(state.ActiveSteps))
+	}
+	if _, ok := state.ActiveSteps[resultA.StepID]; !ok {
+		t.Fatal("expected step A in ActiveSteps")
+	}
+	if _, ok := state.ActiveSteps[resultB.StepID]; !ok {
+		t.Fatal("expected step B in ActiveSteps")
+	}
+}
+
+func TestProcessIntentCompleteWithActiveSteps(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Invoke a tool.
+	_, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "tool-a",
+		},
+	})
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+
+	// Attempting to complete while step is active should fail.
+	_, err = k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentComplete,
+			Output: json.RawMessage(`"done"`),
+		},
+	})
 	if !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("expected ErrConflict for concurrent step, got %v", err)
+		t.Fatalf("expected ErrConflict for complete with active steps, got %v", err)
 	}
 }
 

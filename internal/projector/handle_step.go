@@ -42,7 +42,10 @@ func applyStepCreated(state *domain.ExecutionState, evt *domain.Event) error {
 		state.Steps = make(map[string]*domain.Step)
 	}
 	state.Steps[evt.StepID] = step
-	state.CurrentStep = step
+	if state.ActiveSteps == nil {
+		state.ActiveSteps = make(map[string]*domain.Step)
+	}
+	state.ActiveSteps[evt.StepID] = step
 	return nil
 }
 
@@ -91,6 +94,7 @@ func applyStepCompleted(state *domain.ExecutionState, evt *domain.Event) error {
 	step.Status = domain.StepSucceeded
 	step.Result = payload.Result
 	step.CompletedAt = &now
+	delete(state.ActiveSteps, evt.StepID)
 
 	entry := domain.HistoryEntry{
 		StepID:      step.ID,
@@ -120,6 +124,7 @@ func applyStepFailed(state *domain.ExecutionState, evt *domain.Event) error {
 	step.Error = payload.Error
 	step.Retryable = payload.Retryable
 	step.CompletedAt = &now
+	delete(state.ActiveSteps, evt.StepID)
 
 	entry := domain.HistoryEntry{
 		StepID:      step.ID,
@@ -141,6 +146,7 @@ func applyStepTimedOut(state *domain.ExecutionState, evt *domain.Event) error {
 	now := evt.Timestamp
 	step.Status = domain.StepTimedOut
 	step.CompletedAt = &now
+	delete(state.ActiveSteps, evt.StepID)
 
 	entry := domain.HistoryEntry{
 		StepID:      step.ID,
@@ -181,6 +187,7 @@ func applyStepCancelled(state *domain.ExecutionState, evt *domain.Event) error {
 	now := evt.Timestamp
 	step.Status = domain.StepCancelled
 	step.CompletedAt = &now
+	delete(state.ActiveSteps, evt.StepID)
 
 	entry := domain.HistoryEntry{
 		StepID:      step.ID,

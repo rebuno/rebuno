@@ -182,7 +182,8 @@ func (k *Kernel) handleApprovalSignal(
 		return nil
 	}
 
-	isRemote := state.PendingApproval != nil && state.PendingApproval.Remote
+	approval := state.PendingApprovals[stepID]
+	isRemote := approval != nil && approval.Remote
 
 	if isRemote {
 		step := state.Steps[stepID]

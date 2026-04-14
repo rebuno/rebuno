@@ -201,8 +201,8 @@ func TestStepLifecycle(t *testing.T) {
 	if step.ToolID != "web_search" {
 		t.Errorf("expected tool web_search, got %s", step.ToolID)
 	}
-	if state.CurrentStep != step {
-		t.Error("expected CurrentStep to be set")
+	if state.ActiveSteps[stepID] != step {
+		t.Error("expected step to be in ActiveSteps")
 	}
 
 	deadline := time.Now().Add(5 * time.Minute)
@@ -437,16 +437,20 @@ func TestExecutionBlockedWithApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("applyExecutionBlocked: %v", err)
 	}
-	if state.PendingApproval == nil {
-		t.Fatal("expected PendingApproval to be set")
+	if len(state.PendingApprovals) == 0 {
+		t.Fatal("expected PendingApprovals to be non-empty")
 	}
-	if state.PendingApproval.StepID != "step-1" {
-		t.Errorf("expected step-1, got %s", state.PendingApproval.StepID)
+	approval := state.PendingApprovals["step-1"]
+	if approval == nil {
+		t.Fatal("expected approval for step-1")
 	}
-	if state.PendingApproval.ToolID != "dangerous_tool" {
-		t.Errorf("expected dangerous_tool, got %s", state.PendingApproval.ToolID)
+	if approval.StepID != "step-1" {
+		t.Errorf("expected step-1, got %s", approval.StepID)
 	}
-	if !state.PendingApproval.Remote {
+	if approval.ToolID != "dangerous_tool" {
+		t.Errorf("expected dangerous_tool, got %s", approval.ToolID)
+	}
+	if !approval.Remote {
 		t.Error("expected Remote=true")
 	}
 }
@@ -460,18 +464,18 @@ func TestExecutionBlockedNonApprovalClearsPendingApproval(t *testing.T) {
 	// First block with approval
 	applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "t1"}))
-	if state.PendingApproval == nil {
-		t.Fatal("expected PendingApproval set")
+	if len(state.PendingApprovals) == 0 {
+		t.Fatal("expected PendingApprovals non-empty")
 	}
 
 	applyExecutionResumed(state, makeEvent("e1", 4, domain.EventExecutionResumed,
 		domain.ExecutionResumedPayload{Reason: "approved"}))
 
-	// Block again with non-approval reason
+	// Block again with non-approval reason — approvals should have been cleared by resume
 	applyExecutionBlocked(state, makeEvent("e1", 5, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "signal", Ref: "wait"}))
-	if state.PendingApproval != nil {
-		t.Fatal("expected PendingApproval cleared for non-approval block")
+	if len(state.PendingApprovals) != 0 {
+		t.Fatal("expected PendingApprovals empty after resume + non-approval block")
 	}
 }
 
@@ -612,8 +616,11 @@ func TestMultipleStepsTracked(t *testing.T) {
 	if len(state.Steps) != 2 {
 		t.Fatalf("expected 2 steps, got %d", len(state.Steps))
 	}
-	if state.CurrentStep.ID != "s2" {
-		t.Errorf("expected CurrentStep to be s2, got %s", state.CurrentStep.ID)
+	if len(state.ActiveSteps) != 2 {
+		t.Fatalf("expected 2 active steps, got %d", len(state.ActiveSteps))
+	}
+	if state.ActiveSteps["s1"] == nil || state.ActiveSteps["s2"] == nil {
+		t.Error("expected both s1 and s2 in ActiveSteps")
 	}
 	if state.Steps["s1"].ToolID != "tool-a" {
 		t.Errorf("expected s1 tool tool-a, got %s", state.Steps["s1"].ToolID)
@@ -820,19 +827,19 @@ func TestResumedClearsPendingApproval(t *testing.T) {
 	applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "t1"}))
 
-	if state.PendingApproval == nil {
-		t.Fatal("expected PendingApproval set")
+	if len(state.PendingApprovals) == 0 {
+		t.Fatal("expected PendingApprovals non-empty")
 	}
 
 	applyExecutionResumed(state, makeEvent("e1", 4, domain.EventExecutionResumed,
 		domain.ExecutionResumedPayload{Reason: "approved"}))
 
-	if state.PendingApproval != nil {
-		t.Fatal("expected PendingApproval cleared after resume")
+	if len(state.PendingApprovals) != 0 {
+		t.Fatal("expected PendingApprovals cleared after resume")
 	}
 }
 
-func TestResetClearsCurrentStepAndPendingApproval(t *testing.T) {
+func TestResetClearsActiveStepsAndPendingApprovals(t *testing.T) {
 	state := emptyState()
 	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
@@ -840,8 +847,8 @@ func TestResetClearsCurrentStepAndPendingApproval(t *testing.T) {
 	applyStepCreated(state, makeStepEvent("e1", "s1", 3, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "tool-a", Attempt: 1}))
 
-	if state.CurrentStep == nil {
-		t.Fatal("expected CurrentStep to be set before reset")
+	if len(state.ActiveSteps) == 0 {
+		t.Fatal("expected ActiveSteps to be non-empty before reset")
 	}
 
 	applyStepCancelled(state, makeStepEvent("e1", "s1", 4, domain.EventStepCancelled,
@@ -852,11 +859,11 @@ func TestResetClearsCurrentStepAndPendingApproval(t *testing.T) {
 	if state.Execution.Status != domain.ExecutionPending {
 		t.Fatalf("expected pending after reset, got %s", state.Execution.Status)
 	}
-	if state.CurrentStep != nil {
-		t.Fatal("expected CurrentStep to be nil after reset")
+	if state.HasActiveSteps() {
+		t.Fatal("expected no active steps after reset")
 	}
-	if state.PendingApproval != nil {
-		t.Fatal("expected PendingApproval to be nil after reset")
+	if len(state.PendingApprovals) != 0 {
+		t.Fatal("expected PendingApprovals empty after reset")
 	}
 }
 
@@ -870,11 +877,11 @@ func TestResetClearsBlockedApprovalState(t *testing.T) {
 	applyExecutionBlocked(state, makeEvent("e1", 4, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "s1", ToolID: "tool-a"}))
 
-	if state.PendingApproval == nil {
-		t.Fatal("expected PendingApproval set before reset")
+	if len(state.PendingApprovals) == 0 {
+		t.Fatal("expected PendingApprovals non-empty before reset")
 	}
-	if state.CurrentStep == nil {
-		t.Fatal("expected CurrentStep set before reset")
+	if len(state.ActiveSteps) == 0 {
+		t.Fatal("expected ActiveSteps non-empty before reset")
 	}
 
 	applyStepCancelled(state, makeStepEvent("e1", "s1", 5, domain.EventStepCancelled,
@@ -885,11 +892,11 @@ func TestResetClearsBlockedApprovalState(t *testing.T) {
 	if state.Execution.Status != domain.ExecutionPending {
 		t.Fatalf("expected pending, got %s", state.Execution.Status)
 	}
-	if state.CurrentStep != nil {
-		t.Fatal("expected CurrentStep nil after reset")
+	if state.HasActiveSteps() {
+		t.Fatal("expected no active steps after reset")
 	}
-	if state.PendingApproval != nil {
-		t.Fatal("expected PendingApproval nil after reset")
+	if len(state.PendingApprovals) != 0 {
+		t.Fatal("expected PendingApprovals empty after reset")
 	}
 	if state.BlockedReason != "" {
 		t.Fatalf("expected empty blocked reason, got %s", state.BlockedReason)

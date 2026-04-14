@@ -55,14 +55,15 @@ func applyExecutionBlocked(state *domain.ExecutionState, evt *domain.Event) erro
 	state.BlockedReason = payload.Reason
 	state.BlockedRef = payload.Ref
 	if payload.Reason == "approval" {
-		state.PendingApproval = &domain.PendingApproval{
+		if state.PendingApprovals == nil {
+			state.PendingApprovals = make(map[string]*domain.PendingApproval)
+		}
+		state.PendingApprovals[payload.Ref] = &domain.PendingApproval{
 			StepID:    payload.Ref,
 			ToolID:    payload.ToolID,
 			Arguments: payload.Arguments,
 			Remote:    payload.Remote,
 		}
-	} else {
-		state.PendingApproval = nil
 	}
 	return nil
 }
@@ -72,7 +73,7 @@ func applyExecutionResumed(state *domain.ExecutionState, evt *domain.Event) erro
 	state.Execution.UpdatedAt = evt.Timestamp
 	state.BlockedReason = ""
 	state.BlockedRef = ""
-	state.PendingApproval = nil
+	state.PendingApprovals = nil
 	return nil
 }
 
@@ -104,7 +105,7 @@ func applyExecutionReset(state *domain.ExecutionState, evt *domain.Event) error 
 	state.Execution.UpdatedAt = evt.Timestamp
 	state.BlockedReason = ""
 	state.BlockedRef = ""
-	state.CurrentStep = nil
-	state.PendingApproval = nil
+	state.ActiveSteps = nil
+	state.PendingApprovals = nil
 	return nil
 }
