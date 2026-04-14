@@ -867,6 +867,159 @@ func TestResetClearsActiveStepsAndPendingApprovals(t *testing.T) {
 	}
 }
 
+func TestResumedBySignalRemovesConsumedSignal(t *testing.T) {
+	state := emptyState()
+	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+		domain.ExecutionCreatedPayload{AgentID: "a1"}))
+	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+
+	// Receive multiple signals.
+	applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+		domain.SignalReceivedPayload{SignalType: "signal-1", Payload: json.RawMessage(`{"n":1}`)}))
+	applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
+		domain.SignalReceivedPayload{SignalType: "signal-2", Payload: json.RawMessage(`{"n":2}`)}))
+	applySignalReceived(state, makeEvent("e1", 5, domain.EventSignalReceived,
+		domain.SignalReceivedPayload{SignalType: "signal-3", Payload: json.RawMessage(`{"n":3}`)}))
+
+	if len(state.PendingSignals) != 3 {
+		t.Fatalf("expected 3 pending signals, got %d", len(state.PendingSignals))
+	}
+
+	// Block on signal, then resume by signal-2.
+	applyExecutionBlocked(state, makeEvent("e1", 6, domain.EventExecutionBlocked,
+		domain.ExecutionBlockedPayload{Reason: "signal", Ref: "signal-2"}))
+	applyExecutionResumed(state, makeEvent("e1", 7, domain.EventExecutionResumed,
+		domain.ExecutionResumedPayload{Reason: "signal received: signal-2"}))
+
+	if len(state.PendingSignals) != 2 {
+		t.Fatalf("expected 2 pending signals after consuming signal-2, got %d", len(state.PendingSignals))
+	}
+	for _, s := range state.PendingSignals {
+		if s.SignalType == "signal-2" {
+			t.Fatal("signal-2 should have been removed from PendingSignals")
+		}
+	}
+}
+
+func TestResumedByNonSignalDoesNotAffectPendingSignals(t *testing.T) {
+	state := emptyState()
+	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+		domain.ExecutionCreatedPayload{AgentID: "a1"}))
+	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+
+	applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+		domain.SignalReceivedPayload{SignalType: "signal-1", Payload: json.RawMessage(`{}`)}))
+
+	applyExecutionBlocked(state, makeEvent("e1", 4, domain.EventExecutionBlocked,
+		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "t1"}))
+	applyExecutionResumed(state, makeEvent("e1", 5, domain.EventExecutionResumed,
+		domain.ExecutionResumedPayload{Reason: "approved"}))
+
+	if len(state.PendingSignals) != 1 {
+		t.Fatalf("expected 1 pending signal unchanged, got %d", len(state.PendingSignals))
+	}
+}
+
+func TestResumedBySignalRemovesOnlyFirstMatch(t *testing.T) {
+	state := emptyState()
+	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+		domain.ExecutionCreatedPayload{AgentID: "a1"}))
+	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+
+	// Two signals of the same type.
+	applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+		domain.SignalReceivedPayload{SignalType: "dup", Payload: json.RawMessage(`{"n":1}`)}))
+	applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
+		domain.SignalReceivedPayload{SignalType: "dup", Payload: json.RawMessage(`{"n":2}`)}))
+
+	if len(state.PendingSignals) != 2 {
+		t.Fatalf("expected 2 pending signals, got %d", len(state.PendingSignals))
+	}
+
+	applyExecutionBlocked(state, makeEvent("e1", 5, domain.EventExecutionBlocked,
+		domain.ExecutionBlockedPayload{Reason: "signal", Ref: "dup"}))
+	applyExecutionResumed(state, makeEvent("e1", 6, domain.EventExecutionResumed,
+		domain.ExecutionResumedPayload{Reason: "signal received: dup"}))
+
+	if len(state.PendingSignals) != 1 {
+		t.Fatalf("expected 1 remaining pending signal, got %d", len(state.PendingSignals))
+	}
+	if state.PendingSignals[0].SignalType != "dup" {
+		t.Errorf("expected remaining signal type dup, got %s", state.PendingSignals[0].SignalType)
+	}
+}
+
+func TestTerminalStatesClearPendingSignals(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		applyFunc func(*domain.ExecutionState, *domain.Event) error
+		eventType domain.EventType
+		payload   any
+	}{
+		{
+			name:      "completed",
+			applyFunc: applyExecutionCompleted,
+			eventType: domain.EventExecutionCompleted,
+			payload:   domain.ExecutionCompletedPayload{Output: json.RawMessage(`{}`)},
+		},
+		{
+			name:      "failed",
+			applyFunc: applyExecutionFailed,
+			eventType: domain.EventExecutionFailed,
+			payload:   nil,
+		},
+		{
+			name:      "cancelled",
+			applyFunc: applyExecutionCancelled,
+			eventType: domain.EventExecutionCancelled,
+			payload:   nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := emptyState()
+			applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+				domain.ExecutionCreatedPayload{AgentID: "a1"}))
+			applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+			applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+				domain.SignalReceivedPayload{SignalType: "s1", Payload: json.RawMessage(`{}`)}))
+			applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
+				domain.SignalReceivedPayload{SignalType: "s2", Payload: json.RawMessage(`{}`)}))
+
+			if len(state.PendingSignals) != 2 {
+				t.Fatalf("expected 2 pending signals before terminal, got %d", len(state.PendingSignals))
+			}
+
+			err := tc.applyFunc(state, makeEvent("e1", 5, tc.eventType, tc.payload))
+			if err != nil {
+				t.Fatalf("apply %s: %v", tc.name, err)
+			}
+			if len(state.PendingSignals) != 0 {
+				t.Fatalf("expected PendingSignals cleared after %s, got %d", tc.name, len(state.PendingSignals))
+			}
+		})
+	}
+}
+
+func TestResetClearsPendingSignals(t *testing.T) {
+	state := emptyState()
+	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+		domain.ExecutionCreatedPayload{AgentID: "a1"}))
+	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+		domain.SignalReceivedPayload{SignalType: "s1", Payload: json.RawMessage(`{}`)}))
+
+	if len(state.PendingSignals) != 1 {
+		t.Fatalf("expected 1 pending signal, got %d", len(state.PendingSignals))
+	}
+
+	applyExecutionReset(state, makeEvent("e1", 4, domain.EventExecutionReset,
+		domain.ExecutionResetPayload{Reason: "recovery", FromStatus: "running"}))
+
+	if len(state.PendingSignals) != 0 {
+		t.Fatal("expected PendingSignals cleared after reset")
+	}
+}
+
 func TestResetClearsBlockedApprovalState(t *testing.T) {
 	state := emptyState()
 	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
