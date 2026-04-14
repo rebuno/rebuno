@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/store"
 )
@@ -265,6 +267,14 @@ func (m *mockRunnerHub) HasCapability(_ string) bool {
 
 func (m *mockRunnerHub) UpdateCapabilities(_ string, _ []string) {}
 
+type noDispatchRunnerHub struct {
+	mockRunnerHub
+}
+
+func (m *noDispatchRunnerHub) Dispatch(_ string, _ store.RunnerMessage) (store.RunnerConnInfo, bool) {
+	return store.RunnerConnInfo{}, false
+}
+
 type mockSignalStore struct {
 	mu      sync.Mutex
 	signals map[string][]domain.Signal
@@ -446,6 +456,58 @@ func (m *capturingPolicyEngine) Evaluate(_ context.Context, input domain.PolicyI
 	defer m.mu.Unlock()
 	m.last = input
 	return m.result, nil
+}
+
+type mockJobQueue struct {
+	mu        sync.Mutex
+	jobs      []domain.Job
+	removeErr error
+}
+
+func newMockJobQueue() *mockJobQueue {
+	return &mockJobQueue{}
+}
+
+func (q *mockJobQueue) Enqueue(_ context.Context, job domain.Job) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.jobs = append(q.jobs, job)
+	return nil
+}
+
+func (q *mockJobQueue) DequeueForTool(_ context.Context, toolID string) (*domain.Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i, j := range q.jobs {
+		if j.ToolID == toolID {
+			q.jobs = append(q.jobs[:i], q.jobs[i+1:]...)
+			return &j, nil
+		}
+	}
+	return nil, nil
+}
+
+func (q *mockJobQueue) All(_ context.Context) ([]domain.Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := make([]domain.Job, len(q.jobs))
+	copy(out, q.jobs)
+	return out, nil
+}
+
+func (q *mockJobQueue) Remove(_ context.Context, jobID uuid.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.removeErr != nil {
+		return q.removeErr
+	}
+	for i, j := range q.jobs {
+		if j.ID == jobID {
+			q.jobs = append(q.jobs[:i], q.jobs[i+1:]...)
+			return nil
+		}
+	}
+	return nil
 }
 
 type mockRateLimitPolicy struct {

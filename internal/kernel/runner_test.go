@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
@@ -369,6 +371,156 @@ func TestSubmitJobResultFailureExhaustsRetries(t *testing.T) {
 	step := state.Steps[result.StepID]
 	if step.Status != domain.StepFailed {
 		t.Fatalf("expected step failed, got %s", step.Status)
+	}
+}
+
+func TestDispatchPendingJobsRemoveFailureKeepsJobInQueue(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+	jq.removeErr = errors.New("storage unavailable")
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	job := domain.Job{
+		ID:     uuid.Must(uuid.NewV7()),
+		ToolID: "web.search",
+	}
+	if err := jq.Enqueue(ctx, job); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	k.DispatchPendingJobs()
+
+	// Job should still be dispatched to the runner.
+	runnerHub.mu.Lock()
+	dispatched := len(runnerHub.dispatched)
+	runnerHub.mu.Unlock()
+	if dispatched != 1 {
+		t.Fatalf("expected 1 dispatch, got %d", dispatched)
+	}
+
+	// But the job should remain in the queue because Remove failed.
+	jobs, err := jq.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected job to remain in queue after Remove failure, got %d jobs", len(jobs))
+	}
+	if jobs[0].ID != job.ID {
+		t.Fatalf("expected same job ID in queue, got %s", jobs[0].ID)
+	}
+}
+
+func TestDispatchPendingJobsRemoveSuccessRemovesJob(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	job := domain.Job{
+		ID:     uuid.Must(uuid.NewV7()),
+		ToolID: "web.search",
+	}
+	if err := jq.Enqueue(ctx, job); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	k.DispatchPendingJobs()
+
+	jobs, err := jq.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("expected job removed from queue after successful dispatch, got %d jobs", len(jobs))
+	}
+}
+
+func TestDispatchPendingJobsNoRunnerDoesNotRemove(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := &mockRunnerHub{
+		idle:   make(map[string]bool),
+		hasCap: true,
+	}
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	// Override Dispatch to return false (no runner available).
+	noDispatchHub := &noDispatchRunnerHub{}
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   noDispatchHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	_ = runnerHub // suppress unused
+	ctx := context.Background()
+
+	job := domain.Job{
+		ID:     uuid.Must(uuid.NewV7()),
+		ToolID: "web.search",
+	}
+	if err := jq.Enqueue(ctx, job); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	k.DispatchPendingJobs()
+
+	// Job should remain because no runner was available.
+	jobs, err := jq.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("expected job to remain in queue when no runner available, got %d jobs", len(jobs))
 	}
 }
 
