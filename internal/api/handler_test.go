@@ -151,7 +151,6 @@ func (s *stubRunnerHub) Dispatch(_ string, _ store.RunnerMessage) (store.RunnerC
 func (s *stubRunnerHub) SendTo(_, _ string, _ store.RunnerMessage) bool { return false }
 func (s *stubRunnerHub) MarkBusy(_, _ string)                           {}
 func (s *stubRunnerHub) MarkIdle(_, _ string)                           {}
-func (s *stubRunnerHub) MarkRunnerIdle(_ string)                        {}
 func (s *stubRunnerHub) HasCapability(_ string) bool                    { return false }
 func (s *stubRunnerHub) UpdateCapabilities(_ string, _ []string)        {}
 

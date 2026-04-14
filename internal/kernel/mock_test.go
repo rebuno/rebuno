@@ -253,12 +253,6 @@ func (m *mockRunnerHub) MarkIdle(runnerID, _ string) {
 	m.idle[runnerID] = true
 }
 
-func (m *mockRunnerHub) MarkRunnerIdle(runnerID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.idle[runnerID] = true
-}
-
 func (m *mockRunnerHub) HasCapability(_ string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

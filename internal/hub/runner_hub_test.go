@@ -341,7 +341,7 @@ func TestRunnerUnregisterStaleGeneration(t *testing.T) {
 	}
 }
 
-func TestRunnerMarkRunnerIdle(t *testing.T) {
+func TestRunnerMarkIdleOnlyTargetsSpecificConsumer(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
@@ -355,10 +355,53 @@ func TestRunnerMarkRunnerIdle(t *testing.T) {
 		t.Fatal("expected both connections to be busy")
 	}
 
-	h.MarkRunnerIdle("runner-1")
+	h.MarkIdle("runner-1", "c1")
 
-	if conn1.Busy || conn2.Busy {
-		t.Fatal("expected both connections to be idle after MarkRunnerIdle")
+	if conn1.Busy {
+		t.Fatal("expected c1 to be idle after MarkIdle")
+	}
+	if !conn2.Busy {
+		t.Fatal("expected c2 to remain busy after marking only c1 idle")
+	}
+
+	// Now mark c2 idle as well
+	h.MarkIdle("runner-1", "c2")
+	if conn2.Busy {
+		t.Fatal("expected c2 to be idle after MarkIdle")
+	}
+}
+
+func TestRunnerMarkIdleDoesNotAffectOtherConsumers(t *testing.T) {
+	h := NewRunnerHub(nil)
+	defer h.Close()
+
+	conn1 := h.Register("runner-1", "c1", []string{"tool"})
+	conn2 := h.Register("runner-1", "c2", []string{"tool"})
+	conn3 := h.Register("runner-1", "c3", []string{"tool"})
+
+	h.MarkBusy("runner-1", "c1")
+	h.MarkBusy("runner-1", "c2")
+	h.MarkBusy("runner-1", "c3")
+
+	h.MarkIdle("runner-1", "c2")
+
+	if !conn1.Busy {
+		t.Fatal("expected c1 to still be busy")
+	}
+	if conn2.Busy {
+		t.Fatal("expected c2 to be idle")
+	}
+	if !conn3.Busy {
+		t.Fatal("expected c3 to still be busy")
+	}
+
+	// Dispatch should only go to c2 (the only idle one)
+	info, ok := h.Dispatch("tool", runnerMsg("job"))
+	if !ok {
+		t.Fatal("expected dispatch to succeed")
+	}
+	if info.ConsumerID != "c2" {
+		t.Fatalf("expected dispatch to c2 (idle), got %s", info.ConsumerID)
 	}
 }
 
@@ -491,5 +534,4 @@ func TestRunnerMarkBusyNonexistent(t *testing.T) {
 	// Should not panic
 	h.MarkBusy("nonexistent", "c1")
 	h.MarkIdle("nonexistent", "c1")
-	h.MarkRunnerIdle("nonexistent")
 }
