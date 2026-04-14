@@ -445,6 +445,20 @@ func (m *Manager) failExecutionTimeout(ctx context.Context, executionID string) 
 		return
 	}
 
+	for stepID, step := range state.Steps {
+		if step.Status.IsTerminal() {
+			continue
+		}
+		if _, err := m.emitter.EmitEvent(ctx, executionID, stepID, domain.EventStepCancelled,
+			domain.StepCancelledPayload{Reason: "execution timed out"}, uuid.Nil, uuid.Nil); err != nil {
+			m.logger.Warn("timeout watcher: failed to cancel step",
+				slog.String("execution_id", executionID),
+				slog.String("step_id", stepID),
+				slog.String("error", err.Error()),
+			)
+		}
+	}
+
 	_, err = m.emitter.EmitEvent(ctx, executionID, "", domain.EventExecutionFailed,
 		domain.ExecutionFailedPayload{Error: "execution exceeded maximum duration"}, uuid.Nil, uuid.Nil)
 	if err != nil {
