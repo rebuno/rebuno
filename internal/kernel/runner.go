@@ -229,7 +229,13 @@ func (k *Kernel) DispatchPendingJobs() {
 		info, dispatched := k.runnerHub.Dispatch(job.ToolID, msg)
 		if dispatched {
 			k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
-			_ = k.jobQueue.Remove(ctx, job.ID)
+			if err := k.jobQueue.Remove(ctx, job.ID); err != nil {
+				k.logger.Error("failed to remove dispatched job from queue, may be dispatched again",
+					slog.String("job_id", job.ID.String()),
+					slog.String("runner_id", info.RunnerID),
+					slog.String("error", err.Error()),
+				)
+			}
 			k.logger.Debug("dispatched pending job",
 				slog.String("job_id", job.ID.String()),
 				slog.String("runner_id", info.RunnerID),
