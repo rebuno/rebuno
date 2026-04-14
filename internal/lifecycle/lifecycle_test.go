@@ -587,6 +587,66 @@ func TestReapSessionsCancelsOrphanedSteps(t *testing.T) {
 	}
 }
 
+func TestExecutionTimeoutCancelsActiveSteps(t *testing.T) {
+	f := newTestFixture()
+
+	execID := "exec-timeout-with-steps"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		{
+			Type:      domain.EventExecutionCreated,
+			Payload:   mustMarshal(domain.ExecutionCreatedPayload{AgentID: "agent-1"}),
+			Sequence:  1,
+			Timestamp: time.Now().Add(-2 * time.Hour),
+		},
+		startedEvent(2),
+		stepCreatedEvent("step-1", 3),
+		stepCreatedEvent("step-2", 4),
+		{
+			StepID:   "step-3",
+			Type:     domain.EventStepCreated,
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local.tool", Attempt: 1}),
+			Sequence: 5,
+		},
+		{
+			StepID:   "step-3",
+			Type:     domain.EventStepCompleted,
+			Payload:  mustMarshal(domain.StepCompletedPayload{}),
+			Sequence: 6,
+		},
+	}
+
+	m := f.manager(1 * time.Hour)
+	m.checkTimeouts(context.Background())
+
+	f.emitter.mu.Lock()
+	defer f.emitter.mu.Unlock()
+
+	cancelledSteps := map[string]bool{}
+	foundExecFailed := false
+	for _, e := range f.emitter.events {
+		if e.EventType == domain.EventStepCancelled {
+			cancelledSteps[e.StepID] = true
+		}
+		if e.EventType == domain.EventExecutionFailed && e.ExecutionID == execID {
+			foundExecFailed = true
+		}
+	}
+
+	if !cancelledSteps["step-1"] {
+		t.Error("expected step.cancelled for step-1")
+	}
+	if !cancelledSteps["step-2"] {
+		t.Error("expected step.cancelled for step-2")
+	}
+	if cancelledSteps["step-3"] {
+		t.Error("did not expect step.cancelled for already-terminal step-3")
+	}
+	if !foundExecFailed {
+		t.Error("expected execution.failed event")
+	}
+}
+
 func mustMarshal(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
