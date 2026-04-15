@@ -77,7 +77,15 @@ func (m *mockEventStore) GetLatestSequence(_ context.Context, executionID string
 }
 
 func (m *mockEventStore) ListActiveExecutionIDs(_ context.Context) ([]string, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ids []string
+	for id, s := range m.executions {
+		if !s.Status.IsTerminal() {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 func (m *mockEventStore) ListExecutions(_ context.Context, _ domain.ExecutionFilter, _ string, _ int) ([]domain.ExecutionSummary, string, error) {

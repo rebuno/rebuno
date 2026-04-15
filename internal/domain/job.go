@@ -16,6 +16,7 @@ type Job struct {
 	ToolVersion int             `json:"tool_version"`
 	Arguments   json.RawMessage `json:"arguments"`
 	Deadline    time.Time       `json:"deadline"`
+	NotBefore   time.Time       `json:"not_before,omitempty"`
 }
 
 type JobResult struct {
