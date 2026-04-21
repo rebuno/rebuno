@@ -58,7 +58,7 @@ func TestSubmitJobResultSuccess(t *testing.T) {
 }
 
 func TestSubmitJobResultFailureWithRetry(t *testing.T) {
-	k, _, _, runnerHub, sessions, _ := newTestKernel()
+	k, _, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
 
 	execID, sessionID := setupRunningExecution(t, k, sessions)
@@ -73,18 +73,6 @@ func TestSubmitJobResultFailureWithRetry(t *testing.T) {
 		},
 	})
 
-	// Set up a channel that signals when DispatchJob is called for the retry.
-	retryCh := make(chan struct{}, 1)
-	runnerHub.mu.Lock()
-	runnerHub.dispatched = nil
-	runnerHub.onDispatch = func() {
-		select {
-		case retryCh <- struct{}{}:
-		default:
-		}
-	}
-	runnerHub.mu.Unlock()
-
 	err := k.SubmitJobResult(ctx, domain.JobResult{
 		ExecutionID: execID,
 		StepID:      result.StepID,
@@ -97,24 +85,27 @@ func TestSubmitJobResultFailureWithRetry(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Wait for the retry dispatch with a timeout instead of sleeping.
-	select {
-	case <-retryCh:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for retry dispatch")
-	}
-
-	jobs, err := k.jobQueue.All(context.Background())
+	// The retry job should be persisted in the queue immediately with a NotBefore delay.
+	jobs, err := k.jobQueue.All(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(jobs) != 0 {
-		t.Fatalf("expected 0 pending jobs (should have been dispatched), got %d", len(jobs))
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 pending retry job in queue, got %d", len(jobs))
+	}
+	if jobs[0].StepID != result.StepID {
+		t.Fatalf("expected retry job for step %s, got %s", result.StepID, jobs[0].StepID)
+	}
+	if jobs[0].Attempt != 2 {
+		t.Fatalf("expected retry attempt 2, got %d", jobs[0].Attempt)
+	}
+	if jobs[0].NotBefore.IsZero() {
+		t.Fatal("expected retry job to have non-zero NotBefore")
 	}
 }
 
 func TestSubmitJobResultRetryRoundTrip(t *testing.T) {
-	k, _, _, runnerHub, sessions, _ := newTestKernel()
+	k, _, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
 
 	execID, sessionID := setupRunningExecution(t, k, sessions)
@@ -129,17 +120,6 @@ func TestSubmitJobResultRetryRoundTrip(t *testing.T) {
 		},
 	})
 
-	retryCh := make(chan struct{}, 1)
-	runnerHub.mu.Lock()
-	runnerHub.dispatched = nil
-	runnerHub.onDispatch = func() {
-		select {
-		case retryCh <- struct{}{}:
-		default:
-		}
-	}
-	runnerHub.mu.Unlock()
-
 	err := k.SubmitJobResult(ctx, domain.JobResult{
 		ExecutionID: execID,
 		StepID:      result.StepID,
@@ -152,12 +132,7 @@ func TestSubmitJobResultRetryRoundTrip(t *testing.T) {
 		t.Fatalf("submit retryable failure: %v", err)
 	}
 
-	select {
-	case <-retryCh:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for retry dispatch")
-	}
-
+	// Retry job is persisted in queue. Verify step state.
 	state, _ := k.GetExecution(ctx, execID)
 	step := state.Steps[result.StepID]
 	if step.Status != domain.StepPending {
@@ -562,6 +537,292 @@ func TestSubmitJobResultRejectsTaintedExecution(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrExecutionTainted) {
 		t.Fatalf("expected ErrExecutionTainted, got %v", err)
+	}
+}
+
+func TestRetryJobPersistedImmediately(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+			Remote: true,
+		},
+	})
+
+	// Before the failure, queue should be empty (initial job was dispatched directly).
+	jobs, _ := k.jobQueue.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected 0 jobs before retry, got %d", len(jobs))
+	}
+
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		Success:     false,
+		Error:       "transient",
+		Retryable:   true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Retry job must be in queue immediately — crash-safe.
+	jobs, _ = k.jobQueue.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected retry job persisted immediately, got %d jobs", len(jobs))
+	}
+	if jobs[0].Attempt != 2 {
+		t.Fatalf("expected attempt 2, got %d", jobs[0].Attempt)
+	}
+	if jobs[0].NotBefore.IsZero() {
+		t.Fatal("expected NotBefore to be set for retry delay")
+	}
+}
+
+func TestDispatchPendingJobsRespectsNotBefore(t *testing.T) {
+	k, _, _, runnerHub, _, _ := newTestKernel()
+	ctx := context.Background()
+
+	// Enqueue a job with NotBefore far in the future.
+	futureJob := domain.Job{
+		ID:        uuid.Must(uuid.NewV7()),
+		ToolID:    "web.search",
+		NotBefore: time.Now().Add(time.Hour),
+	}
+	k.enqueuePendingJob(futureJob)
+
+	k.DispatchPendingJobs()
+
+	// Job should NOT have been dispatched.
+	runnerHub.mu.Lock()
+	dispatched := len(runnerHub.dispatched)
+	runnerHub.mu.Unlock()
+	if dispatched != 0 {
+		t.Fatalf("expected 0 dispatches for future NotBefore, got %d", dispatched)
+	}
+
+	// Job should remain in queue.
+	jobs, _ := k.jobQueue.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected job to remain in queue, got %d", len(jobs))
+	}
+}
+
+func TestDispatchPendingJobsDispatchesReadyJob(t *testing.T) {
+	k, _, _, runnerHub, _, _ := newTestKernel()
+	ctx := context.Background()
+
+	// Enqueue a job with NotBefore in the past.
+	readyJob := domain.Job{
+		ID:        uuid.Must(uuid.NewV7()),
+		ToolID:    "web.search",
+		NotBefore: time.Now().Add(-time.Second),
+	}
+	k.enqueuePendingJob(readyJob)
+
+	k.DispatchPendingJobs()
+
+	// Job should have been dispatched.
+	runnerHub.mu.Lock()
+	dispatched := len(runnerHub.dispatched)
+	runnerHub.mu.Unlock()
+	if dispatched != 1 {
+		t.Fatalf("expected 1 dispatch for past NotBefore, got %d", dispatched)
+	}
+
+	jobs, _ := k.jobQueue.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected job removed after dispatch, got %d", len(jobs))
+	}
+}
+
+func TestRecoverPendingRetriesAfterCrash(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+			Remote: true,
+		},
+	})
+
+	// The initial job enqueue from ProcessIntent lands in the queue
+	// because noDispatchRunnerHub returns false. Clear it to simulate
+	// a clean crash scenario.
+	jq.mu.Lock()
+	jq.jobs = nil
+	jq.mu.Unlock()
+
+	// Simulate the events that handleJobRetry would emit, but without
+	// enqueuing the retry job (simulating a crash between event emission
+	// and job enqueue).
+	correlationID := uuid.Must(uuid.NewV7())
+	_, err := k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "transient", Retryable: true},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.failed: %v", err)
+	}
+	_, err = k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.retried: %v", err)
+	}
+
+	// No jobs in queue — simulating the crash scenario.
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected 0 jobs before recovery, got %d", len(jobs))
+	}
+
+	// Run recovery — should detect the orphaned retry and re-enqueue.
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		t.Fatalf("RecoverPendingRetries: %v", err)
+	}
+
+	jobs, _ = jq.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 recovered job, got %d", len(jobs))
+	}
+	if jobs[0].StepID != result.StepID {
+		t.Fatalf("expected recovered job for step %s, got %s", result.StepID, jobs[0].StepID)
+	}
+	if jobs[0].Attempt != 2 {
+		t.Fatalf("expected attempt 2, got %d", jobs[0].Attempt)
+	}
+	if jobs[0].ToolID != "web.search" {
+		t.Fatalf("expected tool_id web.search, got %s", jobs[0].ToolID)
+	}
+}
+
+func TestRecoverPendingRetriesSkipsAlreadyQueued(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+			Remote: true,
+		},
+	})
+
+	// Submit a retryable failure — this persists the job in the queue.
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		Success:     false,
+		Error:       "transient",
+		Retryable:   true,
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	jobs, _ := k.jobQueue.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job before recovery, got %d", len(jobs))
+	}
+
+	// Recovery should not duplicate the job.
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		t.Fatalf("RecoverPendingRetries: %v", err)
+	}
+
+	jobs, _ = k.jobQueue.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected still 1 job after recovery (no duplicate), got %d", len(jobs))
+	}
+}
+
+func TestRecoverPendingRetriesSkipsTerminalExecution(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+			Remote: true,
+		},
+	})
+
+	// Emit retried events.
+	correlationID := uuid.Must(uuid.NewV7())
+	k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "err", Retryable: true},
+		uuid.Nil, correlationID)
+	k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2},
+		uuid.Nil, correlationID)
+
+	// Cancel the step and mark execution as failed.
+	k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepCancelled,
+		domain.StepCancelledPayload{Reason: "cancelled"},
+		uuid.Nil, correlationID)
+	k.EmitEvent(ctx, execID, "",
+		domain.EventExecutionFailed,
+		domain.ExecutionFailedPayload{Error: "cancelled"},
+		uuid.Nil, correlationID)
+	k.events.UpdateExecutionStatus(ctx, execID, domain.ExecutionFailed)
+
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		t.Fatalf("RecoverPendingRetries: %v", err)
+	}
+
+	// No recovery for terminal executions.
+	jobs, _ := k.jobQueue.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected 0 jobs for terminal execution, got %d", len(jobs))
 	}
 }
 
