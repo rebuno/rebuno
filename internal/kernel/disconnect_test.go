@@ -162,6 +162,72 @@ func TestHandleAgentDisconnectSkipsTerminalSteps(t *testing.T) {
 	}
 }
 
+func TestHandleAgentDisconnectReassignsWhenAgentAlreadyReconnected(t *testing.T) {
+	k, events, agentHub, _, sessions, _ := newConnectedTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Agent is still connected (simulates reconnect completing before disconnect handler).
+	agentHub.mu.Lock()
+	agentHub.hasConn = true
+	agentHub.mu.Unlock()
+
+	k.HandleAgentDisconnect(ctx, sessionID)
+
+	// The execution should have been immediately reassigned (back to running)
+	// because the agent was already connected when the reset happened.
+	state, err := k.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after reconnect-race reassignment, got %s", state.Execution.Status)
+	}
+
+	// Verify the full event sequence: agent.timeout, execution.reset, execution.started.
+	events.mu.Lock()
+	var foundReset, foundRestarted bool
+	for _, evt := range events.events[execID] {
+		if evt.Type == domain.EventExecutionReset {
+			foundReset = true
+		}
+		if evt.Type == domain.EventExecutionStarted && foundReset {
+			foundRestarted = true
+		}
+	}
+	events.mu.Unlock()
+
+	if !foundReset {
+		t.Fatal("expected execution.reset event")
+	}
+	if !foundRestarted {
+		t.Fatal("expected execution.started event after reset (reassignment)")
+	}
+}
+
+func TestHandleAgentDisconnectStaysPendingWhenNoAgent(t *testing.T) {
+	k, _, agentHub, _, sessions, _ := newConnectedTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Agent has no connections (truly disconnected).
+	agentHub.mu.Lock()
+	agentHub.hasConn = false
+	agentHub.mu.Unlock()
+
+	k.HandleAgentDisconnect(ctx, sessionID)
+
+	state, err := k.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if state.Execution.Status != domain.ExecutionPending {
+		t.Fatalf("expected pending when no agent connected, got %s", state.Execution.Status)
+	}
+}
+
 func TestHandleAgentDisconnectTerminalExecutionNoOp(t *testing.T) {
 	k, events, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
