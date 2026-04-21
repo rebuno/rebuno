@@ -150,12 +150,35 @@ func (h *Hub) Send(agentID string, msg store.AgentMessage) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	conn := h.roundRobin(agentID)
-	if conn == nil {
+	consumers := h.agents[agentID]
+	if len(consumers) == 0 {
 		return false
 	}
 
-	if !conn.Send(msg) {
+	ids := h.sortedConsumerIDs(agentID)
+	startIdx := h.rrIndex[agentID] % len(ids)
+	h.rrIndex[agentID] = startIdx + 1
+
+	// Try all connections starting from the round-robin pick.
+	var evict []*Conn
+	for i := 0; i < len(ids); i++ {
+		idx := (startIdx + i) % len(ids)
+		conn := consumers[ids[idx]]
+		if conn.Send(msg) {
+			// Evict any full connections we skipped over.
+			h.evictConns(agentID, evict)
+			return true
+		}
+		evict = append(evict, conn)
+	}
+
+	// All connections were full; evict them all.
+	h.evictConns(agentID, evict)
+	return false
+}
+
+func (h *Hub) evictConns(agentID string, conns []*Conn) {
+	for _, conn := range conns {
 		h.logger.Warn("event channel full, closing connection",
 			slog.String("agent_id", agentID),
 			slog.String("consumer_id", conn.ConsumerID),
@@ -165,13 +188,11 @@ func (h *Hub) Send(agentID string, msg store.AgentMessage) bool {
 		}
 		close(conn.EventCh)
 		delete(h.agents[agentID], conn.ConsumerID)
-		if len(h.agents[agentID]) == 0 {
-			delete(h.agents, agentID)
-			delete(h.rrIndex, agentID)
-		}
-		return false
 	}
-	return true
+	if len(h.agents[agentID]) == 0 {
+		delete(h.agents, agentID)
+		delete(h.rrIndex, agentID)
+	}
 }
 
 func (h *Hub) SendTo(consumerID, agentID string, msg store.AgentMessage) bool {
@@ -220,15 +241,20 @@ func (h *Hub) roundRobin(agentID string) *Conn {
 		return nil
 	}
 
+	ids := h.sortedConsumerIDs(agentID)
+	idx := h.rrIndex[agentID] % len(ids)
+	h.rrIndex[agentID] = idx + 1
+	return consumers[ids[idx]]
+}
+
+func (h *Hub) sortedConsumerIDs(agentID string) []string {
+	consumers := h.agents[agentID]
 	ids := make([]string, 0, len(consumers))
 	for id := range consumers {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-
-	idx := h.rrIndex[agentID] % len(ids)
-	h.rrIndex[agentID] = idx + 1
-	return consumers[ids[idx]]
+	return ids
 }
 
 func (h *Hub) HasConnections(agentID string) bool {
