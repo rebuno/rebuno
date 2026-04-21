@@ -836,6 +836,213 @@ func TestRecoverPendingRetriesSkipsTerminalExecution(t *testing.T) {
 	}
 }
 
+func TestHandleJobRetryEmitsEventsAtomically(t *testing.T) {
+	k, events, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+			Remote: true,
+		},
+	})
+
+	eventsBefore := len(events.events[execID])
+
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
+		Success:     false,
+		Error:       "timeout",
+		Retryable:   true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	events.mu.Lock()
+	evts := events.events[execID]
+	newEvents := evts[eventsBefore:]
+	events.mu.Unlock()
+
+	if len(newEvents) != 2 {
+		t.Fatalf("expected exactly 2 new events (step.failed + step.retried), got %d", len(newEvents))
+	}
+	if newEvents[0].Type != domain.EventStepFailed {
+		t.Fatalf("expected first event to be step.failed, got %s", newEvents[0].Type)
+	}
+	if newEvents[1].Type != domain.EventStepRetried {
+		t.Fatalf("expected second event to be step.retried, got %s", newEvents[1].Type)
+	}
+	if newEvents[0].CorrelationID != newEvents[1].CorrelationID {
+		t.Fatal("expected both retry events to share the same correlation ID")
+	}
+}
+
+func TestRecoverPendingRetriesHandlesOrphanedFailedRetryable(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+			Remote: true,
+		},
+	})
+
+	jq.mu.Lock()
+	jq.jobs = nil
+	jq.mu.Unlock()
+
+	// Simulate crash window: only step.failed (retryable) was written,
+	// step.retried was NOT written.
+	correlationID := uuid.Must(uuid.NewV7())
+	_, err := k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "transient", Retryable: true},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.failed: %v", err)
+	}
+
+	// Verify step is stuck: failed + retryable, no step.retried.
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepFailed {
+		t.Fatalf("expected step failed, got %s", step.Status)
+	}
+	if !step.Retryable {
+		t.Fatal("expected step to be retryable")
+	}
+
+	// Recovery should detect the orphaned failed+retryable step and recover it.
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		t.Fatalf("RecoverPendingRetries: %v", err)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 recovered job, got %d", len(jobs))
+	}
+	if jobs[0].StepID != result.StepID {
+		t.Fatalf("expected recovered job for step %s, got %s", result.StepID, jobs[0].StepID)
+	}
+	if jobs[0].Attempt != 2 {
+		t.Fatalf("expected attempt 2, got %d", jobs[0].Attempt)
+	}
+
+	// The recovery should have emitted step.retried.
+	state, _ = k.GetExecution(ctx, execID)
+	step = state.Steps[result.StepID]
+	if step.Status != domain.StepPending {
+		t.Fatalf("expected step pending after recovery, got %s", step.Status)
+	}
+	if step.Attempt != 2 {
+		t.Fatalf("expected attempt 2 after recovery, got %d", step.Attempt)
+	}
+}
+
+func TestRecoverPendingRetriesSkipsExhaustedRetries(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+			Remote: true, // max_attempts=3
+		},
+	})
+
+	jq.mu.Lock()
+	jq.jobs = nil
+	jq.mu.Unlock()
+
+	// Simulate retries up to attempt 3, then a final failed+retryable on attempt 3.
+	// Emit step.failed + step.retried for attempt 1→2.
+	cid := uuid.Must(uuid.NewV7())
+	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "err", Retryable: true}, uuid.Nil, cid)
+	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2}, uuid.Nil, cid)
+	// Emit step.failed + step.retried for attempt 2→3.
+	cid2 := uuid.Must(uuid.NewV7())
+	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "err", Retryable: true}, uuid.Nil, cid2)
+	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 3}, uuid.Nil, cid2)
+	// Now fail on attempt 3 (max_attempts=3) with retryable=true — but should NOT retry.
+	cid3 := uuid.Must(uuid.NewV7())
+	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "err", Retryable: true}, uuid.Nil, cid3)
+
+	// Recovery should NOT create a job because attempt == maxAttempts.
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		t.Fatalf("RecoverPendingRetries: %v", err)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected 0 recovered jobs for exhausted retries, got %d", len(jobs))
+	}
+}
+
 func TestSubmitStepResultRejectsTaintedExecution(t *testing.T) {
 	k, events, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
