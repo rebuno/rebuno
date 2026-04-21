@@ -496,6 +496,55 @@ func TestRecoverActiveExecutionsBlockedOrphan(t *testing.T) {
 	}
 }
 
+func TestReapSessionsPendingExecutionWithConnectedAgentNotified(t *testing.T) {
+	f := newTestFixture()
+	f.sessions.deletedExpired = 1
+	f.agentHub.hasConn = true
+	f.events.activeIDs = []string{"exec-pending"}
+	f.events.events["exec-pending"] = []domain.Event{
+		createdEvent("agent-1", 1),
+	}
+
+	m := f.manager(time.Hour)
+	m.reapSessions(context.Background())
+
+	// The reaper should notify the connected agent about the pending execution.
+	f.agentHub.mu.Lock()
+	var foundPendingNotification bool
+	for _, msg := range f.agentHub.sent {
+		if msg.Type == "execution.pending" && msg.AgentID == "agent-1" {
+			foundPendingNotification = true
+		}
+	}
+	f.agentHub.mu.Unlock()
+
+	if !foundPendingNotification {
+		t.Fatal("expected execution.pending notification for pending execution with connected agent")
+	}
+}
+
+func TestReapSessionsPendingExecutionNoAgentSkipped(t *testing.T) {
+	f := newTestFixture()
+	f.sessions.deletedExpired = 1
+	f.agentHub.hasConn = false
+	f.events.activeIDs = []string{"exec-pending"}
+	f.events.events["exec-pending"] = []domain.Event{
+		createdEvent("agent-1", 1),
+	}
+
+	m := f.manager(time.Hour)
+	m.reapSessions(context.Background())
+
+	// No notification should be sent when agent is not connected.
+	f.agentHub.mu.Lock()
+	sentCount := len(f.agentHub.sent)
+	f.agentHub.mu.Unlock()
+
+	if sentCount != 0 {
+		t.Fatalf("expected no messages sent when agent not connected, got %d", sentCount)
+	}
+}
+
 func TestReapSessionsOrphanedPendingExecutionNotReassigned(t *testing.T) {
 	// A pending execution without a session should not be touched by the reaper
 	// because handleOrphanedExecution returns early for pending status.

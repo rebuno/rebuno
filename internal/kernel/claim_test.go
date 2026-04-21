@@ -92,7 +92,7 @@ func TestTryAssignExecutionNoConnection(t *testing.T) {
 }
 
 func TestHandleAgentDisconnect(t *testing.T) {
-	k, events, _, _, sessions, _ := newConnectedTestKernel()
+	k, events, agentHub, _, sessions, _ := newConnectedTestKernel()
 	ctx := context.Background()
 
 	execID, err := k.CreateExecution(ctx, CreateExecutionRequest{
@@ -107,6 +107,11 @@ func TestHandleAgentDisconnect(t *testing.T) {
 		t.Fatal("expected session")
 	}
 	sessionID := sess.ID
+
+	// Simulate agent fully disconnected (no new SSE connection yet).
+	agentHub.mu.Lock()
+	agentHub.hasConn = false
+	agentHub.mu.Unlock()
 
 	k.HandleAgentDisconnect(ctx, sessionID)
 
