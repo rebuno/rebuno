@@ -550,6 +550,105 @@ func TestMultipleSessionsOverflowEvictsAll(t *testing.T) {
 	}
 }
 
+func TestSendFallsBackToOtherConnection(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	conn1 := h.Register("agent-1", "c1")
+	conn2 := h.Register("agent-1", "c2")
+
+	// Fill c1's channel so it cannot accept messages.
+	for i := 0; i < eventChannelSize; i++ {
+		conn1.EventCh <- testMsg("fill")
+	}
+
+	// Send twice: round-robin should hit c1 first (sorted order), but
+	// fall back to c2. Then the next call should also succeed because c2
+	// is still available.
+	for i := 0; i < 2; i++ {
+		ok := h.Send("agent-1", testMsg("fallback"))
+		if !ok {
+			t.Fatalf("expected send #%d to succeed via fallback", i)
+		}
+	}
+
+	// c2 should have received the messages.
+	received := 0
+	for {
+		select {
+		case <-conn2.EventCh:
+			received++
+		default:
+			goto done
+		}
+	}
+done:
+	if received != 2 {
+		t.Fatalf("expected 2 messages on c2, got %d", received)
+	}
+
+	// c1 should have been evicted.
+	if h.HasConnections("agent-1") {
+		// c2 should still exist
+		ok := h.Send("agent-1", testMsg("after-evict"))
+		if !ok {
+			t.Fatal("expected c2 to still be available")
+		}
+	}
+}
+
+func TestSendAllConnectionsFull(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	conn1 := h.Register("agent-1", "c1")
+	conn2 := h.Register("agent-1", "c2")
+
+	// Fill both channels.
+	for i := 0; i < eventChannelSize; i++ {
+		conn1.EventCh <- testMsg("fill")
+		conn2.EventCh <- testMsg("fill")
+	}
+
+	ok := h.Send("agent-1", testMsg("overflow"))
+	if ok {
+		t.Fatal("expected send to return false when all connections are full")
+	}
+
+	if h.HasConnections("agent-1") {
+		t.Fatal("expected all connections to be evicted")
+	}
+}
+
+func TestSendFallbackEvictsFullConnOnly(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	conn1 := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-c1")
+	h.Register("agent-1", "c2")
+
+	// Fill c1's channel.
+	for i := 0; i < eventChannelSize; i++ {
+		conn1.EventCh <- testMsg("fill")
+	}
+
+	ok := h.Send("agent-1", testMsg("test"))
+	if !ok {
+		t.Fatal("expected send to succeed via c2")
+	}
+
+	// session-c1 should be cleaned up because c1 was evicted.
+	if ok := h.SendToSession("session-c1", testMsg("test")); ok {
+		t.Fatal("expected session-c1 to be unreachable after c1 eviction")
+	}
+
+	// c2 should still be available.
+	if !h.HasConnections("agent-1") {
+		t.Fatal("expected c2 to remain registered")
+	}
+}
+
 func TestReRegisterClearsAllSessions(t *testing.T) {
 	h := New(nil)
 	defer h.Close()
