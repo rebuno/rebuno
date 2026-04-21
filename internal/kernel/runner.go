@@ -88,19 +88,19 @@ func (k *Kernel) handleJobSuccess(ctx context.Context, result domain.JobResult, 
 }
 
 func (k *Kernel) handleJobRetry(ctx context.Context, result domain.JobResult, step *domain.Step, correlationID uuid.UUID) error {
-	_, err := k.EmitEvent(ctx, result.ExecutionID, result.StepID,
-		domain.EventStepFailed,
-		domain.StepFailedPayload{Error: result.Error, Retryable: true},
-		uuid.Nil, correlationID)
-	if err != nil {
-		return err
-	}
-
 	nextAttempt := step.Attempt + 1
-	_, err = k.EmitEvent(ctx, result.ExecutionID, result.StepID,
-		domain.EventStepRetried,
-		domain.StepRetriedPayload{NextAttempt: nextAttempt},
-		uuid.Nil, correlationID)
+	_, err := k.EmitEvents(ctx, result.ExecutionID, correlationID, []eventEntry{
+		{
+			stepID:    result.StepID,
+			eventType: domain.EventStepFailed,
+			payload:   domain.StepFailedPayload{Error: result.Error, Retryable: true},
+		},
+		{
+			stepID:    result.StepID,
+			eventType: domain.EventStepRetried,
+			payload:   domain.StepRetriedPayload{NextAttempt: nextAttempt},
+		},
+	})
 	if err != nil {
 		return err
 	}
@@ -276,23 +276,51 @@ func (k *Kernel) RecoverPendingRetries(ctx context.Context) error {
 		}
 
 		for _, step := range state.Steps {
-			if step.Status != domain.StepPending || step.Attempt < 2 {
-				continue
-			}
 			if _, ok := coveredSteps[step.ID]; ok {
 				continue
 			}
 
-			job := domain.Job{
-				ID:          uuid.Must(uuid.NewV7()),
-				ExecutionID: execID,
-				StepID:      step.ID,
-				Attempt:     step.Attempt,
-				ToolID:      step.ToolID,
-				ToolVersion: step.ToolVersion,
-				Arguments:   step.Arguments,
-				Deadline:    time.Now().Add(k.config.StepTimeout),
+			var job domain.Job
+			switch {
+			case step.Status == domain.StepPending && step.Attempt >= 2:
+				job = domain.Job{
+					ID:          uuid.Must(uuid.NewV7()),
+					ExecutionID: execID,
+					StepID:      step.ID,
+					Attempt:     step.Attempt,
+					ToolID:      step.ToolID,
+					ToolVersion: step.ToolVersion,
+					Arguments:   step.Arguments,
+					Deadline:    time.Now().Add(k.config.StepTimeout),
+				}
+			case step.Status == domain.StepFailed && step.Retryable && step.Attempt < step.MaxAttempts:
+				nextAttempt := step.Attempt + 1
+				_, err := k.EmitEvent(ctx, execID, step.ID,
+					domain.EventStepRetried,
+					domain.StepRetriedPayload{NextAttempt: nextAttempt},
+					uuid.Nil, uuid.Nil)
+				if err != nil {
+					k.logger.Warn("recovery: failed to emit step.retried for orphaned retry",
+						slog.String("execution_id", execID),
+						slog.String("step_id", step.ID),
+						slog.String("error", err.Error()),
+					)
+					continue
+				}
+				job = domain.Job{
+					ID:          uuid.Must(uuid.NewV7()),
+					ExecutionID: execID,
+					StepID:      step.ID,
+					Attempt:     nextAttempt,
+					ToolID:      step.ToolID,
+					ToolVersion: step.ToolVersion,
+					Arguments:   step.Arguments,
+					Deadline:    time.Now().Add(k.config.StepTimeout),
+				}
+			default:
+				continue
 			}
+
 			k.enqueuePendingJob(job)
 			coveredSteps[step.ID] = struct{}{}
 			recovered++
