@@ -17,7 +17,6 @@ type RunnerHub interface {
 	SendTo(runnerID, consumerID string, msg RunnerMessage) bool
 	MarkBusy(runnerID, consumerID string)
 	MarkIdle(runnerID, consumerID string)
-	MarkRunnerIdle(runnerID string)
 	HasCapability(toolID string) bool
 	UpdateCapabilities(runnerID string, capabilities []string)
 }
