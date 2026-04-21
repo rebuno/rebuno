@@ -59,6 +59,7 @@ func (k *Kernel) SubmitStepResult(ctx context.Context, req StepResultRequest) er
 	correlationID := uuid.Must(uuid.NewV7())
 
 	var stepStatus domain.StepStatus
+	var stepEventType domain.EventType
 	if req.Success {
 		_, err := k.EmitEvent(ctx, req.ExecutionID, req.StepID,
 			domain.EventStepCompleted,
@@ -68,6 +69,7 @@ func (k *Kernel) SubmitStepResult(ctx context.Context, req StepResultRequest) er
 			return err
 		}
 		stepStatus = domain.StepSucceeded
+		stepEventType = domain.EventStepCompleted
 
 		if k.metrics != nil {
 			k.metrics.StepDuration.WithLabelValues(step.ToolID).Observe(time.Since(step.CreatedAt).Seconds())
@@ -81,6 +83,12 @@ func (k *Kernel) SubmitStepResult(ctx context.Context, req StepResultRequest) er
 			return err
 		}
 		stepStatus = domain.StepFailed
+		stepEventType = domain.EventStepFailed
+	}
+
+	updated, err := k.projector.Project(ctx, req.ExecutionID)
+	if err == nil {
+		k.maybeCheckpoint(ctx, updated, stepEventType)
 	}
 
 	session, found, sessErr := k.sessions.GetByExecution(ctx, req.ExecutionID)

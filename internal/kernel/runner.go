@@ -42,10 +42,12 @@ func (k *Kernel) SubmitJobResult(ctx context.Context, result domain.JobResult) e
 
 	correlationID := uuid.Must(uuid.NewV7())
 
+	var checkpointEventType domain.EventType
 	if result.Success {
 		if err := k.handleJobSuccess(ctx, result, step, correlationID); err != nil {
 			return err
 		}
+		checkpointEventType = domain.EventStepCompleted
 	} else if result.Retryable && step.Attempt < step.MaxAttempts {
 		if err := k.handleJobRetry(ctx, result, step, correlationID); err != nil {
 			return err
@@ -53,6 +55,14 @@ func (k *Kernel) SubmitJobResult(ctx context.Context, result domain.JobResult) e
 	} else {
 		if err := k.handleJobFailure(ctx, result, correlationID); err != nil {
 			return err
+		}
+		checkpointEventType = domain.EventStepFailed
+	}
+
+	if checkpointEventType != "" {
+		updated, err := k.projector.Project(ctx, result.ExecutionID)
+		if err == nil {
+			k.maybeCheckpoint(ctx, updated, checkpointEventType)
 		}
 	}
 
