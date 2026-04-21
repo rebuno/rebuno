@@ -146,7 +146,17 @@ func (m *Manager) reapSessions(ctx context.Context) {
 			)
 			continue
 		}
-		if state.Execution.Status.IsTerminal() || state.Execution.Status == domain.ExecutionPending {
+		if state.Execution.Status.IsTerminal() {
+			continue
+		}
+		if state.Execution.Status == domain.ExecutionPending {
+			if m.agentHub.HasConnections(state.AgentID) {
+				m.logger.Info("session reaper: pending execution has connected agent, notifying",
+					slog.String("execution_id", execID),
+					slog.String("agent_id", state.AgentID),
+				)
+				m.notifyPendingExecution(execID, state.AgentID)
+			}
 			continue
 		}
 		if m.agentHub.HasConnections(state.AgentID) {
@@ -159,6 +169,25 @@ func (m *Manager) reapSessions(ctx context.Context) {
 
 		m.handleOrphanedExecution(ctx, execID)
 	}
+}
+
+func (m *Manager) notifyPendingExecution(executionID, agentID string) {
+	claimPayload := map[string]string{
+		"execution_id": executionID,
+		"agent_id":     agentID,
+	}
+	payload, err := json.Marshal(claimPayload)
+	if err != nil {
+		m.logger.Error("failed to marshal pending notification payload",
+			slog.String("execution_id", executionID),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	m.agentHub.Send(agentID, store.AgentMessage{
+		Type:    "execution.pending",
+		Payload: payload,
+	})
 }
 
 func (m *Manager) handleOrphanedExecution(ctx context.Context, executionID string) {
