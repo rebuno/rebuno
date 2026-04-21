@@ -1020,6 +1020,88 @@ func TestResetClearsPendingSignals(t *testing.T) {
 	}
 }
 
+func TestStepRetriedReAddsToActiveSteps(t *testing.T) {
+	state := emptyState()
+	execID := "exec-1"
+	stepID := "step-1"
+
+	applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
+		domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1, MaxAttempts: 3}))
+
+	if !state.HasActiveSteps() {
+		t.Fatal("expected active steps after creation")
+	}
+
+	applyStepFailed(state, makeStepEvent(execID, stepID, 2, domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "connection timeout", Retryable: true}))
+
+	if state.HasActiveSteps() {
+		t.Fatal("expected no active steps after failure")
+	}
+
+	err := applyStepRetried(state, makeStepEvent(execID, stepID, 3, domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2}))
+	if err != nil {
+		t.Fatalf("applyStepRetried: %v", err)
+	}
+
+	if !state.HasActiveSteps() {
+		t.Fatal("expected HasActiveSteps=true after retry")
+	}
+	if state.ActiveSteps[stepID] == nil {
+		t.Fatal("expected retried step in ActiveSteps map")
+	}
+	step := state.Steps[stepID]
+	if step.Status != domain.StepPending {
+		t.Errorf("expected pending after retry, got %s", step.Status)
+	}
+	if step.Attempt != 2 {
+		t.Errorf("expected attempt 2, got %d", step.Attempt)
+	}
+	if step.Error != "" {
+		t.Errorf("expected error cleared, got %q", step.Error)
+	}
+	if step.CompletedAt != nil {
+		t.Error("expected CompletedAt cleared")
+	}
+	if step.Retryable {
+		t.Error("expected Retryable=false after retry")
+	}
+}
+
+func TestStepRetriedThenCompletedClearsActiveSteps(t *testing.T) {
+	state := emptyState()
+	execID := "exec-1"
+	stepID := "step-1"
+
+	applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
+		domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1, MaxAttempts: 3}))
+	applyStepFailed(state, makeStepEvent(execID, stepID, 2, domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "timeout", Retryable: true}))
+	applyStepRetried(state, makeStepEvent(execID, stepID, 3, domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2}))
+
+	if !state.HasActiveSteps() {
+		t.Fatal("expected active steps after retry")
+	}
+
+	applyStepCompleted(state, makeStepEvent(execID, stepID, 4, domain.EventStepCompleted,
+		domain.StepCompletedPayload{Result: json.RawMessage(`{"ok":true}`)}))
+
+	if state.HasActiveSteps() {
+		t.Fatal("expected no active steps after retried step completes")
+	}
+}
+
+func TestStepRetriedUnknownStepReturnsError(t *testing.T) {
+	state := emptyState()
+	err := applyStepRetried(state, makeStepEvent("e1", "nonexistent", 1, domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2}))
+	if err == nil {
+		t.Fatal("expected error for unknown step on step.retried")
+	}
+}
+
 func TestResetClearsBlockedApprovalState(t *testing.T) {
 	state := emptyState()
 	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
