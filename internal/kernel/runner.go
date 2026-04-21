@@ -115,13 +115,10 @@ func (k *Kernel) handleJobRetry(ctx context.Context, result domain.JobResult, st
 		ToolVersion: step.ToolVersion,
 		Arguments:   step.Arguments,
 		Deadline:    time.Now().Add(k.config.StepTimeout),
+		NotBefore:   time.Now().Add(delay),
 	}
 
-	k.retryWg.Add(1)
-	time.AfterFunc(delay, func() {
-		defer k.retryWg.Done()
-		k.retryJob(retryJob)
-	})
+	k.enqueuePendingJob(retryJob)
 	return nil
 }
 
@@ -216,7 +213,12 @@ func (k *Kernel) DispatchPendingJobs() {
 		return
 	}
 
+	now := time.Now()
 	for _, job := range jobs {
+		if !job.NotBefore.IsZero() && now.Before(job.NotBefore) {
+			continue
+		}
+
 		payload, err := json.Marshal(job)
 		if err != nil {
 			k.logger.Warn("failed to marshal pending job",
@@ -244,12 +246,64 @@ func (k *Kernel) DispatchPendingJobs() {
 	}
 }
 
-func (k *Kernel) retryJob(job domain.Job) {
-	select {
-	case <-k.done:
-		return
-	default:
+func (k *Kernel) RecoverPendingRetries(ctx context.Context) error {
+	execIDs, err := k.events.ListActiveExecutionIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("listing active executions: %w", err)
 	}
-	k.enqueuePendingJob(job)
-	k.DispatchPendingJobs()
+
+	existingJobs, err := k.jobQueue.All(ctx)
+	if err != nil {
+		return fmt.Errorf("listing pending jobs: %w", err)
+	}
+	coveredSteps := make(map[string]struct{}, len(existingJobs))
+	for _, j := range existingJobs {
+		coveredSteps[j.StepID] = struct{}{}
+	}
+
+	recovered := 0
+	for _, execID := range execIDs {
+		state, err := k.projector.Project(ctx, execID)
+		if err != nil {
+			k.logger.Warn("recovery: failed to project execution",
+				slog.String("execution_id", execID),
+				slog.String("error", err.Error()),
+			)
+			continue
+		}
+		if state.Tainted || state.Execution.Status.IsTerminal() {
+			continue
+		}
+
+		for _, step := range state.Steps {
+			if step.Status != domain.StepPending || step.Attempt < 2 {
+				continue
+			}
+			if _, ok := coveredSteps[step.ID]; ok {
+				continue
+			}
+
+			job := domain.Job{
+				ID:          uuid.Must(uuid.NewV7()),
+				ExecutionID: execID,
+				StepID:      step.ID,
+				Attempt:     step.Attempt,
+				ToolID:      step.ToolID,
+				ToolVersion: step.ToolVersion,
+				Arguments:   step.Arguments,
+				Deadline:    time.Now().Add(k.config.StepTimeout),
+			}
+			k.enqueuePendingJob(job)
+			coveredSteps[step.ID] = struct{}{}
+			recovered++
+		}
+	}
+
+	if recovered > 0 {
+		k.logger.Info("recovered pending retry jobs",
+			slog.Int("count", recovered),
+		)
+		k.DispatchPendingJobs()
+	}
+	return nil
 }
