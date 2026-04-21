@@ -27,6 +27,7 @@ type submitResultRequest struct {
 	Retryable   bool            `json:"retryable"`
 	StartedAt   *time.Time      `json:"started_at"`
 	CompletedAt *time.Time      `json:"completed_at"`
+	ConsumerID  string          `json:"consumer_id"`
 }
 
 func (h *runnerHandlers) submitResult(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,7 @@ func (h *runnerHandlers) submitResult(w http.ResponseWriter, r *http.Request) {
 		StartedAt:   req.StartedAt,
 		CompletedAt: req.CompletedAt,
 		RunnerID:    runnerID,
+		ConsumerID:  req.ConsumerID,
 	}
 
 	err := h.kernel.SubmitJobResult(r.Context(), result)

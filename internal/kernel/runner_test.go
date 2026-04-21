@@ -32,6 +32,7 @@ func TestSubmitJobResultSuccess(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     true,
 		Data:        json.RawMessage(`{"results":["a","b"]}`),
 	})
@@ -77,6 +78,7 @@ func TestSubmitJobResultFailureWithRetry(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     false,
 		Error:       "timeout",
 		Retryable:   true,
@@ -124,6 +126,7 @@ func TestSubmitJobResultRetryRoundTrip(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     false,
 		Error:       "timeout",
 		Retryable:   true,
@@ -146,6 +149,7 @@ func TestSubmitJobResultRetryRoundTrip(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     true,
 		Data:        json.RawMessage(`{"results":["a","b"]}`),
 	})
@@ -180,6 +184,7 @@ func TestSubmitJobResultFailureNoRetry(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     false,
 		Error:       "division by zero",
 		Retryable:   false, // not retryable
@@ -262,6 +267,7 @@ func TestSubmitJobResultStepNotFound(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      "nonexistent-step",
 		RunnerID:    "runner-1",
+		ConsumerID:  "c1",
 		Success:     true,
 		Data:        json.RawMessage(`{}`),
 	})
@@ -291,6 +297,7 @@ func TestSubmitJobResultAlreadyResolved(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     true,
 		Data:        json.RawMessage(`{"result":42}`),
 	})
@@ -303,6 +310,7 @@ func TestSubmitJobResultAlreadyResolved(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     true,
 		Data:        json.RawMessage(`{"result":42}`),
 	})
@@ -334,6 +342,7 @@ func TestSubmitJobResultFailureExhaustsRetries(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     false,
 		Error:       "permanent failure",
 		Retryable:   false,
@@ -532,6 +541,7 @@ func TestSubmitJobResultRejectsTaintedExecution(t *testing.T) {
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
 		Success:     true,
 		Data:        json.RawMessage(`{"result":"ok"}`),
 	})

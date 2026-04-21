@@ -173,17 +173,6 @@ func (h *RunnerHub) setConnBusy(runnerID, consumerID string, busy bool) {
 	}
 }
 
-func (h *RunnerHub) MarkRunnerIdle(runnerID string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if consumers, ok := h.runners[runnerID]; ok {
-		for _, conn := range consumers {
-			conn.Busy = false
-		}
-	}
-}
-
 func (h *RunnerHub) UpdateCapabilities(runnerID string, capabilities []string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

@@ -56,8 +56,8 @@ func (k *Kernel) SubmitJobResult(ctx context.Context, result domain.JobResult) e
 		}
 	}
 
-	if result.RunnerID != "" {
-		k.runnerHub.MarkRunnerIdle(result.RunnerID)
+	if result.RunnerID != "" && result.ConsumerID != "" {
+		k.runnerHub.MarkIdle(result.RunnerID, result.ConsumerID)
 	}
 	k.DispatchPendingJobs()
 

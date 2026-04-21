@@ -30,4 +30,5 @@ type JobResult struct {
 	StartedAt   *time.Time      `json:"started_at,omitempty"`
 	CompletedAt *time.Time      `json:"completed_at,omitempty"`
 	RunnerID    string          `json:"runner_id"`
+	ConsumerID  string          `json:"consumer_id"`
 }
