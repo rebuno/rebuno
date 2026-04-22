@@ -768,6 +768,105 @@ func TestStepTimeoutCancelsSiblingSteps(t *testing.T) {
 	if !foundExecFailed {
 		t.Error("expected execution.failed event")
 	}
+func TestFailStepTimeoutSkipsTerminalExecution(t *testing.T) {
+	t.Run("multiple simultaneous step timeouts emit only one execution.failed", func(t *testing.T) {
+		f := newTestFixture()
+		f.emitter.feedback = f.events
+
+		execID := "exec-multi-step-timeout"
+		f.events.activeIDs = []string{execID}
+		pastDeadline := time.Now().Add(-1 * time.Minute)
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2),
+			{
+				StepID:   "step-1",
+				Type:     domain.EventStepCreated,
+				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+				Sequence: 3,
+			},
+			{
+				StepID:   "step-1",
+				Type:     domain.EventStepDispatched,
+				Payload:  mustMarshal(domain.StepDispatchedPayload{RunnerID: "r1", Deadline: pastDeadline}),
+				Sequence: 4,
+			},
+			{
+				StepID:   "step-2",
+				Type:     domain.EventStepCreated,
+				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.fetch", Attempt: 1}),
+				Sequence: 5,
+			},
+			{
+				StepID:   "step-2",
+				Type:     domain.EventStepDispatched,
+				Payload:  mustMarshal(domain.StepDispatchedPayload{RunnerID: "r2", Deadline: pastDeadline}),
+				Sequence: 6,
+			},
+		}
+
+		m := f.manager(time.Hour)
+		m.checkTimeouts(context.Background())
+
+		f.emitter.mu.Lock()
+		defer f.emitter.mu.Unlock()
+
+		execFailedCount := 0
+		stepTimedOutCount := 0
+		for _, e := range f.emitter.events {
+			if e.EventType == domain.EventExecutionFailed && e.ExecutionID == execID {
+				execFailedCount++
+			}
+			if e.EventType == domain.EventStepTimedOut {
+				stepTimedOutCount++
+			}
+		}
+
+		if execFailedCount != 1 {
+			t.Errorf("expected exactly 1 execution.failed event, got %d", execFailedCount)
+		}
+		if stepTimedOutCount < 1 {
+			t.Error("expected at least 1 step.timed_out event")
+		}
+	})
+
+	t.Run("failStepTimeout skips already-failed execution", func(t *testing.T) {
+		f := newTestFixture()
+
+		execID := "exec-already-failed"
+		pastDeadline := time.Now().Add(-1 * time.Minute)
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2),
+			{
+				StepID:   "step-1",
+				Type:     domain.EventStepCreated,
+				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+				Sequence: 3,
+			},
+			{
+				StepID:   "step-1",
+				Type:     domain.EventStepDispatched,
+				Payload:  mustMarshal(domain.StepDispatchedPayload{RunnerID: "r1", Deadline: pastDeadline}),
+				Sequence: 4,
+			},
+			{
+				Type:     domain.EventExecutionFailed,
+				Payload:  mustMarshal(domain.ExecutionFailedPayload{Error: "step timed out"}),
+				Sequence: 5,
+			},
+		}
+
+		m := f.manager(time.Hour)
+		m.failStepTimeout(context.Background(), execID, "step-1")
+
+		f.emitter.mu.Lock()
+		defer f.emitter.mu.Unlock()
+
+		if len(f.emitter.events) != 0 {
+			t.Errorf("expected no events emitted for already-failed execution, got %d", len(f.emitter.events))
+		}
+	})
 }
 
 func mustMarshal(v any) json.RawMessage {
