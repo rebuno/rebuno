@@ -37,18 +37,18 @@ type Execution struct {
 }
 
 type ExecutionState struct {
-	Execution        Execution                    `json:"execution"`
-	ActiveSteps      map[string]*Step             `json:"active_steps,omitempty"`
-	Steps            map[string]*Step             `json:"steps"`
-	PendingSignals   []Signal                     `json:"pending_signals,omitempty"`
-	History          []HistoryEntry               `json:"history,omitempty"`
-	AgentID          string                       `json:"agent_id"`
-	LastSequence     int64                        `json:"last_sequence"`
-	Tainted          bool                         `json:"tainted"`
-	TaintedReason    string                       `json:"tainted_reason,omitempty"`
-	BlockedReason    string                       `json:"blocked_reason,omitempty"`
-	BlockedRef       string                       `json:"blocked_ref,omitempty"`
-	PendingApprovals map[string]*PendingApproval  `json:"pending_approvals,omitempty"`
+	Execution        Execution                   `json:"execution"`
+	ActiveSteps      map[string]*Step            `json:"active_steps,omitempty"`
+	Steps            map[string]*Step            `json:"steps"`
+	PendingSignals   []Signal                    `json:"pending_signals,omitempty"`
+	History          []HistoryEntry              `json:"history,omitempty"`
+	AgentID          string                      `json:"agent_id"`
+	LastSequence     int64                       `json:"last_sequence"`
+	Tainted          bool                        `json:"tainted"`
+	TaintedReason    string                      `json:"tainted_reason,omitempty"`
+	BlockedReason    string                      `json:"blocked_reason,omitempty"`
+	BlockedRef       string                      `json:"blocked_ref,omitempty"`
+	PendingApprovals map[string]*PendingApproval `json:"pending_approvals,omitempty"`
 }
 
 func (s *ExecutionState) HasActiveSteps() bool {
