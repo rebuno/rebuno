@@ -696,6 +696,78 @@ func TestExecutionTimeoutCancelsActiveSteps(t *testing.T) {
 	}
 }
 
+func TestStepTimeoutCancelsSiblingSteps(t *testing.T) {
+	f := newTestFixture()
+
+	execID := "exec-step-timeout-siblings"
+	f.events.activeIDs = []string{execID}
+	pastDeadline := time.Now().Add(-1 * time.Minute)
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+		stepCreatedEvent("step-1", 3),
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepDispatched,
+			Payload:  mustMarshal(domain.StepDispatchedPayload{RunnerID: "r1", Deadline: pastDeadline}),
+			Sequence: 4,
+		},
+		stepCreatedEvent("step-2", 5),
+		stepCreatedEvent("step-3", 6),
+		{
+			StepID:   "step-4",
+			Type:     domain.EventStepCreated,
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local.tool", Attempt: 1}),
+			Sequence: 7,
+		},
+		{
+			StepID:   "step-4",
+			Type:     domain.EventStepCompleted,
+			Payload:  mustMarshal(domain.StepCompletedPayload{}),
+			Sequence: 8,
+		},
+	}
+
+	m := f.manager(time.Hour)
+	m.checkTimeouts(context.Background())
+
+	f.emitter.mu.Lock()
+	defer f.emitter.mu.Unlock()
+
+	foundStepTimedOut := false
+	cancelledSteps := map[string]bool{}
+	foundExecFailed := false
+	for _, e := range f.emitter.events {
+		switch e.EventType {
+		case domain.EventStepTimedOut:
+			if e.StepID == "step-1" {
+				foundStepTimedOut = true
+			}
+		case domain.EventStepCancelled:
+			cancelledSteps[e.StepID] = true
+		case domain.EventExecutionFailed:
+			foundExecFailed = true
+		}
+	}
+
+	if !foundStepTimedOut {
+		t.Error("expected step.timed_out for step-1")
+	}
+	if !cancelledSteps["step-2"] {
+		t.Error("expected step.cancelled for sibling step-2")
+	}
+	if !cancelledSteps["step-3"] {
+		t.Error("expected step.cancelled for sibling step-3")
+	}
+	if cancelledSteps["step-1"] {
+		t.Error("did not expect step.cancelled for the timed-out step-1 itself")
+	}
+	if cancelledSteps["step-4"] {
+		t.Error("did not expect step.cancelled for already-terminal step-4")
+	}
+	if !foundExecFailed {
+		t.Error("expected execution.failed event")
+	}
 func TestFailStepTimeoutSkipsTerminalExecution(t *testing.T) {
 	t.Run("multiple simultaneous step timeouts emit only one execution.failed", func(t *testing.T) {
 		f := newTestFixture()
