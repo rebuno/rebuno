@@ -412,6 +412,9 @@ func (m *Manager) failStepTimeout(ctx context.Context, executionID, stepID strin
 		)
 		return
 	}
+	if state.Execution.Status.IsTerminal() {
+		return
+	}
 	step, ok := state.Steps[stepID]
 	if !ok || step.Status.IsTerminal() {
 		return
