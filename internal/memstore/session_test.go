@@ -286,6 +286,31 @@ func TestSessionStore_DeleteExpiredCleansExecIndex(t *testing.T) {
 	}
 }
 
+func TestSessionStore_GetByExecutionReturnsExpiredSession(t *testing.T) {
+	s := memstore.NewSessionStore()
+	ctx := context.Background()
+
+	expired := domain.Session{
+		ID:          "sess-expired",
+		ExecutionID: "exec-expired",
+		AgentID:     "agent-1",
+		CreatedAt:   time.Now().Add(-2 * time.Hour),
+		ExpiresAt:   time.Now().Add(-time.Hour),
+	}
+	_ = s.Create(ctx, expired)
+
+	got, ok, err := s.GetByExecution(ctx, "exec-expired")
+	if err != nil {
+		t.Fatalf("GetByExecution: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected expired session to still be found by GetByExecution")
+	}
+	if got.ID != "sess-expired" {
+		t.Errorf("ID: got %q want sess-expired", got.ID)
+	}
+}
+
 func TestSessionStore_GetReturnsCopy(t *testing.T) {
 	s := memstore.NewSessionStore()
 	ctx := context.Background()

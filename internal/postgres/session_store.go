@@ -56,7 +56,7 @@ func (s *SessionStore) GetByExecution(ctx context.Context, executionID string) (
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, execution_id, agent_id, consumer_id, created_at, expires_at
 		FROM sessions
-		WHERE execution_id = $1 AND expires_at > now()
+		WHERE execution_id = $1
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, executionID).Scan(
