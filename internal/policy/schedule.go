@@ -127,5 +127,8 @@ func matchSchedule(s *schedule, at time.Time) bool {
 	minutes := t.Hour()*60 + t.Minute()
 	start := s.startHour*60 + s.startMin
 	end := s.endHour*60 + s.endMin
+	if start > end {
+		return minutes >= start || minutes < end
+	}
 	return minutes >= start && minutes < end
 }

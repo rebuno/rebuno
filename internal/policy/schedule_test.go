@@ -74,6 +74,43 @@ func TestMatchSchedule_WrongDay(t *testing.T) {
 	}
 }
 
+func TestMatchSchedule_OvernightRange(t *testing.T) {
+	s, err := parseSchedule("Mon-Fri 22:00-06:00 UTC")
+	if err != nil {
+		t.Fatalf("parseSchedule: %v", err)
+	}
+	// Wednesday 23:00 UTC — should match (after start, before midnight)
+	at := time.Date(2026, 3, 25, 23, 0, 0, 0, time.UTC)
+	if !matchSchedule(s, at) {
+		t.Error("expected match for Wed 23:00 UTC within 22:00-06:00")
+	}
+	// Thursday 03:00 UTC — should match (after midnight, before end)
+	at = time.Date(2026, 3, 26, 3, 0, 0, 0, time.UTC)
+	if !matchSchedule(s, at) {
+		t.Error("expected match for Thu 03:00 UTC within 22:00-06:00")
+	}
+	// Wednesday 22:00 UTC — should match (exact start boundary)
+	at = time.Date(2026, 3, 25, 22, 0, 0, 0, time.UTC)
+	if !matchSchedule(s, at) {
+		t.Error("expected match for Wed 22:00 UTC at start of 22:00-06:00")
+	}
+	// Thursday 06:00 UTC — should NOT match (exact end boundary, exclusive)
+	at = time.Date(2026, 3, 26, 6, 0, 0, 0, time.UTC)
+	if matchSchedule(s, at) {
+		t.Error("expected no match for Thu 06:00 UTC at end of 22:00-06:00")
+	}
+	// Wednesday 12:00 UTC — should NOT match (midday, outside overnight range)
+	at = time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
+	if matchSchedule(s, at) {
+		t.Error("expected no match for Wed 12:00 UTC outside 22:00-06:00")
+	}
+	// Saturday 23:00 UTC — should NOT match (weekend, wrong day)
+	at = time.Date(2026, 3, 28, 23, 0, 0, 0, time.UTC)
+	if matchSchedule(s, at) {
+		t.Error("expected no match for Sat 23:00 UTC outside Mon-Fri")
+	}
+}
+
 func TestMatchSchedule_TimezoneConversion(t *testing.T) {
 	s, _ := parseSchedule("Mon-Fri 09:00-17:00 America/New_York")
 	// Wed 14:00 UTC = Wed 10:00 ET (within window, EDT in March 2026)
