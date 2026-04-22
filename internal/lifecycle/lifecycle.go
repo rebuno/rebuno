@@ -412,6 +412,9 @@ func (m *Manager) failStepTimeout(ctx context.Context, executionID, stepID strin
 		)
 		return
 	}
+	if state.Execution.Status.IsTerminal() {
+		return
+	}
 	step, ok := state.Steps[stepID]
 	if !ok || step.Status.IsTerminal() {
 		return
@@ -426,6 +429,20 @@ func (m *Manager) failStepTimeout(ctx context.Context, executionID, stepID strin
 			slog.String("error", err.Error()),
 		)
 		return
+	}
+
+	for otherID, otherStep := range state.Steps {
+		if otherID == stepID || otherStep.Status.IsTerminal() {
+			continue
+		}
+		if _, err := m.emitter.EmitEvent(ctx, executionID, otherID, domain.EventStepCancelled,
+			domain.StepCancelledPayload{Reason: "sibling step timed out"}, uuid.Nil, uuid.Nil); err != nil {
+			m.logger.Warn("timeout watcher: failed to cancel sibling step",
+				slog.String("execution_id", executionID),
+				slog.String("step_id", otherID),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 
 	_, err = m.emitter.EmitEvent(ctx, executionID, "", domain.EventExecutionFailed,
