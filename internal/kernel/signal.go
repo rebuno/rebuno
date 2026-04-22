@@ -226,6 +226,16 @@ func (k *Kernel) handleApprovalSignal(
 		} else {
 			k.enqueuePendingJob(job)
 		}
+	} else {
+		deadline := time.Now().Add(k.config.StepTimeout)
+		dispatchPayload := domain.StepDispatchedPayload{
+			Deadline: deadline,
+		}
+		_, err := k.EmitEvent(ctx, executionID, stepID, domain.EventStepDispatched,
+			dispatchPayload, signalEvt.ID, signalEvt.CorrelationID)
+		if err != nil {
+			return fmt.Errorf("emitting deadline refresh after approval: %w", err)
+		}
 	}
 
 	resumePayload := domain.ExecutionResumedPayload{
