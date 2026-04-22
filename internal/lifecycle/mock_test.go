@@ -305,8 +305,9 @@ type emittedEvent struct {
 }
 
 type mockEmitter struct {
-	mu     sync.Mutex
-	events []emittedEvent
+	mu       sync.Mutex
+	events   []emittedEvent
+	feedback *mockEventStore
 }
 
 func newMockEmitter() *mockEmitter {
@@ -314,11 +315,11 @@ func newMockEmitter() *mockEmitter {
 }
 
 func (m *mockEmitter) EmitEvent(
-	_ context.Context,
+	ctx context.Context,
 	executionID string,
 	stepID string,
 	eventType domain.EventType,
-	_ any,
+	payload any,
 	_ uuid.UUID,
 	_ uuid.UUID,
 ) (domain.Event, error) {
@@ -329,12 +330,17 @@ func (m *mockEmitter) EmitEvent(
 		StepID:      stepID,
 		EventType:   eventType,
 	})
-	return domain.Event{
+	payloadBytes, _ := json.Marshal(payload)
+	evt := domain.Event{
 		ID:          uuid.Must(uuid.NewV7()),
 		ExecutionID: executionID,
 		StepID:      stepID,
 		Type:        eventType,
-		Payload:     json.RawMessage(`{}`),
+		Payload:     payloadBytes,
 		Timestamp:   time.Now(),
-	}, nil
+	}
+	if m.feedback != nil {
+		_ = m.feedback.Append(ctx, evt)
+	}
+	return evt, nil
 }
