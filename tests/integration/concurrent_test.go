@@ -91,8 +91,8 @@ func TestConcurrentExecutions(t *testing.T) {
 	}
 }
 
-// TestConcurrentToolInvocationConflict verifies that an agent cannot invoke
-// a second tool while another tool step is already active.
+// TestConcurrentToolInvocationConflict verifies that an agent may invoke
+// a second tool while another tool step is still active (parallel steps).
 func TestConcurrentToolInvocationConflict(t *testing.T) {
 	ts := startServer(t, testPool)
 	hc := newHTTPClient(ts.URL)
@@ -141,7 +141,8 @@ func TestConcurrentToolInvocationConflict(t *testing.T) {
 		t.Fatalf("first intent not accepted: %s", firstResult.Error)
 	}
 
-	// Try to invoke a second tool while the first is still active
+	// Invoke a second tool in parallel with the first — the kernel supports
+	// concurrent active steps, so this should be accepted.
 	status, body = hc.postJSON(t, "/v0/agents/intent", map[string]any{
 		"execution_id": execID,
 		"session_id":   claim.SessionID,
@@ -153,31 +154,37 @@ func TestConcurrentToolInvocationConflict(t *testing.T) {
 			},
 		},
 	})
-	// Should fail with a conflict error (not 200 OK, or 200 with accepted=false)
-	if status == http.StatusOK {
-		var secondResult domain.IntentResult
-		if err := json.Unmarshal(body, &secondResult); err == nil && secondResult.Accepted {
-			t.Fatalf("expected second tool invocation to be rejected while first is active")
+	if status != http.StatusOK {
+		t.Fatalf("submit second intent: status %d, body: %s", status, body)
+	}
+	var secondResult domain.IntentResult
+	if err := json.Unmarshal(body, &secondResult); err != nil {
+		t.Fatalf("decode second intent result: %v", err)
+	}
+	if !secondResult.Accepted {
+		t.Fatalf("expected second parallel tool invocation to be accepted: %s", secondResult.Error)
+	}
+
+	// Complete both steps so we can cleanly finish
+	for _, stepID := range []string{firstResult.StepID, secondResult.StepID} {
+		status, body = hc.postJSON(t, "/v0/agents/step-result", map[string]any{
+			"execution_id": execID,
+			"session_id":   claim.SessionID,
+			"step_id":      stepID,
+			"success":      true,
+			"data":         map[string]string{"result": "done"},
+		})
+		if status != http.StatusOK {
+			t.Fatalf("submit step result for %s: status %d, body: %s", stepID, status, body)
 		}
 	}
-	// Any non-success is acceptable — the kernel should prevent concurrent steps.
 
-	// Complete the first step so we can cleanly finish
-	status, body = hc.postJSON(t, "/v0/agents/step-result", map[string]any{
-		"execution_id": execID,
-		"session_id":   claim.SessionID,
-		"step_id":      firstResult.StepID,
-		"success":      true,
-		"data":         map[string]string{"result": "done"},
-	})
-	if status != http.StatusOK {
-		t.Fatalf("submit step result: status %d, body: %s", status, body)
-	}
-
-	// Read the tool.result SSE
-	toolEvt := sse.readEvent(t, 5*time.Second)
-	if toolEvt.Type != "tool.result" {
-		t.Fatalf("expected tool.result, got %q", toolEvt.Type)
+	// Drain the tool.result SSE events for both steps
+	for i := 0; i < 2; i++ {
+		toolEvt := sse.readEvent(t, 5*time.Second)
+		if toolEvt.Type != "tool.result" {
+			t.Fatalf("expected tool.result, got %q", toolEvt.Type)
+		}
 	}
 
 	// Complete the execution
