@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
 )
@@ -272,5 +273,66 @@ func TestApprovalMalformedPayload(t *testing.T) {
 	state, _ := k.GetExecution(ctx, execID)
 	if state.Execution.Status != domain.ExecutionBlocked {
 		t.Fatalf("expected still blocked after malformed payload, got %s", state.Execution.Status)
+	}
+}
+
+func TestApprovalGrantedRefreshesDeadlineForNonRemoteStep(t *testing.T) {
+	k, events, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Record the original deadline from the step.created event.
+	var originalDeadline time.Time
+	for _, evt := range events.events[execID] {
+		if evt.Type == domain.EventStepCreated {
+			var p domain.StepCreatedPayload
+			json.Unmarshal(evt.Payload, &p)
+			originalDeadline = p.Deadline
+		}
+	}
+	if originalDeadline.IsZero() {
+		t.Fatal("expected step.created event with a deadline")
+	}
+
+	// Simulate time passing beyond the original deadline by sleeping briefly,
+	// so the refreshed deadline is measurably later.
+	time.Sleep(10 * time.Millisecond)
+
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":true}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify a step.dispatched event was emitted for the non-remote step.
+	var foundDispatched bool
+	var refreshedDeadline time.Time
+	for _, evt := range events.events[execID] {
+		if evt.Type == domain.EventStepDispatched && evt.StepID == stepID {
+			foundDispatched = true
+			var p domain.StepDispatchedPayload
+			json.Unmarshal(evt.Payload, &p)
+			refreshedDeadline = p.Deadline
+		}
+	}
+	if !foundDispatched {
+		t.Fatal("expected step.dispatched event after non-remote approval to refresh deadline")
+	}
+	if !refreshedDeadline.After(originalDeadline) {
+		t.Fatalf("expected refreshed deadline (%v) to be after original deadline (%v)",
+			refreshedDeadline, originalDeadline)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after approval, got %s", state.Execution.Status)
+	}
+	step := state.Steps[stepID]
+	if step == nil {
+		t.Fatal("step not found in state after approval")
+	}
+	if step.Deadline == nil || !step.Deadline.After(originalDeadline) {
+		t.Fatalf("expected step deadline to be refreshed after approval, got %v", step.Deadline)
 	}
 }
