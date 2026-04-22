@@ -725,10 +725,10 @@ func TestRuleEngineRateLimitPropagated(t *testing.T) {
 	engine, _ := NewRuleEngine(PolicyConfig{
 		Rules: []domain.PolicyRule{
 			{
-				ID:       "rate-limited-shell",
-				Priority: 1,
-				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "shell.exec"},
-				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
+				ID:        "rate-limited-shell",
+				Priority:  1,
+				When:      domain.PolicyCondition{Action: "tool.invoke", ToolID: "shell.exec"},
+				Then:      domain.PolicyAction{Decision: domain.PolicyAllow},
 				RateLimit: &domain.RateLimitConfig{Max: 10, Window: "1m"},
 			},
 		},

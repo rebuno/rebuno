@@ -768,6 +768,8 @@ func TestStepTimeoutCancelsSiblingSteps(t *testing.T) {
 	if !foundExecFailed {
 		t.Error("expected execution.failed event")
 	}
+}
+
 func TestFailStepTimeoutSkipsTerminalExecution(t *testing.T) {
 	t.Run("multiple simultaneous step timeouts emit only one execution.failed", func(t *testing.T) {
 		f := newTestFixture()

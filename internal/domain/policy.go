@@ -45,12 +45,12 @@ type ArgumentPredicate struct {
 }
 
 type PolicyCondition struct {
-	Action    string              `json:"action,omitempty" yaml:"action,omitempty"`
-	ToolID    string              `json:"tool_id,omitempty" yaml:"tool_id,omitempty"`
-	ToolIDs   []string            `json:"tool_ids,omitempty" yaml:"tool_ids,omitempty"`
-	AgentID   string              `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
-	AgentIDs  []string            `json:"agent_ids,omitempty" yaml:"agent_ids,omitempty"`
-	Labels    map[string]string   `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Action        string              `json:"action,omitempty" yaml:"action,omitempty"`
+	ToolID        string              `json:"tool_id,omitempty" yaml:"tool_id,omitempty"`
+	ToolIDs       []string            `json:"tool_ids,omitempty" yaml:"tool_ids,omitempty"`
+	AgentID       string              `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	AgentIDs      []string            `json:"agent_ids,omitempty" yaml:"agent_ids,omitempty"`
+	Labels        map[string]string   `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Arguments     []ArgumentPredicate `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 	MinStepCount  *int                `json:"min_step_count,omitempty" yaml:"min_step_count,omitempty"`
 	MaxDurationMs *int64              `json:"max_duration_ms,omitempty" yaml:"max_duration_ms,omitempty"`
