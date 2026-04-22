@@ -314,6 +314,18 @@ func TestPolicyRequireApprovalGranted(t *testing.T) {
 		t.Fatalf("expected execution.resumed after approval: %v", eventTypes(events))
 	}
 
+	// Agent reports the step as complete so the execution has no active steps.
+	status, body = hc.postJSON(t, "/v0/agents/step-result", map[string]any{
+		"execution_id": execID,
+		"session_id":   claim.SessionID,
+		"step_id":      stepID,
+		"success":      true,
+		"data":         map[string]string{"deployed": "v1.2.3"},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("submit step result: status %d, body: %s", status, body)
+	}
+
 	// Agent completes the execution
 	status, body = hc.postJSON(t, "/v0/agents/intent", map[string]any{
 		"execution_id": execID,
@@ -513,12 +525,12 @@ func TestPolicyWithLabels(t *testing.T) {
 	}
 
 	var createResp struct {
-		ExecutionID string `json:"execution_id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &createResp); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	execID := createResp.ExecutionID
+	execID := createResp.ID
 	cleanupExecution(t, testPool, execID)
 
 	evt := sse.readEvent(t, 5*time.Second)
@@ -1044,7 +1056,7 @@ func buildAgentScopedPolicy(t *testing.T) policy.Engine {
 			Rules: []domain.PolicyRule{
 				{
 					ID:       "global-deny-secrets",
-					Priority: 0,
+					Priority: 50,
 					When: domain.PolicyCondition{
 						ToolID: "secret.*",
 					},

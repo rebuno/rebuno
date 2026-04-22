@@ -99,14 +99,14 @@ func createExecution(t *testing.T, hc *httpClient, pool *pgxpool.Pool, agentID s
 	}
 
 	var resp struct {
-		ExecutionID string `json:"execution_id"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
 
-	cleanupExecution(t, pool, resp.ExecutionID)
-	return resp.ExecutionID
+	cleanupExecution(t, pool, resp.ID)
+	return resp.ID
 }
 
 type sseEvent struct {
