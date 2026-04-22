@@ -41,8 +41,8 @@ func (w *executionWatcher) Watch(executionID string) (<-chan struct{}, func()) {
 // Buffered channels (size 1) coalesce rapid notifications.
 func (w *executionWatcher) Notify(executionID string) {
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	chs := w.watchers[executionID]
-	w.mu.Unlock()
 
 	for ch := range chs {
 		select {
