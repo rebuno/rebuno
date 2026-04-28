@@ -871,6 +871,83 @@ func TestFailStepTimeoutSkipsTerminalExecution(t *testing.T) {
 	})
 }
 
+func TestCheckTimeoutsSkipsBlockedExecution(t *testing.T) {
+	f := newTestFixture()
+
+	execID := "exec-blocked-approval"
+	f.events.activeIDs = []string{execID}
+	pastDeadline := time.Now().Add(-10 * time.Minute)
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepCreated,
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1, Deadline: pastDeadline}),
+			Sequence: 3,
+		},
+		{
+			StepID:  "step-1",
+			Type:    domain.EventStepApprovalRequired,
+			Payload: mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web.search", Reason: "policy"}),
+			Sequence: 4,
+		},
+		{
+			Type:     domain.EventExecutionBlocked,
+			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "web.search"}),
+			Sequence: 5,
+		},
+	}
+
+	m := f.manager(time.Hour)
+	m.checkTimeouts(context.Background())
+
+	f.emitter.mu.Lock()
+	defer f.emitter.mu.Unlock()
+
+	if len(f.emitter.events) != 0 {
+		t.Errorf("expected no emitted events for blocked execution awaiting approval, got %d", len(f.emitter.events))
+	}
+}
+
+func TestFailStepTimeoutSkipsBlockedExecution(t *testing.T) {
+	f := newTestFixture()
+
+	execID := "exec-blocked-direct"
+	pastDeadline := time.Now().Add(-10 * time.Minute)
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepCreated,
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1, Deadline: pastDeadline}),
+			Sequence: 3,
+		},
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepApprovalRequired,
+			Payload:  mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web.search", Reason: "policy"}),
+			Sequence: 4,
+		},
+		{
+			Type:     domain.EventExecutionBlocked,
+			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "web.search"}),
+			Sequence: 5,
+		},
+	}
+
+	m := f.manager(time.Hour)
+	m.failStepTimeout(context.Background(), execID, "step-1")
+
+	f.emitter.mu.Lock()
+	defer f.emitter.mu.Unlock()
+
+	if len(f.emitter.events) != 0 {
+		t.Errorf("expected no events emitted for blocked execution, got %d", len(f.emitter.events))
+	}
+}
+
 func mustMarshal(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {

@@ -349,6 +349,10 @@ func (m *Manager) checkTimeouts(ctx context.Context) {
 			continue
 		}
 
+		if state.Execution.Status == domain.ExecutionBlocked {
+			continue
+		}
+
 		stepTimedOut := false
 		for stepID, step := range state.Steps {
 			if step.Status.IsTerminal() {
@@ -413,6 +417,9 @@ func (m *Manager) failStepTimeout(ctx context.Context, executionID, stepID strin
 		return
 	}
 	if state.Execution.Status.IsTerminal() {
+		return
+	}
+	if state.Execution.Status == domain.ExecutionBlocked {
 		return
 	}
 	step, ok := state.Steps[stepID]
