@@ -173,6 +173,7 @@ func (k *Kernel) handleApprovalSignal(
 			)
 		}
 
+		k.restoreSessionAfterApproval(ctx, executionID, state)
 		k.sendApprovalResolved(ctx, executionID, stepID, false)
 
 		k.logger.Info("approval denied",
@@ -254,18 +255,8 @@ func (k *Kernel) handleApprovalSignal(
 		)
 	}
 
+	k.restoreSessionAfterApproval(ctx, executionID, state)
 	k.sendApprovalResolved(ctx, executionID, stepID, true)
-
-	// Extend the session TTL since the agent may have been waiting for human approval.
-	session, found, sessErr := k.sessions.GetByExecution(ctx, executionID)
-	if sessErr == nil && found {
-		if err := k.sessions.Extend(ctx, session.ID, k.config.AgentTimeout); err != nil {
-			k.logger.Warn("failed to extend session after approval",
-				slog.String("session_id", session.ID),
-				slog.String("error", err.Error()),
-			)
-		}
-	}
 
 	updated, err := k.projector.Project(ctx, executionID)
 	if err == nil {
@@ -278,6 +269,68 @@ func (k *Kernel) handleApprovalSignal(
 		slog.Bool("remote", isRemote),
 	)
 	return nil
+}
+
+// restoreSessionAfterApproval extends the session TTL if it still exists,
+// or re-creates it when the session was reaped during the approval wait
+// and the agent still has an active SSE connection.
+func (k *Kernel) restoreSessionAfterApproval(ctx context.Context, executionID string, state *domain.ExecutionState) {
+	session, found, sessErr := k.sessions.GetByExecution(ctx, executionID)
+	if sessErr != nil {
+		k.logger.Warn("failed to lookup session after approval",
+			slog.String("execution_id", executionID),
+			slog.String("error", sessErr.Error()),
+		)
+		return
+	}
+
+	if found {
+		if err := k.sessions.Extend(ctx, session.ID, k.config.AgentTimeout); err != nil {
+			k.logger.Warn("failed to extend session after approval",
+				slog.String("session_id", session.ID),
+				slog.String("error", err.Error()),
+			)
+		}
+		return
+	}
+
+	connInfo, connected := k.agentHub.PickConnection(state.AgentID)
+	if !connected {
+		k.logger.Info("session expired during approval and agent disconnected",
+			slog.String("execution_id", executionID),
+			slog.String("agent_id", state.AgentID),
+		)
+		return
+	}
+
+	newSessionID := uuid.Must(uuid.NewV7()).String()
+	newSession := domain.Session{
+		ID:          newSessionID,
+		ExecutionID: executionID,
+		AgentID:     state.AgentID,
+		ConsumerID:  connInfo.ConsumerID,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(k.config.AgentTimeout),
+	}
+	if err := k.sessions.Create(ctx, newSession); err != nil {
+		k.logger.Warn("failed to re-create session after approval",
+			slog.String("execution_id", executionID),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	if hub, ok := k.agentHub.(interface {
+		SetSession(agentID, consumerID, sessionID string)
+	}); ok {
+		hub.SetSession(state.AgentID, connInfo.ConsumerID, newSessionID)
+	}
+
+	k.logger.Info("re-created session after approval (previous session expired)",
+		slog.String("execution_id", executionID),
+		slog.String("session_id", newSessionID),
+		slog.String("agent_id", state.AgentID),
+	)
 }
 
 func (k *Kernel) sendApprovalResolved(ctx context.Context, executionID, stepID string, approved bool) {
