@@ -1029,9 +1029,9 @@ func TestCheckTimeoutsSkipsBlockedExecution(t *testing.T) {
 			Sequence: 3,
 		},
 		{
-			StepID:  "step-1",
-			Type:    domain.EventStepApprovalRequired,
-			Payload: mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web.search", Reason: "policy"}),
+			StepID:   "step-1",
+			Type:     domain.EventStepApprovalRequired,
+			Payload:  mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web.search", Reason: "policy"}),
 			Sequence: 4,
 		},
 		{
