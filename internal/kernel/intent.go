@@ -46,6 +46,11 @@ func (k *Kernel) ProcessIntent(ctx context.Context, req domain.IntentRequest) (d
 			domain.ErrTerminalExecution, req.ExecutionID, state.Execution.Status)
 	}
 
+	if state.Execution.Status == domain.ExecutionBlocked {
+		return domain.IntentResult{}, fmt.Errorf("%w: execution %s is blocked pending approval",
+			domain.ErrExecutionBlocked, req.ExecutionID)
+	}
+
 	if err := validateIntent(req.Intent); err != nil {
 		return domain.IntentResult{}, err
 	}
