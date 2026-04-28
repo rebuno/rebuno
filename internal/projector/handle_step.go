@@ -190,6 +190,18 @@ func applyStepCancelled(state *domain.ExecutionState, evt *domain.Event) error {
 	if step == nil {
 		return fmt.Errorf("step.cancelled for unknown step %s", evt.StepID)
 	}
+
+	reason := "execution cancelled"
+	if evt.Payload != nil {
+		var payload domain.StepCancelledPayload
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+			return fmt.Errorf("unmarshal step.cancelled payload: %w", err)
+		}
+		if payload.Reason != "" {
+			reason = payload.Reason
+		}
+	}
+
 	now := evt.Timestamp
 	step.Status = domain.StepCancelled
 	step.CompletedAt = &now
@@ -200,7 +212,7 @@ func applyStepCancelled(state *domain.ExecutionState, evt *domain.Event) error {
 		ToolID:      step.ToolID,
 		Status:      step.Status,
 		Arguments:   step.Arguments,
-		Error:       "execution cancelled",
+		Error:       reason,
 		CompletedAt: step.CompletedAt,
 	}
 	state.History = append(state.History, entry)
