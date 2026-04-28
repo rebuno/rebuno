@@ -500,6 +500,28 @@ func TestStepCancelled(t *testing.T) {
 	}
 }
 
+func TestStepCancelledWithCustomReason(t *testing.T) {
+	state := emptyState()
+	stepID := "step-1"
+	applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
+		domain.StepCreatedPayload{ToolID: "t1"}))
+
+	err := applyStepCancelled(state, makeStepEvent("e1", stepID, 2, domain.EventStepCancelled,
+		domain.StepCancelledPayload{Reason: "agent disconnected"}))
+	if err != nil {
+		t.Fatalf("applyStepCancelled: %v", err)
+	}
+	if state.Steps[stepID].Status != domain.StepCancelled {
+		t.Errorf("expected cancelled, got %s", state.Steps[stepID].Status)
+	}
+	if len(state.History) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(state.History))
+	}
+	if state.History[0].Error != "agent disconnected" {
+		t.Errorf("expected 'agent disconnected' error in history, got %q", state.History[0].Error)
+	}
+}
+
 func TestStepFailedAddsToHistory(t *testing.T) {
 	state := emptyState()
 	stepID := "step-1"
