@@ -749,3 +749,136 @@ func TestProcessIntentRequireApprovalStepHasDeadline(t *testing.T) {
 		t.Fatalf("deadline %v is before expected minimum %v", *step.Deadline, expectedMin)
 	}
 }
+
+func TestProcessIntentRejectsIntentWhileBlocked(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Switch to require-approval policy to trigger blocked state.
+	k.policy = &mockPolicyEngine{
+		decision: domain.PolicyRequireApproval,
+		reason:   "needs human review",
+		ruleID:   "test-require-approval",
+	}
+
+	// Send an invoke_tool intent that requires approval — execution becomes blocked.
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "dangerous.tool",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.PendingApproval {
+		t.Fatal("expected PendingApproval=true")
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	if state.Execution.Status != domain.ExecutionBlocked {
+		t.Fatalf("expected blocked, got %s", state.Execution.Status)
+	}
+
+	// Switch to allow policy so any rejection is from the blocked guard, not policy.
+	k.policy = &mockPolicyEngine{
+		decision: domain.PolicyAllow,
+		ruleID:   "allow-all",
+	}
+
+	// invoke_tool should be rejected while blocked.
+	_, err = k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "another.tool",
+		},
+	})
+	if !errors.Is(err, domain.ErrExecutionBlocked) {
+		t.Fatalf("expected ErrExecutionBlocked for invoke_tool while blocked, got %v", err)
+	}
+
+	// complete should be rejected while blocked.
+	_, err = k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type: domain.IntentComplete,
+		},
+	})
+	if !errors.Is(err, domain.ErrExecutionBlocked) {
+		t.Fatalf("expected ErrExecutionBlocked for complete while blocked, got %v", err)
+	}
+
+	// fail should be rejected while blocked.
+	_, err = k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:  domain.IntentFail,
+			Error: "something went wrong",
+		},
+	})
+	if !errors.Is(err, domain.ErrExecutionBlocked) {
+		t.Fatalf("expected ErrExecutionBlocked for fail while blocked, got %v", err)
+	}
+
+	// wait should be rejected while blocked.
+	_, err = k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:       domain.IntentWait,
+			SignalType: "some_signal",
+		},
+	})
+	if !errors.Is(err, domain.ErrExecutionBlocked) {
+		t.Fatalf("expected ErrExecutionBlocked for wait while blocked, got %v", err)
+	}
+}
+
+func TestProcessIntentRejectsIntentWhileBlockedByWait(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Send a wait intent — execution becomes blocked waiting for a signal.
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:       domain.IntentWait,
+			SignalType: "human_approval",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatal("expected wait intent to be accepted")
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	if state.Execution.Status != domain.ExecutionBlocked {
+		t.Fatalf("expected blocked, got %s", state.Execution.Status)
+	}
+
+	// New intent should be rejected.
+	_, err = k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web.search",
+		},
+	})
+	if !errors.Is(err, domain.ErrExecutionBlocked) {
+		t.Fatalf("expected ErrExecutionBlocked, got %v", err)
+	}
+}

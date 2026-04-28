@@ -44,7 +44,8 @@ func writeErrorFromErr(w http.ResponseWriter, err error) {
 		errors.Is(err, domain.ErrTerminalExecution),
 		errors.Is(err, domain.ErrInvalidTransition),
 		errors.Is(err, domain.ErrExecutionTainted),
-		errors.Is(err, domain.ErrIdempotencyConflict):
+		errors.Is(err, domain.ErrIdempotencyConflict),
+		errors.Is(err, domain.ErrExecutionBlocked):
 		writeError(w, http.StatusConflict, domain.CodeConflict, err.Error())
 	case errors.Is(err, domain.ErrValidation):
 		writeError(w, http.StatusBadRequest, domain.CodeValidationError, err.Error())
