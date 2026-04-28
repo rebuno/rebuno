@@ -12,6 +12,7 @@ var (
 	ErrSessionExpired       = errors.New("session expired")
 	ErrSessionNotFound      = errors.New("session not found")
 	ErrExecutionTainted     = errors.New("execution is tainted")
+	ErrExecutionBlocked     = errors.New("execution is blocked")
 	ErrPolicyDenied         = errors.New("policy denied")
 	ErrRunnerNotFound       = errors.New("runner not found")
 	ErrStepAlreadyResolved  = errors.New("step already resolved")
