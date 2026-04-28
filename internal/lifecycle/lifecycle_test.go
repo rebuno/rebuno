@@ -7,7 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/projector"
 )
 
@@ -32,6 +36,10 @@ func newTestFixture() testFixture {
 }
 
 func (f testFixture) manager(executionTimeout time.Duration) *Manager {
+	return f.managerWithMetrics(executionTimeout, nil)
+}
+
+func (f testFixture) managerWithMetrics(executionTimeout time.Duration, metrics *observe.Metrics) *Manager {
 	logger := slog.Default()
 	proj := projector.New(f.events, f.checkpoints, logger)
 
@@ -45,8 +53,22 @@ func (f testFixture) manager(executionTimeout time.Duration) *Manager {
 		Projector:        proj,
 		Emitter:          f.emitter,
 		Logger:           logger,
+		Metrics:          metrics,
 		ExecutionTimeout: executionTimeout,
 	})
+}
+
+func newTestGauge() prometheus.Gauge {
+	return prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "test_active_executions",
+		Help: "test gauge",
+	})
+}
+
+func gaugeValue(g prometheus.Gauge) float64 {
+	var m dto.Metric
+	g.Write(&m)
+	return m.GetGauge().GetValue()
 }
 
 func createdEvent(agentID string, seq int64) domain.Event {
@@ -867,6 +889,126 @@ func TestFailStepTimeoutSkipsTerminalExecution(t *testing.T) {
 
 		if len(f.emitter.events) != 0 {
 			t.Errorf("expected no events emitted for already-failed execution, got %d", len(f.emitter.events))
+		}
+	})
+}
+
+func TestStepTimeoutDecrementsActiveExecutions(t *testing.T) {
+	f := newTestFixture()
+
+	gauge := newTestGauge()
+	gauge.Set(5)
+	metrics := &observe.Metrics{ActiveExecutions: gauge}
+
+	execID := "exec-timeout-metric"
+	f.events.activeIDs = []string{execID}
+	pastDeadline := time.Now().Add(-1 * time.Minute)
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepCreated,
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+			Sequence: 3,
+		},
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepDispatched,
+			Payload:  mustMarshal(domain.StepDispatchedPayload{RunnerID: "r1", Deadline: pastDeadline}),
+			Sequence: 4,
+		},
+	}
+
+	m := f.managerWithMetrics(time.Hour, metrics)
+	m.checkTimeouts(context.Background())
+
+	if v := gaugeValue(gauge); v != 4 {
+		t.Errorf("expected ActiveExecutions gauge to be 4 after step timeout, got %v", v)
+	}
+}
+
+func TestExecutionTimeoutDecrementsActiveExecutions(t *testing.T) {
+	f := newTestFixture()
+
+	gauge := newTestGauge()
+	gauge.Set(3)
+	metrics := &observe.Metrics{ActiveExecutions: gauge}
+
+	execID := "exec-timeout-global-metric"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		{
+			Type:      domain.EventExecutionCreated,
+			Payload:   mustMarshal(domain.ExecutionCreatedPayload{AgentID: "agent-1"}),
+			Sequence:  1,
+			Timestamp: time.Now().Add(-2 * time.Hour),
+		},
+		startedEvent(2),
+	}
+
+	m := f.managerWithMetrics(1*time.Hour, metrics)
+	m.checkTimeouts(context.Background())
+
+	if v := gaugeValue(gauge); v != 2 {
+		t.Errorf("expected ActiveExecutions gauge to be 2 after execution timeout, got %v", v)
+	}
+}
+
+func TestRecoverActiveExecutionsInitializesGauge(t *testing.T) {
+	t.Run("sets gauge to count of non-terminal executions", func(t *testing.T) {
+		f := newTestFixture()
+
+		gauge := newTestGauge()
+		gauge.Set(99)
+		metrics := &observe.Metrics{ActiveExecutions: gauge}
+
+		f.events.activeIDs = []string{"exec-running", "exec-completed"}
+		f.events.events["exec-running"] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2),
+		}
+		f.events.events["exec-completed"] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2),
+			{
+				Type:     domain.EventExecutionCompleted,
+				Payload:  mustMarshal(domain.ExecutionCompletedPayload{}),
+				Sequence: 3,
+			},
+		}
+
+		m := f.managerWithMetrics(time.Hour, metrics)
+		m.RecoverActiveExecutions(context.Background())
+
+		if v := gaugeValue(gauge); v != 1 {
+			t.Errorf("expected ActiveExecutions gauge to be 1 (only running), got %v", v)
+		}
+	})
+
+	t.Run("sets gauge to zero when all executions are terminal", func(t *testing.T) {
+		f := newTestFixture()
+
+		gauge := newTestGauge()
+		gauge.Set(10)
+		metrics := &observe.Metrics{ActiveExecutions: gauge}
+
+		f.events.activeIDs = []string{"exec-done"}
+		f.events.events["exec-done"] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2),
+			{
+				Type:     domain.EventExecutionCompleted,
+				Payload:  mustMarshal(domain.ExecutionCompletedPayload{}),
+				Sequence: 3,
+			},
+		}
+
+		m := f.managerWithMetrics(time.Hour, metrics)
+		m.RecoverActiveExecutions(context.Background())
+
+		if v := gaugeValue(gauge); v != 0 {
+			t.Errorf("expected ActiveExecutions gauge to be 0, got %v", v)
 		}
 	})
 }
