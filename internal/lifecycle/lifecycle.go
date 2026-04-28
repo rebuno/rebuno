@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/projector"
 	"github.com/rebuno/rebuno/internal/store"
 )
@@ -43,6 +44,7 @@ type Deps struct {
 	Projector        *projector.Projector
 	Emitter          EventEmitter
 	Logger           *slog.Logger
+	Metrics          *observe.Metrics
 	ExecutionTimeout time.Duration
 }
 
@@ -56,6 +58,7 @@ type Manager struct {
 	projector        *projector.Projector
 	emitter          EventEmitter
 	logger           *slog.Logger
+	metrics          *observe.Metrics
 	executionTimeout time.Duration
 }
 
@@ -74,6 +77,7 @@ func NewManager(d Deps) *Manager {
 		projector:        d.Projector,
 		emitter:          d.Emitter,
 		logger:           logger,
+		metrics:          d.Metrics,
 		executionTimeout: d.ExecutionTimeout,
 	}
 }
@@ -462,6 +466,10 @@ func (m *Manager) failStepTimeout(ctx context.Context, executionID, stepID strin
 		)
 	}
 
+	if m.metrics != nil {
+		m.metrics.ActiveExecutions.Dec()
+	}
+
 	m.logger.Info("timeout watcher: step timed out, execution failed",
 		slog.String("execution_id", executionID),
 		slog.String("step_id", stepID),
@@ -520,6 +528,10 @@ func (m *Manager) failExecutionTimeout(ctx context.Context, executionID string) 
 			slog.String("execution_id", executionID),
 			slog.String("error", err.Error()),
 		)
+	}
+
+	if m.metrics != nil {
+		m.metrics.ActiveExecutions.Dec()
 	}
 
 	m.logger.Info("timeout watcher: execution timed out",
@@ -622,6 +634,7 @@ func (m *Manager) RecoverActiveExecutions(ctx context.Context) {
 		slog.Int("count", len(ids)),
 	)
 
+	activeCount := 0
 	recovered := 0
 	for _, execID := range ids {
 		state, err := m.projector.Project(ctx, execID)
@@ -644,9 +657,15 @@ func (m *Manager) RecoverActiveExecutions(ctx context.Context) {
 			continue
 		}
 
+		activeCount++
+
 		if m.recoverExecution(ctx, execID, state.AgentID) {
 			recovered++
 		}
+	}
+
+	if m.metrics != nil {
+		m.metrics.ActiveExecutions.Set(float64(activeCount))
 	}
 
 	if recovered > 0 {

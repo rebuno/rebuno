@@ -197,6 +197,7 @@ func runServer(cfg *config.Config) error {
 		Projector:        k.Projector(),
 		Emitter:          k,
 		Logger:           logger,
+		Metrics:          metrics,
 		ExecutionTimeout: cfg.ExecutionTimeout,
 	})
 	lm.StartSessionReaper(ctx)
