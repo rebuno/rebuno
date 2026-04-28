@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 func TestSendSignal(t *testing.T) {
@@ -334,5 +335,174 @@ func TestApprovalGrantedRefreshesDeadlineForNonRemoteStep(t *testing.T) {
 	}
 	if step.Deadline == nil || !step.Deadline.After(originalDeadline) {
 		t.Fatalf("expected step deadline to be refreshed after approval, got %v", step.Deadline)
+	}
+}
+
+func TestApprovalGrantedReCreatesSessionWhenExpired(t *testing.T) {
+	k, _, agentHub, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	agentHub.hasConn = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Simulate the session reaper deleting the expired session.
+	sess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist before deletion")
+	}
+	sessions.Delete(ctx, sess.ID)
+
+	// Verify the session is gone.
+	_, found, _ = sessions.GetByExecution(ctx, execID)
+	if found {
+		t.Fatal("expected session to be deleted")
+	}
+
+	// Approve the step — should re-create the session.
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":true}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after approval, got %s", state.Execution.Status)
+	}
+
+	// Verify a new session was created.
+	newSess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected new session to exist after approval re-creation")
+	}
+	if newSess.ID == sess.ID {
+		t.Fatal("expected a new session ID, got the same old one")
+	}
+	if newSess.AgentID != "agent-1" {
+		t.Fatalf("expected agent_id 'agent-1', got %q", newSess.AgentID)
+	}
+	if newSess.ConsumerID != "consumer-1" {
+		t.Fatalf("expected consumer_id 'consumer-1', got %q", newSess.ConsumerID)
+	}
+	if newSess.IsExpired() {
+		t.Fatal("expected new session to not be expired")
+	}
+
+	// Verify the agent can submit step results with the new session.
+	err = k.SubmitStepResult(ctx, StepResultRequest{
+		ExecutionID: execID,
+		SessionID:   newSess.ID,
+		StepID:      stepID,
+		Success:     true,
+		Data:        json.RawMessage(`{"result":"done"}`),
+	})
+	if err != nil {
+		t.Fatalf("expected agent to submit step result with new session, got error: %v", err)
+	}
+}
+
+func TestApprovalDeniedReCreatesSessionWhenExpired(t *testing.T) {
+	k, _, agentHub, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	agentHub.hasConn = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Simulate the session reaper deleting the expired session.
+	sess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist before deletion")
+	}
+	sessions.Delete(ctx, sess.ID)
+
+	// Deny the step — should re-create the session.
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":false,"reason":"nope"}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after denial, got %s", state.Execution.Status)
+	}
+
+	// Verify a new session was created.
+	newSess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected new session to exist after approval denial")
+	}
+	if newSess.ID == sess.ID {
+		t.Fatal("expected a new session ID, got the same old one")
+	}
+}
+
+func TestApprovalNoSessionReCreationWhenAgentDisconnected(t *testing.T) {
+	k, _, agentHub, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	// Start with agent connected for setup.
+	agentHub.hasConn = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Simulate session reaped and agent disconnected.
+	sess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist")
+	}
+	sessions.Delete(ctx, sess.ID)
+	agentHub.mu.Lock()
+	agentHub.hasConn = false
+	agentHub.mu.Unlock()
+
+	// Approve — should succeed but NOT re-create session.
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":true}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Session should not exist since agent is disconnected.
+	_, found, _ = sessions.GetByExecution(ctx, execID)
+	if found {
+		t.Fatal("expected no session when agent is disconnected")
+	}
+}
+
+func TestApprovalExtendsExistingSession(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Record expiry before approval.
+	sess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist")
+	}
+	expiryBefore := sess.ExpiresAt
+
+	time.Sleep(10 * time.Millisecond)
+
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":true}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Session should still exist with extended expiry.
+	sess, found, _ = sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to still exist")
+	}
+	if !sess.ExpiresAt.After(expiryBefore) {
+		t.Fatalf("expected session expiry to be extended, before=%v after=%v",
+			expiryBefore, sess.ExpiresAt)
 	}
 }
