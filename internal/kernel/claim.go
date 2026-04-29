@@ -29,13 +29,10 @@ type StepResult struct {
 	Error       string            `json:"error,omitempty"`
 }
 
+// buildClaimResult builds the claim payload and transitions the execution to
+// running.  The caller MUST already hold the "execution:<id>" lock (or
+// guarantee there is no concurrent access, e.g. during initial creation).
 func (k *Kernel) buildClaimResult(ctx context.Context, executionID, agentID, consumerID string) (*ClaimResult, error) {
-	release, err := k.locker.Acquire(ctx, "execution:"+executionID)
-	if err != nil {
-		return nil, fmt.Errorf("acquiring lock for %s: %w", executionID, err)
-	}
-	defer release()
-
 	state, err := k.projector.Project(ctx, executionID)
 	if err != nil {
 		return nil, fmt.Errorf("projecting execution %s: %w", executionID, err)

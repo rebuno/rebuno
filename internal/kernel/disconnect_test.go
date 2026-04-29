@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/memstore"
 )
 
 func TestHandleAgentDisconnectCancelsOrphanedSteps(t *testing.T) {
@@ -252,5 +253,55 @@ func TestHandleAgentDisconnectTerminalExecutionNoOp(t *testing.T) {
 
 	if countAfter != countBefore {
 		t.Fatalf("expected no new events after disconnect on terminal execution, before=%d after=%d", countBefore, countAfter)
+	}
+}
+
+func TestHandleAgentDisconnectNoDeadlockWithRealLocker(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newConnectedMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      memstore.NewLocker(),
+		Policy:      newAllowAllPolicy(),
+	})
+
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	agentHub.mu.Lock()
+	agentHub.hasConn = true
+	agentHub.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		k.HandleAgentDisconnect(ctx, sessionID)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("HandleAgentDisconnect deadlocked — buildClaimResult tried to re-acquire the execution lock")
+	}
+
+	state, err := k.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after reassignment, got %s", state.Execution.Status)
 	}
 }
