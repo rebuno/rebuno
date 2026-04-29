@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/memstore"
 )
 
 func TestCreateExecution(t *testing.T) {
@@ -200,5 +201,45 @@ func TestCancelRunningExecutionWithActiveStep(t *testing.T) {
 	state, _ := k.GetExecution(ctx, execID)
 	if state.Execution.Status != domain.ExecutionCancelled {
 		t.Fatalf("expected cancelled, got %s", state.Execution.Status)
+	}
+}
+
+func TestAssignPendingExecutionsWithRealLocker(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newConnectedMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      memstore.NewLocker(),
+		Policy:      newAllowAllPolicy(),
+	})
+
+	ctx := context.Background()
+
+	execID, err := k.CreateExecution(ctx, CreateExecutionRequest{
+		AgentID: "agent-1",
+		Input:   json.RawMessage(`{"q":"test"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state, err := k.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running, got %s", state.Execution.Status)
 	}
 }

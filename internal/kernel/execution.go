@@ -121,7 +121,16 @@ func (k *Kernel) AssignPendingExecutions(ctx context.Context, agentID string) {
 			continue
 		}
 
+		release, err := k.locker.Acquire(ctx, "execution:"+execID)
+		if err != nil {
+			k.logger.Warn("assign pending: failed to acquire lock",
+				slog.String("execution_id", execID),
+				slog.String("error", err.Error()),
+			)
+			continue
+		}
 		k.tryAssignExecution(ctx, execID, agentID)
+		release()
 	}
 }
 
