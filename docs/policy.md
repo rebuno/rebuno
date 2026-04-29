@@ -119,14 +119,14 @@ when:
   min_step_count: 100   # fires at 100+ steps
 ```
 
-#### max_duration_ms
+#### min_duration_ms
 
-The rule matches when the execution's elapsed time exceeds this value in milliseconds. Use with a `deny` decision to cap execution duration.
+The rule matches when the execution's elapsed time meets or exceeds this value in milliseconds. Use with a `deny` decision to cap execution duration.
 
 ```yaml
 when:
   action: "tool.invoke"
-  max_duration_ms: 3600000   # fires after 1 hour
+  min_duration_ms: 3600000   # fires after 1 hour
 ```
 
 ### schedule
@@ -316,7 +316,7 @@ rules:
     priority: 2
     when:
       action: "tool.invoke"
-      max_duration_ms: 3600000
+      min_duration_ms: 3600000
     then:
       decision: "deny"
       reason: "Execution exceeded 1 hour"
