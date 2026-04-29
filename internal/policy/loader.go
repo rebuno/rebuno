@@ -111,8 +111,8 @@ func validate(cfg *PolicyConfig) error {
 			return fmt.Errorf("%w: rule %q min_step_count must be non-negative",
 				domain.ErrInvalidConfiguration, r.ID)
 		}
-		if r.When.MaxDurationMs != nil && *r.When.MaxDurationMs <= 0 {
-			return fmt.Errorf("%w: rule %q max_duration_ms must be positive",
+		if r.When.MinDurationMs != nil && *r.When.MinDurationMs <= 0 {
+			return fmt.Errorf("%w: rule %q min_duration_ms must be positive",
 				domain.ErrInvalidConfiguration, r.ID)
 		}
 		if r.When.Schedule != "" {

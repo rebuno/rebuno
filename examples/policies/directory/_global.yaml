@@ -14,7 +14,7 @@ rules:
     priority: 2
     when:
       action: "tool.invoke"
-      max_duration_ms: 3600000
+      min_duration_ms: 3600000
     then:
       decision: "deny"
       reason: "Execution exceeded 1 hour"

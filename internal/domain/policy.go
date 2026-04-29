@@ -53,7 +53,7 @@ type PolicyCondition struct {
 	Labels        map[string]string   `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Arguments     []ArgumentPredicate `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 	MinStepCount  *int                `json:"min_step_count,omitempty" yaml:"min_step_count,omitempty"`
-	MaxDurationMs *int64              `json:"max_duration_ms,omitempty" yaml:"max_duration_ms,omitempty"`
+	MinDurationMs *int64              `json:"min_duration_ms,omitempty" yaml:"min_duration_ms,omitempty"`
 	Schedule      string              `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 }
 
