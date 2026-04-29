@@ -620,7 +620,7 @@ func TestRuleEngineStepCountCondition(t *testing.T) {
 }
 
 func TestRuleEngineDurationCondition(t *testing.T) {
-	maxDuration := int64(60000) // 60 seconds
+	minDuration := int64(60000) // 60 seconds
 	engine, _ := NewRuleEngine(PolicyConfig{
 		Rules: []domain.PolicyRule{
 			{
@@ -628,7 +628,7 @@ func TestRuleEngineDurationCondition(t *testing.T) {
 				Priority: 1,
 				When: domain.PolicyCondition{
 					Action:        "tool.invoke",
-					MaxDurationMs: &maxDuration,
+					MinDurationMs: &minDuration,
 				},
 				Then: domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "execution too long"},
 			},
