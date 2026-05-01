@@ -184,7 +184,20 @@ func (k *Kernel) RecordStepStarted(ctx context.Context, executionID, stepID, run
 }
 
 func (k *Kernel) UnregisterRunner(ctx context.Context, runnerID string) error {
+	k.tools.DropRunner(runnerID)
 	return k.runners.Delete(ctx, runnerID)
+}
+
+func (k *Kernel) PublishTools(runnerID string, schemas []domain.ToolSchema) {
+	k.tools.Publish(runnerID, schemas)
+}
+
+func (k *Kernel) ListTools(prefix string) []domain.ToolSchema {
+	return k.tools.List(prefix)
+}
+
+func (k *Kernel) DropRunnerTools(runnerID string) {
+	k.tools.DropRunner(runnerID)
 }
 
 func (k *Kernel) ListExecutions(ctx context.Context, filter domain.ExecutionFilter, cursor string, limit int) ([]domain.ExecutionSummary, string, error) {
