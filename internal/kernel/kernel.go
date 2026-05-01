@@ -54,6 +54,7 @@ type Kernel struct {
 	watcher     *executionWatcher
 	jobQueue    store.JobQueue
 	rateLimiter ratelimit.Limiter
+	tools       *toolDirectory
 
 	retryWg   sync.WaitGroup
 	done      chan struct{}
@@ -130,6 +131,7 @@ func NewKernel(d Deps) *Kernel {
 		watcher:     newExecutionWatcher(),
 		jobQueue:    jobQueue,
 		rateLimiter: rl,
+		tools:       newToolDirectory(logger),
 		done:        make(chan struct{}),
 	}
 }

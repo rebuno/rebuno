@@ -117,3 +117,29 @@ func (h *runnerHandlers) updateCapabilities(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+type publishToolsRequest struct {
+	Tools []domain.ToolSchema `json:"tools"`
+}
+
+// publishTools accepts a runner's full tool schema set and updates both the
+// kernel's schema cache and its capability index in one call. Replaces (not
+// merges) any previously published set for this runner.
+func (h *runnerHandlers) publishTools(w http.ResponseWriter, r *http.Request) {
+	runnerID := chi.URLParam(r, "id")
+	var req publishToolsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorFromErr(w, err)
+		return
+	}
+
+	h.kernel.PublishTools(runnerID, req.Tools)
+
+	toolIDs := make([]string, 0, len(req.Tools))
+	for _, t := range req.Tools {
+		toolIDs = append(toolIDs, t.ID)
+	}
+	h.hub.UpdateCapabilities(runnerID, toolIDs)
+
+	writeNoContent(w)
+}

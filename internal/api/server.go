@@ -60,6 +60,7 @@ func (s *Server) routes(h *hub.Hub, rh *hub.RunnerHub, bearerToken string, corsO
 	exec := &executionHandlers{kernel: s.kernel}
 	agent := &agentHandlers{kernel: s.kernel}
 	runner := &runnerHandlers{kernel: s.kernel, hub: rh}
+	tools := &toolHandlers{kernel: s.kernel}
 	sse := &sseHandlers{hub: h, kernel: s.kernel, logger: s.logger}
 	runnerSSE := &runnerSSEHandlers{hub: rh, kernel: s.kernel, logger: s.logger}
 
@@ -94,8 +95,13 @@ func (s *Server) routes(h *hub.Hub, rh *hub.RunnerHub, bearerToken string, corsO
 			r.Route("/{id}", func(r chi.Router) {
 				r.Post("/results", runner.submitResult)
 				r.Post("/capabilities", runner.updateCapabilities)
+				r.Post("/tools", runner.publishTools)
 				r.Delete("/", runner.unregister)
 			})
+		})
+
+		r.Route("/v0/tools", func(r chi.Router) {
+			r.Get("/", tools.list)
 		})
 	})
 }

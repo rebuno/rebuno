@@ -68,7 +68,13 @@ func (h *runnerSSEHandlers) connect(w http.ResponseWriter, r *http.Request) {
 
 	conn := h.hub.Register(runnerID, consumerID, capabilities)
 	connGen := conn.Generation()
-	defer h.hub.Unregister(runnerID, consumerID, connGen)
+	defer func() {
+		if h.hub.Unregister(runnerID, consumerID, connGen) {
+			// Last consumer for this runner_id disconnected — drop schemas
+			// so agents stop seeing tools no runner can handle.
+			h.kernel.DropRunnerTools(runnerID)
+		}
+	}()
 
 	h.logger.Info("runner SSE connection established",
 		slog.String("runner_id", runnerID),

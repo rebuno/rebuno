@@ -63,29 +63,30 @@ func (h *RunnerHub) Register(runnerID, consumerID string, capabilities []string)
 	return conn
 }
 
-func (h *RunnerHub) Unregister(runnerID, consumerID string, generation uint64) {
+func (h *RunnerHub) Unregister(runnerID, consumerID string, generation uint64) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	consumers, ok := h.runners[runnerID]
 	if !ok {
-		return
+		return false
 	}
 
 	conn, ok := consumers[consumerID]
 	if !ok {
-		return
+		return false
 	}
 
 	if conn.generation != generation {
-		return
+		return false
 	}
 
 	close(conn.EventCh)
 	delete(consumers, consumerID)
 	h.removeFromCapIndex(runnerID, consumerID)
 
-	if len(consumers) == 0 {
+	lastGone := len(consumers) == 0
+	if lastGone {
 		delete(h.runners, runnerID)
 	}
 
@@ -93,6 +94,7 @@ func (h *RunnerHub) Unregister(runnerID, consumerID string, generation uint64) {
 		slog.String("runner_id", runnerID),
 		slog.String("consumer_id", consumerID),
 	)
+	return lastGone
 }
 
 func (h *RunnerHub) Dispatch(toolID string, msg store.RunnerMessage) (store.RunnerConnInfo, bool) {
