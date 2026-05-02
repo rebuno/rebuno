@@ -253,9 +253,11 @@ func (m *mockSessionStore) DeleteExpired(_ context.Context, _ time.Duration) (in
 }
 
 type mockAgentHub struct {
-	mu      sync.Mutex
-	sent    []mockHubMessage
-	hasConn bool
+	mu         sync.Mutex
+	sent       []mockHubMessage
+	hasConn    bool
+	connInfo   store.ConnInfo
+	pickResult bool
 }
 
 type mockHubMessage struct {
@@ -283,7 +285,9 @@ func (m *mockAgentHub) SendToSession(_ string, _ store.AgentMessage) bool {
 }
 
 func (m *mockAgentHub) PickConnection(_ string) (store.ConnInfo, bool) {
-	return store.ConnInfo{}, false
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.connInfo, m.pickResult
 }
 
 func (m *mockAgentHub) HasConnections(_ string) bool {

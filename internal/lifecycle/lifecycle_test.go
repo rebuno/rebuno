@@ -13,6 +13,7 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/projector"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 type testFixture struct {
@@ -1087,6 +1088,105 @@ func TestFailStepTimeoutSkipsBlockedExecution(t *testing.T) {
 
 	if len(f.emitter.events) != 0 {
 		t.Errorf("expected no events emitted for blocked execution, got %d", len(f.emitter.events))
+	}
+}
+
+func TestReapSessionsRunningExecutionWithConnectedAgentRecreatessSession(t *testing.T) {
+	f := newTestFixture()
+	f.sessions.deletedExpired = 1
+	f.agentHub.hasConn = true
+	f.agentHub.pickResult = true
+	f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID := "exec-running"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+	}
+
+	m := f.manager(time.Hour)
+	m.reapSessions(context.Background())
+
+	// The reaper should have recreated a session for the running execution.
+	f.sessions.mu.Lock()
+	var foundSession bool
+	for _, s := range f.sessions.sessions {
+		if s.ExecutionID == execID && s.AgentID == "agent-1" && s.ConsumerID == "consumer-1" {
+			foundSession = true
+		}
+	}
+	f.sessions.mu.Unlock()
+
+	if !foundSession {
+		t.Fatal("expected session to be recreated for running execution with connected agent")
+	}
+
+	// The execution should NOT be reset to pending — it should stay running.
+	if _, ok := f.events.statusUpdates[execID]; ok {
+		t.Fatal("did not expect status update; execution should remain running with new session")
+	}
+}
+
+func TestReapSessionsRunningExecutionWithConnectedAgentNoPickFallsThrough(t *testing.T) {
+	f := newTestFixture()
+	f.sessions.deletedExpired = 1
+	f.agentHub.hasConn = true
+	f.agentHub.pickResult = false // PickConnection returns false
+
+	execID := "exec-running"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+	}
+
+	m := f.manager(time.Hour)
+	m.reapSessions(context.Background())
+
+	// No session should be created since PickConnection failed.
+	f.sessions.mu.Lock()
+	sessionCount := len(f.sessions.sessions)
+	f.sessions.mu.Unlock()
+
+	if sessionCount != 0 {
+		t.Fatalf("expected no sessions when PickConnection fails, got %d", sessionCount)
+	}
+}
+
+func TestReapSessionsBlockedExecutionWithConnectedAgentSkipped(t *testing.T) {
+	f := newTestFixture()
+	f.sessions.deletedExpired = 1
+	f.agentHub.hasConn = true
+	f.agentHub.pickResult = true
+	f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID := "exec-blocked"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+		{
+			Type:     domain.EventExecutionBlocked,
+			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "signal", Ref: "approval"}),
+			Sequence: 3,
+		},
+	}
+
+	m := f.manager(time.Hour)
+	m.reapSessions(context.Background())
+
+	// Blocked execution with connected agent should be skipped (not recreated, not orphaned).
+	f.sessions.mu.Lock()
+	sessionCount := len(f.sessions.sessions)
+	f.sessions.mu.Unlock()
+
+	if sessionCount != 0 {
+		t.Fatalf("expected no session recreation for blocked execution, got %d", sessionCount)
+	}
+
+	if _, ok := f.events.statusUpdates[execID]; ok {
+		t.Fatal("did not expect status update for blocked execution with connected agent")
 	}
 }
 

@@ -46,6 +46,7 @@ type Deps struct {
 	Logger           *slog.Logger
 	Metrics          *observe.Metrics
 	ExecutionTimeout time.Duration
+	AgentTimeout     time.Duration
 }
 
 type Manager struct {
@@ -60,12 +61,17 @@ type Manager struct {
 	logger           *slog.Logger
 	metrics          *observe.Metrics
 	executionTimeout time.Duration
+	agentTimeout     time.Duration
 }
 
 func NewManager(d Deps) *Manager {
 	logger := d.Logger
 	if logger == nil {
 		logger = slog.Default()
+	}
+	agentTimeout := d.AgentTimeout
+	if agentTimeout == 0 {
+		agentTimeout = 30 * time.Second
 	}
 	return &Manager{
 		events:           d.Events,
@@ -79,6 +85,7 @@ func NewManager(d Deps) *Manager {
 		logger:           logger,
 		metrics:          d.Metrics,
 		executionTimeout: d.ExecutionTimeout,
+		agentTimeout:     agentTimeout,
 	}
 }
 
@@ -164,10 +171,14 @@ func (m *Manager) reapSessions(ctx context.Context) {
 			continue
 		}
 		if m.agentHub.HasConnections(state.AgentID) {
-			m.logger.Debug("session reaper: agent still connected, skipping",
-				slog.String("execution_id", execID),
-				slog.String("agent_id", state.AgentID),
-			)
+			if state.Execution.Status == domain.ExecutionRunning {
+				m.recreateSessionForRunning(ctx, execID, state.AgentID)
+			} else {
+				m.logger.Debug("session reaper: agent still connected, skipping",
+					slog.String("execution_id", execID),
+					slog.String("agent_id", state.AgentID),
+				)
+			}
 			continue
 		}
 
@@ -219,6 +230,46 @@ func (m *Manager) handleOrphanedExecution(ctx context.Context, executionID strin
 	}
 
 	m.reassignIfNeeded(ctx, executionID, state.AgentID, "session reaper")
+}
+
+func (m *Manager) recreateSessionForRunning(ctx context.Context, executionID, agentID string) {
+	connInfo, connected := m.agentHub.PickConnection(agentID)
+	if !connected {
+		m.logger.Warn("session reaper: agent reported connected but no connection found",
+			slog.String("execution_id", executionID),
+			slog.String("agent_id", agentID),
+		)
+		return
+	}
+
+	newSessionID := uuid.Must(uuid.NewV7()).String()
+	newSession := domain.Session{
+		ID:          newSessionID,
+		ExecutionID: executionID,
+		AgentID:     agentID,
+		ConsumerID:  connInfo.ConsumerID,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(m.agentTimeout),
+	}
+	if err := m.sessions.Create(ctx, newSession); err != nil {
+		m.logger.Warn("session reaper: failed to recreate session for running execution",
+			slog.String("execution_id", executionID),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	if hub, ok := m.agentHub.(interface {
+		SetSession(agentID, consumerID, sessionID string)
+	}); ok {
+		hub.SetSession(agentID, connInfo.ConsumerID, newSessionID)
+	}
+
+	m.logger.Info("session reaper: recreated session for running execution",
+		slog.String("execution_id", executionID),
+		slog.String("session_id", newSessionID),
+		slog.String("agent_id", agentID),
+	)
 }
 
 func (m *Manager) reassignIfNeeded(ctx context.Context, executionID, agentID, caller string) bool {

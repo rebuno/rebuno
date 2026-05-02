@@ -149,6 +149,7 @@ func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string,
 		Logger:           logger,
 		Metrics:          metrics,
 		ExecutionTimeout: kcfg.ExecutionTimeout,
+		AgentTimeout:     kcfg.AgentTimeout,
 	})
 	lm.StartSessionReaper(ctx)
 	lm.StartTimeoutWatcher(ctx)
