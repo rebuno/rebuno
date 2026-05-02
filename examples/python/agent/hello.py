@@ -10,7 +10,7 @@ logger = logging.getLogger("hello-agent")
 
 agent = Agent(
     "hello",
-    kernel_url=os.environ.get("REBUNO_KERNEL_URL", "http://localhost:8001"),
+    kernel_url=os.environ.get("REBUNO_KERNEL_URL", "http://localhost:8080"),
 )
 
 
