@@ -353,6 +353,17 @@ func (m *Manager) checkTimeouts(ctx context.Context) {
 			continue
 		}
 
+		// Execution-level timeout applies to ALL non-terminal statuses,
+		// including blocked executions waiting for approval.
+		if m.executionTimeout > 0 && !state.Execution.CreatedAt.IsZero() {
+			deadline := state.Execution.CreatedAt.Add(m.executionTimeout)
+			if now.After(deadline) {
+				m.failExecutionTimeout(ctx, execID)
+				continue
+			}
+		}
+
+		// Skip step-level timeout checks for blocked executions.
 		if state.Execution.Status == domain.ExecutionBlocked {
 			continue
 		}
@@ -369,13 +380,6 @@ func (m *Manager) checkTimeouts(ctx context.Context) {
 		}
 		if stepTimedOut {
 			continue
-		}
-
-		if m.executionTimeout > 0 && !state.Execution.CreatedAt.IsZero() {
-			deadline := state.Execution.CreatedAt.Add(m.executionTimeout)
-			if now.After(deadline) {
-				m.failExecutionTimeout(ctx, execID)
-			}
 		}
 	}
 }
