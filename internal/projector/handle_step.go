@@ -176,6 +176,9 @@ func applyStepRetried(state *domain.ExecutionState, evt *domain.Event) error {
 	step.Error = ""
 	step.CompletedAt = nil
 	step.Retryable = false
+	step.Deadline = nil
+	step.DispatchedAt = nil
+	step.StartedAt = nil
 
 	if state.ActiveSteps == nil {
 		state.ActiveSteps = make(map[string]*domain.Step)
