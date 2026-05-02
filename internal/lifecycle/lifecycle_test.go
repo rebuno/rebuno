@@ -1091,7 +1091,7 @@ func TestFailStepTimeoutSkipsBlockedExecution(t *testing.T) {
 	}
 }
 
-func TestReapSessionsRunningExecutionWithConnectedAgentRecreatessSession(t *testing.T) {
+func TestReapSessionsRunningExecutionWithConnectedAgentRecreatesSession(t *testing.T) {
 	f := newTestFixture()
 	f.sessions.deletedExpired = 1
 	f.agentHub.hasConn = true
