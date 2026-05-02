@@ -136,6 +136,7 @@ func (m *mockEventStore) ListTerminalExecutions(_ context.Context, _ int64, _ in
 }
 
 type mockCheckpointStore struct {
+	mu          sync.Mutex
 	checkpoints map[string]*domain.Checkpoint
 }
 
@@ -144,16 +145,22 @@ func newMockCheckpointStore() *mockCheckpointStore {
 }
 
 func (m *mockCheckpointStore) Get(_ context.Context, executionID string) (*domain.Checkpoint, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	cp, ok := m.checkpoints[executionID]
 	return cp, ok, nil
 }
 
 func (m *mockCheckpointStore) Save(_ context.Context, checkpoint domain.Checkpoint) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.checkpoints[checkpoint.ExecutionID] = &checkpoint
 	return nil
 }
 
 func (m *mockCheckpointStore) Delete(_ context.Context, executionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.checkpoints, executionID)
 	return nil
 }
