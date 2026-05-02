@@ -9,12 +9,11 @@ The shell.exec tool is governed by policy:
 import asyncio
 import logging
 import os
-from typing import Any
 
-from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
+from langchain_openai import ChatOpenAI
 
-from rebuno import AsyncAgentContext, AsyncBaseAgent
+from rebuno import Agent, tool
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
@@ -27,73 +26,48 @@ SYSTEM_PROMPT = (
     "safe read-only commands when possible."
 )
 
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
-class ShellAgent(AsyncBaseAgent):
-    """LangGraph agent that executes shell commands under kernel policy."""
-
-    def __init__(self, **kwargs: Any):
-        super().__init__(**kwargs)
-        self._model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-
-    async def process(self, ctx: AsyncAgentContext) -> dict:
-        query = ""
-        if isinstance(ctx.input, dict):
-            query = ctx.input.get("query", "")
-        elif isinstance(ctx.input, str):
-            query = ctx.input
-
-        if not query:
-            return {"error": "No query provided"}
-
-        logger.info("Processing query: %s", query)
-
-        tools = ctx.get_tools()
-
-        llm = ChatOpenAI(model=self._model, temperature=0)
-        agent = create_agent(
-            model=llm,
-            tools=tools,
-            system_prompt=SYSTEM_PROMPT,
-        )
-
-        result = await agent.ainvoke(
-            {"messages": [{"role": "user", "content": query}]}
-        )
-
-        final_message = result["messages"][-1].content
-        logger.info("Agent finished: %s", final_message)
-
-        return {"query": query, "answer": final_message}
-
-
-agent = ShellAgent(
-    agent_id="shell-assistant",
+agent = Agent(
+    "shell-assistant",
     kernel_url=os.environ.get("REBUNO_KERNEL_URL", "http://localhost:8080"),
     api_key="your-secret-token",
 )
 
-@agent.tool("shell.exec")
+
+@tool("shell.exec")
 async def shell_exec(command: str, timeout: int = 30) -> dict:
     """Execute a shell command."""
     logger.info("Executing: %s", command)
+    proc = await asyncio.create_subprocess_shell(
+        command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
     try:
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
-        return {
-            "exit_code": proc.returncode,
-            "stdout": stdout.decode(errors="replace"),
-            "stderr": stderr.decode(errors="replace"),
-        }
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
         return {"exit_code": -1, "stdout": "", "stderr": "Command timed out"}
+    return {
+        "exit_code": proc.returncode,
+        "stdout": stdout.decode(errors="replace"),
+        "stderr": stderr.decode(errors="replace"),
+    }
+
+
+async def process(query: str) -> dict:
+    logger.info("Processing query: %s", query)
+
+    llm = ChatOpenAI(model=MODEL, temperature=0)
+    graph = create_agent(model=llm, tools=[shell_exec], system_prompt=SYSTEM_PROMPT)
+
+    result = await graph.ainvoke({"messages": [{"role": "user", "content": query}]})
+    answer = result["messages"][-1].content
+    logger.info("Agent finished: %s", answer)
+
+    return {"query": query, "answer": answer}
 
 
 if __name__ == "__main__":
-    asyncio.run(agent.run())
+    agent.run(process)

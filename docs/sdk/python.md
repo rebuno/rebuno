@@ -6,274 +6,317 @@ Install the SDK:
 pip install rebuno
 ```
 
+The public surface is small: `Agent`, `Client`, `Runner`, `tool`, `MCPServer`, `remote`, `execution`.
+
 ## Authentication
 
-The kernel uses `--bearer-token` / `REBUNO_BEARER_TOKEN` to configure bearer token authentication. The Python SDK accepts an `api_key` parameter which maps to this bearer token. The SDK sends the token as an `Authorization: Bearer <api_key>` header on all HTTP requests and SSE connections to the kernel.
+The kernel uses `--bearer-token` / `REBUNO_BEARER_TOKEN` to configure bearer token authentication. The Python SDK accepts an `api_key` parameter which maps to this bearer token, sent as an `Authorization: Bearer <api_key>` header on all HTTP requests and SSE connections.
 
 ```python
-agent = MyAgent(
-    agent_id="researcher",
-    kernel_url="http://localhost:8080",
-    api_key="your-secret-token",  # maps to --bearer-token on the kernel
-)
+agent = Agent("researcher", kernel_url="http://localhost:8080", api_key="your-secret-token")
 ```
 
-In development mode (when the kernel is started without `--bearer-token`), `api_key` can be omitted.
+When constructed without arguments, `Agent`, `Client`, and `Runner` read `REBUNO_URL` and `REBUNO_API_KEY` from the environment. In development mode (kernel started without `--bearer-token`), `api_key` can be omitted.
 
 ## Writing an Agent
 
-### Local Tools
-
-Register tools with `@agent.tool()`. The agent holds the implementation and executes it in-process after the kernel approves the intent.
+An agent is a function plus a one-line entry point. The handler signature is the input schema — required parameters become required input fields; defaults make them optional.
 
 ```python
-import asyncio
-from rebuno import AsyncBaseAgent, AsyncAgentContext
+from rebuno import Agent, execution
 
-class MyAgent(AsyncBaseAgent):
-    async def process(self, ctx: AsyncAgentContext) -> dict:
-        tools = ctx.get_tools()
-        result = await tools[0]("what is rebuno")
-        return {"answer": result}
+agent = Agent("my-agent")
 
-agent = MyAgent(agent_id="my-agent", kernel_url="http://localhost:8080")
+async def process(prompt: str) -> dict:
+    return {"answer": prompt.upper(), "execution_id": execution.id}
 
-@agent.tool("web.search")
-async def web_search(query: str) -> dict:
-    """Search the web for information."""
-    return {"results": await do_search(query)}
+agent.run(process)
+```
 
-asyncio.run(agent.run())
+`execution` is a module-level proxy resolving to the current `ExecutionState` via a `ContextVar`. Use it inside `process` (or any tool) to access `id`, `session_id`, `input`, `labels`, `history`. Outside an active execution, attribute access raises `RuntimeError`.
+
+### Input shapes
+
+The framework introspects the handler signature once and routes `claim.input` to it three ways:
+
+```python
+# Kwargs (most common)
+async def process(prompt: str, repo_url: str = ""):
+    ...
+
+# Pydantic model — validation, defaults, JSON Schema
+class Input(BaseModel):
+    prompt: str
+    repo_url: str = ""
+
+async def process(input: Input):
+    ...
+
+# Raw dict — opaque passthrough
+async def process(input: dict):
+    ...
+```
+
+A missing required input fails the execution with a clear error message before the handler runs.
+
+### Local Tools
+
+Tools are plain module-level functions. `@tool` registers them globally; the wrapper submits a kernel intent before running the body.
+
+```python
+from rebuno import tool
+
+@tool("web.search")
+async def search(query: str, limit: int = 10) -> dict:
+    """Search the web."""
+    return {"results": await do_search(query, limit)}
+```
+
+Pass them to your framework as a list:
+
+```python
+async def process(prompt: str):
+    graph = create_agent(llm, [search])
+    return await graph.ainvoke({"messages": [HumanMessage(prompt)]})
 ```
 
 ### Remote Tools
 
-Declare tool schemas with `@agent.remote_tool()`. The function body is never called -- a separate runner process handles execution.
+`@tool(remote=True)` declares a tool whose body lives on a runner. The body is a stub — the kernel routes execution. Useful for type-checked imperative calls in agent code:
 
 ```python
-@agent.remote_tool("web.search")
-async def web_search(query: str) -> dict:
-    """Search the web for information."""
-    ...  # body is never called
+@tool("compute.heavy", remote=True)
+async def heavy(data: str) -> str:
+    """Run on a runner."""
+
+# Inside a handler:
+result = await heavy(data="x")
 ```
 
-The rest of the agent code is identical. `ctx.get_tools()` returns callables that route to the runner transparently.
+For LLM-driven discovery (no source-coupling), use `remote.Tools(prefix)` instead — see [Remote tool discovery](#remote-tool-discovery).
 
-### Mixing Local and Remote Tools
+### Mixing local, remote, and MCP
 
-An agent can use both. The SDK routes each call to the right place.
+Local `@tool` functions, remote `@tool(remote=True)` stubs, MCP tools, and discovered remote tools can all coexist in one tool list:
 
 ```python
-@agent.tool("calculator")
-def calculator(expression: str) -> dict:
-    """Evaluate a math expression."""
-    return {"result": eval(expression)}
-
-@agent.remote_tool("web.search")
-async def web_search(query: str) -> dict:
-    """Search the web for information."""
-    ...
+graph = create_agent(llm, [
+    search,                  # local @tool
+    heavy,                   # remote @tool stub
+    *github.tools,           # local MCP (MCPServer)
+    *compute.tools,          # remote discovery (remote.Tools)
+])
 ```
 
-### MCP Tools
+### Direct invocation via `execution`
 
-Connect to MCP servers to use their tools as local tools. Requires the `mcp` extra: `pip install rebuno[mcp]`.
+You can also invoke tools or wait on signals through the execution proxy:
 
 ```python
-agent = MyAgent(agent_id="my-agent", kernel_url="http://localhost:8080")
+async def process(prompt: str):
+    result = await execution.invoke_tool("web.search", {"query": prompt})
+    approval = await execution.wait_signal("approval")
+    return {"answer": result, "approved": approval.get("approved")}
+```
+
+Most agents won't need this — return a value to complete, raise to fail. The proxy is for the rare case where the framework's tool plumbing isn't enough.
+
+### Framework integration
+
+The wrappers preserve `__name__`, `__doc__`, and synthesized `inspect.Signature`. Any framework that introspects callables works unmodified:
+
+```python
+# LangGraph
+from langgraph.prebuilt import create_react_agent
+graph = create_react_agent(model=llm, tools=[search, *github.tools], prompt=SYSTEM_PROMPT)
+```
+
+## Local MCP
+
+Connect to MCP servers directly from the agent process. Requires `pip install rebuno[mcp]`.
+
+```python
+from rebuno import MCPServer
 
 # Stdio server
-agent.mcp_server(
+fs = MCPServer(
     "filesystem",
     command="npx",
     args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
 )
 
 # HTTP server
-agent.mcp_server("github", url="http://localhost:3000/mcp")
+github = MCPServer(
+    "github",
+    url="https://api.githubcopilot.com/mcp/",
+    headers={"Authorization": "Bearer xxx"},
+)
 ```
 
-MCP tools are prefixed with the server name (e.g., `filesystem.read_file`) and appear alongside local and remote tools in `ctx.get_tools()`. See [Tools](../tools.md) for namespacing, config-based setup, and partial failure behavior.
+Tools are namespaced by `prefix` (defaults to `name`): `filesystem.read_file`, `github.create_pr`, etc.
 
-### Framework Integration
-
-`ctx.get_tools()` returns callables that preserve the original function's `__name__`, `__doc__`, and type annotations. Any framework that introspects function signatures works out of the box.
+Splat into your tool list:
 
 ```python
-# LangGraph
-from langgraph.prebuilt import create_react_agent
-agent = create_react_agent(model=llm, tools=ctx.get_tools(), prompt=SYSTEM_PROMPT)
+graph = create_agent(llm, [..., *fs.tools, *github.tools])
 ```
 
-### Direct Tool Invocation
+Servers connect at `agent.run()` startup and disconnect on shutdown. Tool calls go through the kernel for policy/audit; the MCP transport happens in the agent process.
 
-You can also invoke tools directly without `get_tools()`:
+## Remote tool discovery
+
+Use `remote.Tools(prefix)` to consume tools that *runners* host elsewhere — the agent never holds credentials, never opens MCP transport. Schemas come from the kernel directory ([`GET /v0/tools`](../api.md#tools)).
 
 ```python
-class MyAgent(AsyncBaseAgent):
-    async def process(self, ctx: AsyncAgentContext) -> dict:
-        # Invoke and wait for result
-        result = await ctx.invoke_tool("web.search", {"query": "rebuno"})
+from rebuno import remote
 
-        # Submit multiple tools in parallel
-        step_a = await ctx.submit_tool("web.search", {"query": "topic A"})
-        step_b = await ctx.submit_tool("web.search", {"query": "topic B"})
-        results = await ctx.await_steps([step_a, step_b])
+github  = remote.Tools("github")
+compute = remote.Tools("compute")
 
-        # Wait for an external signal (human approval, webhook, etc.)
-        approval = await ctx.wait_signal("approval")
-
-        return {"answer": results}
+async def process(prompt: str):
+    graph = create_agent(llm, [..., *github.tools, *compute.tools])
+    return await graph.ainvoke({"messages": [HumanMessage(prompt)]})
 ```
 
-### Sync API
+Each call submits an intent with `remote=True`; the kernel routes to whichever runner advertises the tool ID. Works for any source the runner publishes — `@tool` Python functions, MCP servers, or both.
 
-A synchronous API is also available:
-
-```python
-from rebuno import BaseAgent, AgentContext
-
-class MyAgent(BaseAgent):
-    def process(self, ctx: AgentContext) -> dict:
-        tools = ctx.get_tools()
-        result = tools[0]("what is rebuno")
-        return {"answer": result}
-
-agent = MyAgent(agent_id="my-agent", kernel_url="http://localhost:8080")
-
-@agent.tool("web.search")
-def web_search(query: str) -> dict:
-    """Search the web for information."""
-    return {"results": do_search(query)}
-
-agent.run()
-```
+Schemas are fetched once at agent startup. Restart the agent to pick up runner-side schema changes.
 
 ## Constructor Parameters
 
-### BaseAgent / AsyncBaseAgent
+### Agent
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `agent_id` | str | *required* | Unique identifier for this agent. Must match the agent ID used in policy and execution creation. |
-| `kernel_url` | str | *required* | URL of the rebuno kernel (e.g., `http://localhost:8080`). |
-| `api_key` | str | `""` | Bearer token for authenticating with the kernel. Maps to the kernel's `--bearer-token` / `REBUNO_BEARER_TOKEN`. |
-| `consumer_id` | str | `""` | Unique identifier for this SSE connection instance. If empty, auto-generated as `{agent_id}-{random}`. See [Consumer ID](#consumer-id). |
-| `reconnect_delay` | float | `3.0` | Base delay in seconds before reconnecting after an SSE connection failure. |
-| `max_reconnect_delay` | float | `60.0` | Maximum delay in seconds between reconnection attempts (exponential backoff cap). |
+| `kernel_url` | str \| None | env `REBUNO_URL` | URL of the kernel (e.g., `http://localhost:8080`). |
+| `api_key` | str \| None | env `REBUNO_API_KEY` | Bearer token. Maps to the kernel's `--bearer-token`. |
+| `consumer_id` | str | `""` | SSE connection identifier. Auto-generated as `{agent_id}-{random}` if empty. See [Consumer ID](#consumer-id). |
+| `reconnect_delay` | float | `3.0` | Initial reconnect delay (seconds). |
+| `max_reconnect_delay` | float | `60.0` | Cap on reconnect backoff. |
 
-### BaseRunner / AsyncBaseRunner
+### Runner
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `runner_id` | str | *required* | Unique identifier for this runner. |
-| `kernel_url` | str | *required* | URL of the rebuno kernel. |
-| `capabilities` | list[str] | `[]` | List of tool IDs this runner can execute (e.g., `["web.search", "doc.fetch"]`). |
-| `api_key` | str | `""` | Bearer token for authenticating with the kernel. Maps to the kernel's `--bearer-token` / `REBUNO_BEARER_TOKEN`. |
-| `name` | str | `""` | Human-readable name for the runner. Defaults to `runner_id` if empty. |
-| `reconnect_delay` | float | `2.0` | Base delay in seconds before reconnecting after an SSE connection failure. |
-| `max_reconnect_delay` | float | `60.0` | Maximum delay in seconds between reconnection attempts (exponential backoff cap). |
+| `runner_id` | str | *required* | Unique identifier. |
+| `kernel_url` | str \| None | env `REBUNO_URL` | URL of the kernel. |
+| `api_key` | str \| None | env `REBUNO_API_KEY` | Bearer token. |
+| `capabilities` | Iterable[str] \| None | all `@tool` IDs | Tool IDs to advertise. If omitted, every `@tool` in the registry is advertised plus any tools from MCP servers added with `runner.host(...)`. |
+| `consumer_id` | str | `""` | Auto-generated if empty. |
 
-Note: The runner's `consumer_id` is auto-generated as `{runner_id}-{random}` and cannot be overridden via the constructor.
+### Client
 
-### AgentContext / AsyncAgentContext
-
-These are created internally by the SDK when the kernel assigns an execution. You do not construct them directly. See [AgentContext Reference](#agentcontext-reference) for the full list of methods and properties available inside `process()`.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `base_url` | str \| None | env `REBUNO_URL` | URL of the kernel. |
+| `api_key` | str \| None | env `REBUNO_API_KEY` | Bearer token. |
+| `timeout` | float | `35.0` | HTTP timeout (seconds). |
+| `max_retries` | int | `3` | Retry attempts on retryable failures. |
 
 ## Consumer ID
 
-The `consumer_id` identifies a specific SSE connection instance for a given agent. It serves several purposes:
+The `consumer_id` identifies a specific SSE connection instance for a given `agent_id` (or `runner_id`). It serves several purposes:
 
 - **Multiple consumers**: Multiple processes can connect with the same `agent_id` but different `consumer_id` values for redundancy and load distribution.
 - **Round-robin assignment**: The kernel round-robins execution assignments across all connected consumers for the same agent.
 - **Uniqueness**: Each `consumer_id` must be unique per connection. If omitted, the SDK auto-generates one.
 
 ```python
-# Two instances of the same agent for redundancy
-agent1 = MyAgent(agent_id="researcher", kernel_url="...", consumer_id="researcher-instance-1")
-agent2 = MyAgent(agent_id="researcher", kernel_url="...", consumer_id="researcher-instance-2")
+agent1 = Agent("researcher", consumer_id="researcher-instance-1")
+agent2 = Agent("researcher", consumer_id="researcher-instance-2")
 ```
 
-## AgentContext Reference
+## execution Reference
 
-Both `AsyncAgentContext` and `AgentContext` provide the same interface.
-
-| Method | Description |
-|---|---|
-| `ctx.get_tools()` | Return framework-compatible tool callables |
-| `ctx.invoke_tool(tool_id, arguments)` | Invoke a tool and wait for the result |
-| `ctx.submit_tool(tool_id, arguments)` | Submit a tool invocation, return `step_id` immediately |
-| `ctx.await_steps(step_ids)` | Wait for multiple parallel tool invocations to complete |
-| `ctx.wait_signal(signal_type)` | Wait until an external signal is received |
+`from rebuno import execution` exposes the current execution. Valid only inside a handler or a `@tool` body running under `agent.run()`.
 
 | Property | Description |
 |---|---|
-| `ctx.execution_id` | Current execution ID |
-| `ctx.session_id` | Current session ID |
-| `ctx.agent_id` | Agent ID |
-| `ctx.input` | Input data from the execution request |
-| `ctx.labels` | Execution labels |
-| `ctx.history` | Previous steps in this execution |
+| `execution.id` | Current execution ID |
+| `execution.session_id` | Current session ID |
+| `execution.agent_id` | Agent ID |
+| `execution.input` | Raw input data from the execution request |
+| `execution.labels` | Execution labels |
+| `execution.history` | Previous step history |
+
+| Method | Description |
+|---|---|
+| `await execution.invoke_tool(tool_id, arguments)` | Invoke a tool and wait for the result |
+| `await execution.wait_signal(signal_type)` | Wait until an external signal arrives |
+| `await execution.complete(output)` | Mark complete (usually unnecessary — return from the handler) |
+| `await execution.fail(error)` | Mark failed (usually unnecessary — raise from the handler) |
 
 ## Writing a Runner
 
-Runners execute tools on behalf of agents that use `@agent.remote_tool()`. They maintain a persistent SSE connection to the kernel, receive job assignments via push, and report results over HTTP.
+A runner advertises capabilities, publishes their schemas to the kernel directory, and services job assignments. Tools are the same `@tool` decorator used by agents — the runner picks them up from the global registry.
 
 ```python
-import asyncio
-from rebuno import AsyncBaseRunner
+from rebuno import Runner, tool
 
-class MyRunner(AsyncBaseRunner):
-    async def execute(self, tool_id: str, arguments: dict) -> dict:
-        if tool_id == "web.search":
-            return {"results": await do_search(arguments["query"])}
-        raise ValueError(f"Unknown tool: {tool_id}")
+@tool("compute.heavy")
+async def heavy(data: str) -> str:
+    """Run on a runner."""
+    return await do_work(data)
 
-runner = MyRunner(
-    runner_id="my-runner",
-    kernel_url="http://localhost:8080",
-    capabilities=["web.search"],
-)
-asyncio.run(runner.run())
+Runner("compute-1").run()
 ```
 
-Sync version:
+Schemas for `@tool` functions are auto-derived from `inspect.signature` via pydantic. `Annotated[X, Field(description=...)]` flows through to JSON Schema descriptions, so the LLM (on the agent side) gets useful per-parameter docs.
+
+### Hosting an MCP server on a runner
+
+Use `runner.host()` to back tools with an MCP transport. The runner connects to MCP, lists tools, registers their schemas with the kernel, and forwards invocations.
 
 ```python
-from rebuno import BaseRunner
+from rebuno import Runner, MCPServer
 
-class MyRunner(BaseRunner):
-    def execute(self, tool_id: str, arguments: dict) -> dict:
-        if tool_id == "web.search":
-            return {"results": do_search(arguments["query"])}
-        raise ValueError(f"Unknown tool: {tool_id}")
-
-runner = MyRunner(
-    runner_id="my-runner",
-    kernel_url="http://localhost:8080",
-    capabilities=["web.search"],
-)
+runner = Runner("github-runner")
+runner.host(MCPServer(
+    "github",
+    url="https://api.githubcopilot.com/mcp/",
+    headers={"Authorization": "Bearer xxx"},
+))
 runner.run()
 ```
 
-### MCP-backed Runner
+Agents consume those tools via `remote.Tools("github")`. Credentials never leave the runner.
 
-A runner can serve MCP tools without any custom `execute()` logic:
+### Mixing `@tool` and MCP on a runner
+
+Allowed. The runner publishes the union of both. **Hard error at startup if any tool ID collides** — pick one source per tool ID.
+
+## Client (external services)
+
+For services that aren't agents (Discord bots, GitHub webhooks, dashboards), `Client` is the HTTP API:
 
 ```python
-runner = AsyncBaseRunner(
-    runner_id="mcp-tools",
-    kernel_url="http://localhost:8080",
-)
-runner.mcp_server(
-    "filesystem",
-    command="npx",
-    args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-)
-await runner.run()
+from rebuno import Client
+
+client = Client()  # env-configured
+
+# Fire and forget
+ex = await client.create("swe", input={"prompt": "..."})
+
+# Stream events until terminal
+async for event in client.run("swe", input={"prompt": "..."}):
+    print(event.tool_id)
+
+# Convenience: create + stream + return final state
+result = await client.run_until_complete("swe", input={"prompt": "..."}, on_event=cb)
 ```
 
-MCP tool IDs are automatically registered as capabilities. Jobs for MCP tools are routed directly to the MCP server; non-MCP tools fall through to `execute()`.
+| Method | Description |
+|---|---|
+| `await client.create(agent_id, input=, labels=)` | Create an execution |
+| `await client.get(id)` | Fetch current state |
+| `await client.list(...)` | List executions with filters |
+| `await client.cancel(id)` | Cancel a running execution |
+| `await client.send_signal(id, type, payload=)` | Send a signal |
+| `async for event in client.events(id)` | Stream events (terminates on terminal event) |
+| `async for event in client.run(agent_id, input=)` | Create + stream |
+| `await client.run_until_complete(...)` | Create + stream + return final `Execution` |
+| `await client.list_tools(prefix=)` | Read the kernel tool directory |
 
 ## Timeouts
 
