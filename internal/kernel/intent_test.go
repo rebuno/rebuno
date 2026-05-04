@@ -298,6 +298,122 @@ func TestProcessIntentWait(t *testing.T) {
 	}
 }
 
+func TestProcessIntentWaitWithPreExistingSignal(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Send a signal while the execution is running (before the wait intent).
+	err := k.SendSignal(ctx, execID, "human_approval", json.RawMessage(`{"approved":true}`))
+	if err != nil {
+		t.Fatalf("send signal: %v", err)
+	}
+
+	// Verify the signal is pending.
+	state, _ := k.GetExecution(ctx, execID)
+	if len(state.PendingSignals) == 0 {
+		t.Fatal("expected at least one pending signal after SendSignal")
+	}
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running before wait, got %s", state.Execution.Status)
+	}
+
+	// Now issue a wait intent for the same signal type.
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:       domain.IntentWait,
+			SignalType: "human_approval",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatal("expected accepted")
+	}
+
+	// The execution should NOT be blocked — the pre-existing signal satisfies the wait.
+	state, _ = k.GetExecution(ctx, execID)
+	if state.Execution.Status == domain.ExecutionBlocked {
+		t.Fatal("execution should not be blocked when a matching signal already exists")
+	}
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after wait with pre-existing signal, got %s", state.Execution.Status)
+	}
+}
+
+func TestProcessIntentWaitWithPreExistingSignalConsumesSignal(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Send a signal while running.
+	err := k.SendSignal(ctx, execID, "foo", nil)
+	if err != nil {
+		t.Fatalf("send signal: %v", err)
+	}
+
+	// Issue wait — should immediately resume and consume the signal.
+	_, err = k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:       domain.IntentWait,
+			SignalType: "foo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The consumed signal should be removed from PendingSignals.
+	state, _ := k.GetExecution(ctx, execID)
+	for _, sig := range state.PendingSignals {
+		if sig.SignalType == "foo" {
+			t.Fatal("expected signal 'foo' to be consumed from PendingSignals")
+		}
+	}
+}
+
+func TestProcessIntentWaitNoMatchingSignalStillBlocks(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Send a signal of a different type.
+	err := k.SendSignal(ctx, execID, "other_signal", nil)
+	if err != nil {
+		t.Fatalf("send signal: %v", err)
+	}
+
+	// Wait for a signal type that does NOT match.
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:       domain.IntentWait,
+			SignalType: "human_approval",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Accepted {
+		t.Fatal("expected accepted")
+	}
+
+	// Should still block because no matching signal exists.
+	state, _ := k.GetExecution(ctx, execID)
+	if state.Execution.Status != domain.ExecutionBlocked {
+		t.Fatalf("expected blocked, got %s", state.Execution.Status)
+	}
+}
+
 func TestProcessIntentSessionNotFound(t *testing.T) {
 	k, _, _, _, _, _ := newTestKernel()
 	ctx := context.Background()
