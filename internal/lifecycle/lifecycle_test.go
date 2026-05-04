@@ -1014,6 +1014,108 @@ func TestRecoverActiveExecutionsInitializesGauge(t *testing.T) {
 	})
 }
 
+func TestCheckTimeoutsBlockedExecutionTimesOut(t *testing.T) {
+	f := newTestFixture()
+
+	execID := "exec-blocked-expired"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		{
+			Type:      domain.EventExecutionCreated,
+			Payload:   mustMarshal(domain.ExecutionCreatedPayload{AgentID: "agent-1"}),
+			Sequence:  1,
+			Timestamp: time.Now().Add(-2 * time.Hour),
+		},
+		startedEvent(2),
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepCreated,
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+			Sequence: 3,
+		},
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepApprovalRequired,
+			Payload:  mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web.search", Reason: "policy"}),
+			Sequence: 4,
+		},
+		{
+			Type:     domain.EventExecutionBlocked,
+			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "web.search"}),
+			Sequence: 5,
+		},
+	}
+
+	m := f.manager(1 * time.Hour)
+	m.checkTimeouts(context.Background())
+
+	f.emitter.mu.Lock()
+	defer f.emitter.mu.Unlock()
+
+	foundExecFailed := false
+	foundStepCancelled := false
+	for _, e := range f.emitter.events {
+		if e.EventType == domain.EventExecutionFailed && e.ExecutionID == execID {
+			foundExecFailed = true
+		}
+		if e.EventType == domain.EventStepCancelled && e.StepID == "step-1" {
+			foundStepCancelled = true
+		}
+	}
+	if !foundExecFailed {
+		t.Error("expected execution.failed event for blocked execution that exceeded timeout")
+	}
+	if !foundStepCancelled {
+		t.Error("expected step.cancelled event for active step in timed-out blocked execution")
+	}
+}
+
+func TestCheckTimeoutsBlockedExecutionNotTimedOut(t *testing.T) {
+	// A blocked execution within the timeout window should NOT be failed,
+	// and step-level timeouts should still be skipped.
+	f := newTestFixture()
+
+	execID := "exec-blocked-fresh"
+	f.events.activeIDs = []string{execID}
+	pastDeadline := time.Now().Add(-10 * time.Minute)
+	f.events.events[execID] = []domain.Event{
+		{
+			Type:      domain.EventExecutionCreated,
+			Payload:   mustMarshal(domain.ExecutionCreatedPayload{AgentID: "agent-1"}),
+			Sequence:  1,
+			Timestamp: time.Now().Add(-5 * time.Minute),
+		},
+		startedEvent(2),
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepCreated,
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1, Deadline: pastDeadline}),
+			Sequence: 3,
+		},
+		{
+			StepID:   "step-1",
+			Type:     domain.EventStepApprovalRequired,
+			Payload:  mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web.search", Reason: "policy"}),
+			Sequence: 4,
+		},
+		{
+			Type:     domain.EventExecutionBlocked,
+			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "web.search"}),
+			Sequence: 5,
+		},
+	}
+
+	m := f.manager(1 * time.Hour)
+	m.checkTimeouts(context.Background())
+
+	f.emitter.mu.Lock()
+	defer f.emitter.mu.Unlock()
+
+	if len(f.emitter.events) != 0 {
+		t.Errorf("expected no events for blocked execution within timeout window, got %d", len(f.emitter.events))
+	}
+}
+
 func TestCheckTimeoutsSkipsBlockedExecution(t *testing.T) {
 	f := newTestFixture()
 
