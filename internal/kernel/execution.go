@@ -49,7 +49,11 @@ func (k *Kernel) CreateExecution(ctx context.Context, req CreateExecutionRequest
 		slog.String("agent_id", req.AgentID),
 	)
 
-	k.tryAssignExecution(ctx, executionID, req.AgentID)
+	release, err := k.locker.Acquire(ctx, "execution:"+executionID)
+	if err == nil {
+		k.tryAssignExecution(ctx, executionID, req.AgentID)
+		release()
+	}
 
 	return executionID, nil
 }
