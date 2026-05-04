@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/memstore"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 func TestCreateExecution(t *testing.T) {
@@ -241,5 +243,136 @@ func TestAssignPendingExecutionsWithRealLocker(t *testing.T) {
 	}
 	if state.Execution.Status != domain.ExecutionRunning {
 		t.Fatalf("expected running, got %s", state.Execution.Status)
+	}
+}
+
+func TestConcurrentCreateAndAssignSingleSession(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newConnectedMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      memstore.NewLocker(),
+		Policy:      newAllowAllPolicy(),
+	})
+
+	ctx := context.Background()
+
+	execID, err := k.CreateExecution(ctx, CreateExecutionRequest{
+		AgentID: "agent-1",
+		Input:   json.RawMessage(`{"q":"race"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Simulate a concurrent AssignPendingExecutions call (as if triggered by
+	// another agent connection). The lock acquired inside CreateExecution
+	// should prevent buildClaimResult from running twice.
+	k.AssignPendingExecutions(ctx, "agent-1")
+
+	// Count execution.started events — there must be exactly one.
+	var startedCount int
+	for _, e := range events.events[execID] {
+		if e.Type == domain.EventExecutionStarted {
+			startedCount++
+		}
+	}
+	if startedCount != 1 {
+		t.Fatalf("expected exactly 1 execution.started event, got %d", startedCount)
+	}
+
+	// Count sessions — there must be exactly one.
+	sessions.mu.Lock()
+	var sessionCount int
+	for _, s := range sessions.sessions {
+		if s.ExecutionID == execID {
+			sessionCount++
+		}
+	}
+	sessions.mu.Unlock()
+	if sessionCount != 1 {
+		t.Fatalf("expected exactly 1 session, got %d", sessionCount)
+	}
+}
+
+func TestConcurrentAssignPendingExecutionsRace(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub() // start disconnected
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      memstore.NewLocker(),
+		Policy:      newAllowAllPolicy(),
+	})
+
+	ctx := context.Background()
+
+	execID, err := k.CreateExecution(ctx, CreateExecutionRequest{
+		AgentID: "agent-1",
+		Input:   json.RawMessage(`{"q":"parallel"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Now connect the agent so AssignPendingExecutions can claim.
+	agentHub.mu.Lock()
+	agentHub.hasConn = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "test-consumer"}
+	agentHub.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			k.AssignPendingExecutions(ctx, "agent-1")
+		}()
+	}
+	wg.Wait()
+
+	var startedCount int
+	for _, e := range events.events[execID] {
+		if e.Type == domain.EventExecutionStarted {
+			startedCount++
+		}
+	}
+	if startedCount != 1 {
+		t.Fatalf("expected exactly 1 execution.started event, got %d", startedCount)
+	}
+
+	sessions.mu.Lock()
+	var sessionCount int
+	for _, s := range sessions.sessions {
+		if s.ExecutionID == execID {
+			sessionCount++
+		}
+	}
+	sessions.mu.Unlock()
+	if sessionCount != 1 {
+		t.Fatalf("expected exactly 1 session, got %d", sessionCount)
 	}
 }
