@@ -416,6 +416,28 @@ func (k *Kernel) executeWait(
 			domain.ErrTerminalExecution, req.ExecutionID, state.Execution.Status)
 	}
 
+	// Check if a matching signal is already pending — if so, resume immediately
+	// instead of blocking forever (the signal won't be sent again).
+	for _, sig := range state.PendingSignals {
+		if sig.SignalType == req.Intent.SignalType {
+			resumePayload := domain.ExecutionResumedPayload{
+				Reason: fmt.Sprintf("signal received: %s", req.Intent.SignalType),
+			}
+			_, err := k.EmitEvent(ctx, req.ExecutionID, "", domain.EventExecutionResumed,
+				resumePayload, uuid.Nil, correlationID)
+			if err != nil {
+				return domain.IntentResult{}, fmt.Errorf("emitting execution.resumed for pre-existing signal: %w", err)
+			}
+
+			updated, err := k.projector.Project(ctx, req.ExecutionID)
+			if err == nil {
+				k.maybeCheckpoint(ctx, updated, domain.EventExecutionResumed)
+			}
+
+			return domain.IntentResult{Accepted: true}, nil
+		}
+	}
+
 	payload := domain.ExecutionBlockedPayload{
 		Reason: "signal",
 		Ref:    req.Intent.SignalType,
