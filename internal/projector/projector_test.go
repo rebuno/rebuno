@@ -1091,6 +1091,42 @@ func TestStepRetriedReAddsToActiveSteps(t *testing.T) {
 	}
 }
 
+func TestStepRetriedClearsTimingFields(t *testing.T) {
+	state := emptyState()
+	execID := "exec-1"
+	stepID := "step-1"
+
+	applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
+		domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1, MaxAttempts: 3}))
+
+	deadline := time.Now().Add(5 * time.Minute)
+	applyStepDispatched(state, makeStepEvent(execID, stepID, 2, domain.EventStepDispatched,
+		domain.StepDispatchedPayload{RunnerID: "runner-1", JobID: "job-1", Deadline: deadline}))
+	applyStepStarted(state, makeStepEvent(execID, stepID, 3, domain.EventStepStarted,
+		domain.StepStartedPayload{RunnerID: "runner-1"}))
+
+	step := state.Steps[stepID]
+	if step.Deadline == nil || step.DispatchedAt == nil || step.StartedAt == nil {
+		t.Fatal("expected timing fields to be set before retry")
+	}
+
+	applyStepFailed(state, makeStepEvent(execID, stepID, 4, domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "connection timeout", Retryable: true}))
+	applyStepRetried(state, makeStepEvent(execID, stepID, 5, domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2}))
+
+	step = state.Steps[stepID]
+	if step.Deadline != nil {
+		t.Errorf("expected Deadline cleared after retry, got %v", step.Deadline)
+	}
+	if step.DispatchedAt != nil {
+		t.Errorf("expected DispatchedAt cleared after retry, got %v", step.DispatchedAt)
+	}
+	if step.StartedAt != nil {
+		t.Errorf("expected StartedAt cleared after retry, got %v", step.StartedAt)
+	}
+}
+
 func TestStepRetriedThenCompletedClearsActiveSteps(t *testing.T) {
 	state := emptyState()
 	execID := "exec-1"
