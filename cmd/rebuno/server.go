@@ -199,6 +199,7 @@ func runServer(cfg *config.Config) error {
 		Logger:           logger,
 		Metrics:          metrics,
 		ExecutionTimeout: cfg.ExecutionTimeout,
+		AgentTimeout:     cfg.AgentTimeout,
 	})
 	lm.StartSessionReaper(ctx)
 	lm.StartTimeoutWatcher(ctx)
