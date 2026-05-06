@@ -37,7 +37,7 @@ POST /v0/agents/intent
   "session_id": "sess-456",
   "intent": {
     "type": "invoke_tool",
-    "tool_id": "web.search",
+    "tool_id": "web_search",
     "arguments": {"query": "latest news"}
   }
 }

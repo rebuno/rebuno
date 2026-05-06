@@ -41,14 +41,14 @@ when:
 
 ### tool_id / tool_ids
 
-Match by tool identifier. Supports glob patterns using Go's `path.Match` semantics, where `*` matches any sequence of non-`/` characters. Note that `*` is not limited to dot-separated segments -- `web.*` matches `web.search`, `web.fetch`, and also `web.search.deep`.
+Match by tool identifier. Supports glob patterns using Go's `path.Match` semantics, where `*` matches any sequence of non-`/` characters. Note that `*` is not limited to a single underscore-delimited segment -- `web_*` matches `web_search`, `web_fetch`, and also `web_search_deep`.
 
 ```yaml
 when:
-  tool_id: "web.*"        # matches web.search, web.fetch, etc.
+  tool_id: "web_*"        # matches web_search, web_fetch, etc.
 
 when:
-  tool_ids: ["web.*", "doc.*"]   # match any in the list
+  tool_ids: ["web_*", "doc_*"]   # match any in the list
 ```
 
 ### agent_id / agent_ids
@@ -168,7 +168,7 @@ Rules can include a `rate_limit` block to cap how often a tool can be invoked pe
 - id: "rate-limited-shell"
   priority: 10
   when:
-    tool_id: "shell.exec"
+    tool_id: "shell_exec"
   then:
     decision: "allow"
   rate_limit:
@@ -220,7 +220,7 @@ When `timeout_ms` is set on an allow rule, the kernel uses it as the step deadli
   priority: 10
   when:
     agent_ids: ["researcher"]
-    tool_ids: ["web.*"]
+    tool_ids: ["web_*"]
   then:
     decision: "allow"
     timeout_ms: 30000
@@ -229,7 +229,7 @@ When `timeout_ms` is set on an allow rule, the kernel uses it as the step deadli
 - id: "allow-safe-shell"
   priority: 30
   when:
-    tool_id: "shell.exec"
+    tool_id: "shell_exec"
     arguments:
       - field: "command"
         pattern: "^(ls|cat|echo|pwd)"
@@ -261,7 +261,7 @@ Allow a specific agent to use web tools with a 30-second timeout:
   when:
     action: "tool.invoke"
     agent_ids: ["researcher", "researcher-local"]
-    tool_ids: ["web.*", "doc.*"]
+    tool_ids: ["web_*", "doc_*"]
   then:
     decision: "allow"
     timeout_ms: 30000
@@ -274,7 +274,7 @@ Allow shell commands only if they start with safe prefixes, with rate limiting a
   priority: 30
   when:
     action: "tool.invoke"
-    tool_id: "shell.exec"
+    tool_id: "shell_exec"
     arguments:
       - field: "command"
         pattern: "^(ls|cat|echo|pwd|whoami|date|head|tail|wc)"
@@ -292,7 +292,7 @@ Allow shell commands only if they start with safe prefixes, with rate limiting a
   priority: 40
   when:
     action: "tool.invoke"
-    tool_id: "shell.exec"
+    tool_id: "shell_exec"
   then:
     decision: "deny"
     reason: "Shell commands denied by default"
@@ -368,7 +368,7 @@ rules:
     when:
       action: "tool.invoke"
       agent_ids: ["researcher", "researcher-local"]
-      tool_ids: ["web.*", "doc.*"]
+      tool_ids: ["web_*", "doc_*"]
     then:
       decision: "allow"
       timeout_ms: 30000
@@ -377,7 +377,7 @@ rules:
     priority: 30
     when:
       action: "tool.invoke"
-      tool_id: "shell.exec"
+      tool_id: "shell_exec"
       arguments:
         - field: "command"
           pattern: "^(ls|cat|echo|pwd)"
@@ -389,7 +389,7 @@ rules:
     priority: 40
     when:
       action: "tool.invoke"
-      tool_id: "shell.exec"
+      tool_id: "shell_exec"
     then:
       decision: "deny"
       reason: "Shell commands denied by default"
@@ -411,7 +411,7 @@ rules:
       decision: "allow"
 ```
 
-In this setup, the `researcher` agent gets its own `calculator` rule merged with all the global rules. The `researcher-local` agent has no per-agent file, so it is evaluated against the global rules only — it can use `web.*` and `doc.*` tools (via the `agent_ids` scoping) but not the calculator.
+In this setup, the `researcher` agent gets its own `calculator` rule merged with all the global rules. The `researcher-local` agent has no per-agent file, so it is evaluated against the global rules only — it can use `web_*` and `doc_*` tools (via the `agent_ids` scoping) but not the calculator.
 
 ## Secure Defaults
 

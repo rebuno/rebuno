@@ -66,7 +66,7 @@ Tools are plain module-level functions. `@tool` registers them globally; the wra
 ```python
 from rebuno import tool
 
-@tool("web.search")
+@tool("web_search")
 async def search(query: str, limit: int = 10) -> dict:
     """Search the web."""
     return {"results": await do_search(query, limit)}
@@ -114,7 +114,7 @@ You can also invoke tools or wait on signals through the execution proxy:
 
 ```python
 async def process(prompt: str):
-    result = await execution.invoke_tool("web.search", {"query": prompt})
+    result = await execution.invoke_tool("web_search", {"query": prompt})
     approval = await execution.wait_signal("approval")
     return {"answer": result, "approved": approval.get("approved")}
 ```

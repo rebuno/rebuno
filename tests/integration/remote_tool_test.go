@@ -22,18 +22,18 @@ func TestRemoteToolHappyPath(t *testing.T) {
 
 	// 1. Connect agent SSE + runner SSE (capability: web.search)
 	agentSSE := connectAgentSSE(t, ts.URL, agentID, agentConsumer)
-	_ = connectRunnerSSE(t, ts.URL, runnerID, runnerConsumer, []string{"web.search"})
+	_ = connectRunnerSSE(t, ts.URL, runnerID, runnerConsumer, []string{"web_search"})
 
 	// Poll until the runner's capability is registered in the hub.
 	{
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
-			if ts.RunnerHub.HasCapability("web.search") {
+			if ts.RunnerHub.HasCapability("web_search") {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		if !ts.RunnerHub.HasCapability("web.search") {
+		if !ts.RunnerHub.HasCapability("web_search") {
 			t.Fatal("runner did not register web.search capability in time")
 		}
 	}
@@ -60,7 +60,7 @@ func TestRemoteToolHappyPath(t *testing.T) {
 		"session_id":   claim.SessionID,
 		"intent": map[string]any{
 			"type":    "invoke_tool",
-			"tool_id": "web.search",
+			"tool_id": "web_search",
 			"remote":  true,
 			"arguments": map[string]string{
 				"query": "rebuno integration test",

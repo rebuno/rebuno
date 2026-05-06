@@ -1,4 +1,4 @@
-"""Demo runner: services web.search, doc.fetch, and calculator tools.
+"""Demo runner: services web_search, doc_fetch, and calculator tools.
 
 Pair with examples/agent/remote_tools.py — the agent declares stubs for
 these tool IDs, the runner provides implementations. The kernel routes
@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger("demo-runner")
 
 
-@tool("web.search")
+@tool("web_search")
 async def web_search(query: str) -> dict:
     """Search the web for information about a topic."""
     logger.info("Mock web search: %s", query)
@@ -45,7 +45,7 @@ async def web_search(query: str) -> dict:
     }
 
 
-@tool("doc.fetch")
+@tool("doc_fetch")
 async def doc_fetch(url: str) -> dict:
     """Fetch and read the contents of a document at a URL."""
     logger.info("Mock document fetch: %s", url)

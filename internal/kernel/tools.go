@@ -99,7 +99,7 @@ func matchPrefix(toolID, prefix string) bool {
 	if prefix == "" {
 		return true
 	}
-	return toolID == prefix || strings.HasPrefix(toolID, prefix+".")
+	return toolID == prefix || strings.HasPrefix(toolID, prefix+"_")
 }
 
 func schemasIdentical(schemas []domain.ToolSchema) bool {

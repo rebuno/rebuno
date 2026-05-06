@@ -23,7 +23,7 @@ func TestSubmitJobResultSuccess(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -69,7 +69,7 @@ func TestSubmitJobResultFailureWithRetry(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true, // remote tools get max_attempts=3
 		},
 	})
@@ -117,7 +117,7 @@ func TestSubmitJobResultRetryRoundTrip(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -228,7 +228,7 @@ func TestDispatchPendingJobs(t *testing.T) {
 	ctx := context.Background()
 
 	job := domain.Job{
-		ToolID: "web.search",
+		ToolID: "web_search",
 	}
 	k.enqueuePendingJob(job)
 
@@ -330,7 +330,7 @@ func TestSubmitJobResultFailureExhaustsRetries(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true, // max_attempts=3
 		},
 	})
@@ -385,7 +385,7 @@ func TestDispatchPendingJobsRemoveFailureKeepsJobInQueue(t *testing.T) {
 
 	job := domain.Job{
 		ID:     uuid.Must(uuid.NewV7()),
-		ToolID: "web.search",
+		ToolID: "web_search",
 	}
 	if err := jq.Enqueue(ctx, job); err != nil {
 		t.Fatalf("enqueue: %v", err)
@@ -440,7 +440,7 @@ func TestDispatchPendingJobsRemoveSuccessRemovesJob(t *testing.T) {
 
 	job := domain.Job{
 		ID:     uuid.Must(uuid.NewV7()),
-		ToolID: "web.search",
+		ToolID: "web_search",
 	}
 	if err := jq.Enqueue(ctx, job); err != nil {
 		t.Fatalf("enqueue: %v", err)
@@ -490,7 +490,7 @@ func TestDispatchPendingJobsNoRunnerDoesNotRemove(t *testing.T) {
 
 	job := domain.Job{
 		ID:     uuid.Must(uuid.NewV7()),
-		ToolID: "web.search",
+		ToolID: "web_search",
 	}
 	if err := jq.Enqueue(ctx, job); err != nil {
 		t.Fatalf("enqueue: %v", err)
@@ -520,7 +520,7 @@ func TestSubmitJobResultRejectsTaintedExecution(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -561,7 +561,7 @@ func TestRetryJobPersistedImmediately(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -604,7 +604,7 @@ func TestDispatchPendingJobsRespectsNotBefore(t *testing.T) {
 	// Enqueue a job with NotBefore far in the future.
 	futureJob := domain.Job{
 		ID:        uuid.Must(uuid.NewV7()),
-		ToolID:    "web.search",
+		ToolID:    "web_search",
 		NotBefore: time.Now().Add(time.Hour),
 	}
 	k.enqueuePendingJob(futureJob)
@@ -633,7 +633,7 @@ func TestDispatchPendingJobsDispatchesReadyJob(t *testing.T) {
 	// Enqueue a job with NotBefore in the past.
 	readyJob := domain.Job{
 		ID:        uuid.Must(uuid.NewV7()),
-		ToolID:    "web.search",
+		ToolID:    "web_search",
 		NotBefore: time.Now().Add(-time.Second),
 	}
 	k.enqueuePendingJob(readyJob)
@@ -685,7 +685,7 @@ func TestRecoverPendingRetriesAfterCrash(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -737,7 +737,7 @@ func TestRecoverPendingRetriesAfterCrash(t *testing.T) {
 	if jobs[0].Attempt != 2 {
 		t.Fatalf("expected attempt 2, got %d", jobs[0].Attempt)
 	}
-	if jobs[0].ToolID != "web.search" {
+	if jobs[0].ToolID != "web_search" {
 		t.Fatalf("expected tool_id web.search, got %s", jobs[0].ToolID)
 	}
 }
@@ -753,7 +753,7 @@ func TestRecoverPendingRetriesSkipsAlreadyQueued(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -798,7 +798,7 @@ func TestRecoverPendingRetriesSkipsTerminalExecution(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -847,7 +847,7 @@ func TestHandleJobRetryEmitsEventsAtomically(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -917,7 +917,7 @@ func TestRecoverPendingRetriesHandlesOrphanedFailedRetryable(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -1005,7 +1005,7 @@ func TestRecoverPendingRetriesSkipsExhaustedRetries(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true, // max_attempts=3
 		},
 	})

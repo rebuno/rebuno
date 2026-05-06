@@ -133,7 +133,7 @@ Emitted when an execution fails (agent submits `fail` intent, timeout, etc.).
 
 ```json
 {
-  "error": "Tool execution failed: web.search returned 500"
+  "error": "Tool execution failed: web_search returned 500"
 }
 ```
 
@@ -180,7 +180,7 @@ Emitted when the kernel accepts an intent (policy allows it or it is a lifecycle
 ```json
 {
   "intent_type": "invoke_tool",
-  "details": {"tool_id": "web.search", "step_id": "step-abc123"}
+  "details": {"tool_id": "web_search", "step_id": "step-abc123"}
 }
 ```
 
@@ -196,9 +196,9 @@ Emitted when the kernel denies an intent due to policy.
 ```json
 {
   "intent_type": "invoke_tool",
-  "tool_id": "shell.exec",
+  "tool_id": "shell_exec",
   "arguments": {"command": "rm -rf /"},
-  "idempotency_key": "exec-123:shell.exec:a1b2c3d4",
+  "idempotency_key": "exec-123:shell_exec:a1b2c3d4",
   "reason": "Shell commands denied by default",
   "rule_id": "deny-shell"
 }
@@ -221,7 +221,7 @@ Emitted when a tool invocation intent is accepted and a step is created.
 
 ```json
 {
-  "tool_id": "web.search",
+  "tool_id": "web_search",
   "tool_version": 1,
   "arguments": {"query": "event sourcing"},
   "max_attempts": 3,
@@ -289,7 +289,7 @@ Emitted when a step fails.
 
 ```json
 {
-  "error": "web.search returned HTTP 500",
+  "error": "web_search returned HTTP 500",
   "retryable": true
 }
 ```

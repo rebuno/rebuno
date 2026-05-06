@@ -243,9 +243,9 @@ Submit an intent for an execution.
   "session_id": "sess-456",
   "intent": {
     "type": "invoke_tool",
-    "tool_id": "web.search",
+    "tool_id": "web_search",
     "arguments": {"query": "latest news"},
-    "idempotency_key": "exec-123:web.search:a1b2c3d4",
+    "idempotency_key": "exec-123:web_search:a1b2c3d4",
     "remote": false
   }
 }

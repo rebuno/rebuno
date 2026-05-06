@@ -1,9 +1,9 @@
 // Demo agent: LangGraph agent with shell execution (demonstrates approval flow).
 //
-// The shell.exec tool is governed by policy:
+// The shell_exec tool is governed by policy:
 //   - Safe commands (ls, cat, pwd, ...) are auto-allowed by the agent policy
 //   - Other commands require human approval via the client
-//   - The global policy denies shell.exec for any agent without explicit rules
+//   - The global policy denies shell_exec for any agent without explicit rules
 
 import { exec } from "node:child_process";
 import { z } from "zod";
@@ -63,7 +63,7 @@ const agent = new ShellAgent({
 
 agent.addTool(
   defineTool({
-    id: "shell.exec",
+    id: "shell_exec",
     description: "Execute a shell command.",
     inputSchema: z.object({
       command: z.string(),

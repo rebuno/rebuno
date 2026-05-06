@@ -35,7 +35,7 @@ agent = Agent(
 # and type annotations so frameworks like LangGraph can introspect them to
 # generate schemas for the LLM.
 
-@tool("web.search")
+@tool("web_search")
 async def web_search(query: str) -> dict:
     """Search the web for information about a topic."""
     logger.info("Local web search: %s", query)
@@ -49,7 +49,7 @@ async def web_search(query: str) -> dict:
     }
 
 
-@tool("doc.fetch")
+@tool("doc_fetch")
 async def doc_fetch(url: str) -> dict:
     """Fetch and read the contents of a document at a URL."""
     logger.info("Local doc fetch: %s", url)

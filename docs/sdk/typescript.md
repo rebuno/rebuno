@@ -45,7 +45,7 @@ const agent = new MyAgent({
 
 agent.addTool(
   defineTool({
-    id: "web.search",
+    id: "web_search",
     description: "Search the web for information.",
     inputSchema: z.object({ query: z.string() }),
     execute: async (input) => {
@@ -64,7 +64,7 @@ Declare tool schemas with `agent.addRemoteTool()`. The execute function is never
 ```typescript
 agent.addRemoteTool(
   defineTool({
-    id: "web.search",
+    id: "web_search",
     description: "Search the web for information.",
     inputSchema: z.object({ query: z.string() }),
     execute: async () => ({}), // body is never called
@@ -90,7 +90,7 @@ agent.addTool(
 
 agent.addRemoteTool(
   defineTool({
-    id: "web.search",
+    id: "web_search",
     description: "Search the web for information.",
     inputSchema: z.object({ query: z.string() }),
     execute: async () => ({}),
@@ -161,11 +161,11 @@ You can also invoke tools directly without `getTools()`:
 class MyAgent extends BaseAgent {
   async process(ctx: AgentContext) {
     // Invoke and wait for result
-    const result = await ctx.invokeTool("web.search", { query: "rebuno" });
+    const result = await ctx.invokeTool("web_search", { query: "rebuno" });
 
     // Submit multiple tools in parallel
-    const stepA = await ctx.submitTool("web.search", { query: "topic A" });
-    const stepB = await ctx.submitTool("web.search", { query: "topic B" });
+    const stepA = await ctx.submitTool("web_search", { query: "topic A" });
+    const stepB = await ctx.submitTool("web_search", { query: "topic B" });
     const results = await ctx.awaitSteps([stepA, stepB]);
 
     // Wait for an external signal (human approval, webhook, etc.)
@@ -195,7 +195,7 @@ class MyAgent extends BaseAgent {
 |-----------|------|---------|-------------|
 | `runnerId` | string | *required* | Unique identifier for this runner. |
 | `kernelUrl` | string | *required* | URL of the rebuno kernel. |
-| `capabilities` | string[] | `[]` | List of tool IDs this runner can execute (e.g., `["web.search", "doc.fetch"]`). |
+| `capabilities` | string[] | `[]` | List of tool IDs this runner can execute (e.g., `["web_search", "doc_fetch"]`). |
 | `apiKey` | string | `""` | Bearer token for authenticating with the kernel. Maps to the kernel's `--bearer-token` / `REBUNO_BEARER_TOKEN`. |
 | `name` | string | `""` | Human-readable name for the runner. Defaults to `runnerId` if empty. |
 | `reconnectDelay` | number | `2.0` | Base delay in seconds before reconnecting after an SSE connection failure. |
@@ -260,7 +260,7 @@ import { BaseRunner } from "rebuno";
 class MyRunner extends BaseRunner {
   async execute(toolId: string, args: unknown): Promise<unknown> {
     const arguments_ = args as Record<string, unknown>;
-    if (toolId === "web.search") {
+    if (toolId === "web_search") {
       return { results: await doSearch(arguments_.query as string) };
     }
     throw new Error(`Unknown tool: ${toolId}`);
@@ -270,7 +270,7 @@ class MyRunner extends BaseRunner {
 const runner = new MyRunner({
   runnerId: "my-runner",
   kernelUrl: "http://localhost:8080",
-  capabilities: ["web.search"],
+  capabilities: ["web_search"],
 });
 
 runner.run();
