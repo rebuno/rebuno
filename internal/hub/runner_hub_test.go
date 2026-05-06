@@ -17,16 +17,16 @@ func TestRunnerRegisterUnregister(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	conn := h.Register("runner-1", "c1", []string{"web.search"})
+	conn := h.Register("runner-1", "c1", []string{"web_search"})
 	if conn == nil {
 		t.Fatal("expected non-nil conn")
 	}
-	if !h.HasCapability("web.search") {
+	if !h.HasCapability("web_search") {
 		t.Fatal("expected capability web.search")
 	}
 
 	h.Unregister("runner-1", "c1", conn.Generation())
-	if h.HasCapability("web.search") {
+	if h.HasCapability("web_search") {
 		t.Fatal("expected no capability after unregister")
 	}
 }
@@ -35,10 +35,10 @@ func TestRunnerCapabilityIndex(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	h.Register("runner-1", "c1", []string{"web.search", "doc.fetch"})
+	h.Register("runner-1", "c1", []string{"web_search", "doc.fetch"})
 	h.Register("runner-2", "c1", []string{"calculator"})
 
-	if !h.HasCapability("web.search") {
+	if !h.HasCapability("web_search") {
 		t.Fatal("expected web.search capability")
 	}
 	if !h.HasCapability("doc.fetch") {
@@ -56,9 +56,9 @@ func TestRunnerDispatchToIdleRunner(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	conn := h.Register("runner-1", "c1", []string{"web.search"})
+	conn := h.Register("runner-1", "c1", []string{"web_search"})
 
-	info, ok := h.Dispatch("web.search", runnerMsg("job.assigned"))
+	info, ok := h.Dispatch("web_search", runnerMsg("job.assigned"))
 	if !ok {
 		t.Fatal("expected dispatch to succeed")
 	}
@@ -80,12 +80,12 @@ func TestRunnerDispatchSkipsBusyRunner(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	h.Register("runner-1", "c1", []string{"web.search"})
-	conn2 := h.Register("runner-2", "c1", []string{"web.search"})
+	h.Register("runner-1", "c1", []string{"web_search"})
+	conn2 := h.Register("runner-2", "c1", []string{"web_search"})
 
 	h.MarkBusy("runner-1", "c1")
 
-	info, ok := h.Dispatch("web.search", runnerMsg("job.assigned"))
+	info, ok := h.Dispatch("web_search", runnerMsg("job.assigned"))
 	if !ok {
 		t.Fatal("expected dispatch to succeed")
 	}
@@ -109,7 +109,7 @@ func TestRunnerDispatchNoCapability(t *testing.T) {
 
 	h.Register("runner-1", "c1", []string{"calculator"})
 
-	_, ok := h.Dispatch("web.search", runnerMsg("job.assigned"))
+	_, ok := h.Dispatch("web_search", runnerMsg("job.assigned"))
 	if ok {
 		t.Fatal("expected dispatch to fail for missing capability")
 	}
@@ -119,12 +119,12 @@ func TestRunnerRoundRobin(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	h.Register("runner-1", "c1", []string{"web.search"})
-	h.Register("runner-2", "c1", []string{"web.search"})
+	h.Register("runner-1", "c1", []string{"web_search"})
+	h.Register("runner-2", "c1", []string{"web_search"})
 
 	seen := make(map[string]int)
 	for i := 0; i < 10; i++ {
-		info, ok := h.Dispatch("web.search", runnerMsg("job.assigned"))
+		info, ok := h.Dispatch("web_search", runnerMsg("job.assigned"))
 		if !ok {
 			t.Fatal("expected dispatch to succeed")
 		}
@@ -147,14 +147,14 @@ func TestRunnerMarkBusyIdle(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	conn := h.Register("runner-1", "c1", []string{"web.search"})
+	conn := h.Register("runner-1", "c1", []string{"web_search"})
 
 	h.MarkBusy("runner-1", "c1")
 	if !conn.Busy {
 		t.Fatal("expected conn to be busy")
 	}
 
-	_, ok := h.Dispatch("web.search", runnerMsg("test"))
+	_, ok := h.Dispatch("web_search", runnerMsg("test"))
 	if ok {
 		t.Fatal("expected dispatch to fail when busy")
 	}
@@ -164,7 +164,7 @@ func TestRunnerMarkBusyIdle(t *testing.T) {
 		t.Fatal("expected conn to be idle")
 	}
 
-	_, ok = h.Dispatch("web.search", runnerMsg("test"))
+	_, ok = h.Dispatch("web_search", runnerMsg("test"))
 	if !ok {
 		t.Fatal("expected dispatch to succeed after marking idle")
 	}
@@ -174,7 +174,7 @@ func TestRunnerSendTo(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	conn := h.Register("runner-1", "c1", []string{"web.search"})
+	conn := h.Register("runner-1", "c1", []string{"web_search"})
 
 	ok := h.SendTo("runner-1", "c1", runnerMsg("ping"))
 	if !ok {
@@ -240,8 +240,8 @@ func TestRunnerReRegisterSameConsumer(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	conn1 := h.Register("runner-1", "c1", []string{"web.search"})
-	conn2 := h.Register("runner-1", "c1", []string{"web.search", "calculator"})
+	conn1 := h.Register("runner-1", "c1", []string{"web_search"})
+	conn2 := h.Register("runner-1", "c1", []string{"web_search", "calculator"})
 
 	if conn1 == conn2 {
 		t.Fatal("expected new connection object")
@@ -311,7 +311,7 @@ func TestRunnerUpdateCapabilitiesUnknownRunner(t *testing.T) {
 }
 
 func TestRunnerConnOverflow(t *testing.T) {
-	c := NewRunnerConn("runner-1", "c1", []string{"web.search"})
+	c := NewRunnerConn("runner-1", "c1", []string{"web_search"})
 
 	for i := 0; i < runnerEventChannelSize; i++ {
 		if !c.Send(runnerMsg("fill")) {
@@ -328,15 +328,15 @@ func TestRunnerUnregisterStaleGeneration(t *testing.T) {
 	h := NewRunnerHub(nil)
 	defer h.Close()
 
-	conn1 := h.Register("runner-1", "c1", []string{"web.search"})
+	conn1 := h.Register("runner-1", "c1", []string{"web_search"})
 	staleGen := conn1.Generation()
 
-	h.Register("runner-1", "c1", []string{"web.search"})
+	h.Register("runner-1", "c1", []string{"web_search"})
 
 	// Unregister with stale generation should be a no-op
 	h.Unregister("runner-1", "c1", staleGen)
 
-	if !h.HasCapability("web.search") {
+	if !h.HasCapability("web_search") {
 		t.Fatal("expected capability to survive stale unregister")
 	}
 }

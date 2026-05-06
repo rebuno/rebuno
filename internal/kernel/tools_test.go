@@ -32,10 +32,10 @@ func toolIDs(schemas []domain.ToolSchema) []string {
 
 func TestToolDirectory_PublishAndList(t *testing.T) {
 	d := newToolDirectory(nil)
-	d.Publish("runner-1", sampleSchemas("github.create_pr", "github.issue_read"))
+	d.Publish("runner-1", sampleSchemas("github_create_pr", "github_issue_read"))
 
 	got := toolIDs(d.List(""))
-	want := []string{"github.create_pr", "github.issue_read"}
+	want := []string{"github_create_pr", "github_issue_read"}
 	if !equalSlices(got, want) {
 		t.Errorf("List() = %v, want %v", got, want)
 	}
@@ -43,38 +43,38 @@ func TestToolDirectory_PublishAndList(t *testing.T) {
 
 func TestToolDirectory_PublishReplacesPreviousFromSameRunner(t *testing.T) {
 	d := newToolDirectory(nil)
-	d.Publish("runner-1", sampleSchemas("github.create_pr", "github.issue_read"))
-	d.Publish("runner-1", sampleSchemas("github.create_pr")) // dropped issue_read
+	d.Publish("runner-1", sampleSchemas("github_create_pr", "github_issue_read"))
+	d.Publish("runner-1", sampleSchemas("github_create_pr")) // dropped issue_read
 
 	got := toolIDs(d.List(""))
-	if !equalSlices(got, []string{"github.create_pr"}) {
-		t.Errorf("after re-publish List() = %v, want only [github.create_pr]", got)
+	if !equalSlices(got, []string{"github_create_pr"}) {
+		t.Errorf("after re-publish List() = %v, want only [github_create_pr]", got)
 	}
 }
 
 func TestToolDirectory_DropRunnerRemovesOnlyItsEntries(t *testing.T) {
 	d := newToolDirectory(nil)
-	d.Publish("runner-1", sampleSchemas("a.one", "a.two"))
-	d.Publish("runner-2", sampleSchemas("b.one"))
+	d.Publish("runner-1", sampleSchemas("a_one", "a_two"))
+	d.Publish("runner-2", sampleSchemas("b_one"))
 
 	d.DropRunner("runner-1")
 	got := toolIDs(d.List(""))
-	if !equalSlices(got, []string{"b.one"}) {
-		t.Errorf("after DropRunner runner-1, got %v, want [b.one]", got)
+	if !equalSlices(got, []string{"b_one"}) {
+		t.Errorf("after DropRunner runner-1, got %v, want [b_one]", got)
 	}
 }
 
 func TestToolDirectory_TwoRunnersSameToolBothVisibleAfterOneDrops(t *testing.T) {
 	d := newToolDirectory(nil)
-	d.Publish("runner-1", sampleSchemas("github.create_pr"))
+	d.Publish("runner-1", sampleSchemas("github_create_pr"))
 	time.Sleep(time.Millisecond) // ensure RegisteredAt differs
-	d.Publish("runner-2", sampleSchemas("github.create_pr"))
+	d.Publish("runner-2", sampleSchemas("github_create_pr"))
 
 	d.DropRunner("runner-2")
 
 	got := d.List("")
-	if len(got) != 1 || got[0].ID != "github.create_pr" {
-		t.Fatalf("after dropping runner-2, expected [github.create_pr] still visible; got %v", got)
+	if len(got) != 1 || got[0].ID != "github_create_pr" {
+		t.Fatalf("after dropping runner-2, expected [github_create_pr] still visible; got %v", got)
 	}
 	if got[0].RunnerID != "runner-1" {
 		t.Errorf("survivor should be runner-1, got %s", got[0].RunnerID)
@@ -84,20 +84,20 @@ func TestToolDirectory_TwoRunnersSameToolBothVisibleAfterOneDrops(t *testing.T) 
 func TestToolDirectory_PrefixFiltering(t *testing.T) {
 	d := newToolDirectory(nil)
 	d.Publish("runner-1", sampleSchemas(
-		"github.create_pr",
-		"github.issue_read",
-		"compute.heavy_job",
-		"githubactions.x", // should NOT match prefix=github
+		"github_create_pr",
+		"github_issue_read",
+		"compute_heavy_job",
+		"githubactions_x", // should NOT match prefix=github
 	))
 
 	tests := []struct {
 		prefix string
 		want   []string
 	}{
-		{"", []string{"compute.heavy_job", "github.create_pr", "github.issue_read", "githubactions.x"}},
-		{"github", []string{"github.create_pr", "github.issue_read"}},
-		{"compute", []string{"compute.heavy_job"}},
-		{"compute.heavy_job", []string{"compute.heavy_job"}}, // exact match
+		{"", []string{"compute_heavy_job", "github_create_pr", "github_issue_read", "githubactions_x"}},
+		{"github", []string{"github_create_pr", "github_issue_read"}},
+		{"compute", []string{"compute_heavy_job"}},
+		{"compute_heavy_job", []string{"compute_heavy_job"}}, // exact match
 		{"nonexistent", []string{}},
 	}
 
@@ -115,12 +115,12 @@ func TestToolDirectory_NewestWinsOnConflict(t *testing.T) {
 	d := newToolDirectory(nil)
 
 	older := domain.ToolSchema{
-		ID:          "x.tool",
+		ID:          "x_tool",
 		Description: "old version",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"a":{"type":"string"}}}`),
 	}
 	newer := domain.ToolSchema{
-		ID:          "x.tool",
+		ID:          "x_tool",
 		Description: "new version",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"a":{"type":"integer"}}}`),
 	}
@@ -148,7 +148,7 @@ func TestToolDirectory_IdenticalSchemasMergeCleanly(t *testing.T) {
 	d := newToolDirectory(nil)
 
 	schema := domain.ToolSchema{
-		ID:          "x.tool",
+		ID:          "x_tool",
 		Description: "same",
 		InputSchema: json.RawMessage(`{"type":"object"}`),
 	}
@@ -166,8 +166,8 @@ func TestToolDirectory_IdenticalSchemasMergeCleanly(t *testing.T) {
 
 func TestToolDirectory_EmptyAfterDropAll(t *testing.T) {
 	d := newToolDirectory(nil)
-	d.Publish("runner-1", sampleSchemas("a.one"))
-	d.Publish("runner-2", sampleSchemas("a.one"))
+	d.Publish("runner-1", sampleSchemas("a_one"))
+	d.Publish("runner-2", sampleSchemas("a_one"))
 
 	d.DropRunner("runner-1")
 	d.DropRunner("runner-2")
@@ -196,11 +196,11 @@ func TestMatchPrefix(t *testing.T) {
 		toolID, prefix string
 		want           bool
 	}{
-		{"github.create_pr", "", true},
-		{"github.create_pr", "github", true},
-		{"github.create_pr", "github.create_pr", true},
+		{"github_create_pr", "", true},
+		{"github_create_pr", "github", true},
+		{"github_create_pr", "github_create_pr", true},
 		{"github", "github", true},
-		{"githubactions.x", "github", false}, // not a prefix match (no '.' delim)
+		{"githubactions_x", "github", false}, // not a prefix match (no '_' delim)
 		{"github.x", "git", false},           // partial-segment, not a prefix
 	}
 	for _, tt := range tests {

@@ -123,7 +123,7 @@ func TestSubmitJobResultSuccessCreatesCheckpoint(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})

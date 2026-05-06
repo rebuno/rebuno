@@ -144,7 +144,7 @@ func TestProcessIntentInvokeTool(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:      domain.IntentInvokeTool,
-			ToolID:    "web.search",
+			ToolID:    "web_search",
 			Arguments: json.RawMessage(`{"query":"test"}`),
 		},
 	})
@@ -191,7 +191,7 @@ func TestProcessIntentInvokeToolLocalStepHasDeadline(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 		},
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func TestProcessIntentInvokeToolRemote(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 			Remote: true,
 		},
 	})
@@ -257,7 +257,7 @@ func TestProcessIntentInvokeToolDeniedByPolicy(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 		},
 	})
 	if err != nil {
@@ -456,7 +456,7 @@ func TestValidateIntent(t *testing.T) {
 	}{
 		{
 			name:   "valid invoke_tool",
-			intent: domain.Intent{Type: domain.IntentInvokeTool, ToolID: "web.search"},
+			intent: domain.Intent{Type: domain.IntentInvokeTool, ToolID: "web_search"},
 		},
 		{
 			name:    "invoke_tool missing tool_id",
@@ -664,7 +664,7 @@ func TestProcessIntentPopulatesStepCountAndDuration(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 		},
 	})
 	if err != nil {
@@ -708,7 +708,7 @@ func TestProcessIntentRateLimited(t *testing.T) {
 			SessionID:   sessionID,
 			Intent: domain.Intent{
 				Type:   domain.IntentInvokeTool,
-				ToolID: "web.search",
+				ToolID: "web_search",
 			},
 		})
 		if err != nil {
@@ -736,7 +736,7 @@ func TestProcessIntentRateLimited(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 		},
 	})
 	if err != nil {
@@ -768,7 +768,7 @@ func TestProcessIntentRequireApprovalPolicy(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:      domain.IntentInvokeTool,
-			ToolID:    "dangerous.tool",
+			ToolID:    "dangerous_tool",
 			Arguments: json.RawMessage(`{"target":"production"}`),
 		},
 	})
@@ -842,7 +842,7 @@ func TestProcessIntentRequireApprovalStepHasDeadline(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "dangerous.tool",
+			ToolID: "dangerous_tool",
 		},
 	})
 	if err != nil {
@@ -885,7 +885,7 @@ func TestProcessIntentRejectsIntentWhileBlocked(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "dangerous.tool",
+			ToolID: "dangerous_tool",
 		},
 	})
 	if err != nil {
@@ -912,7 +912,7 @@ func TestProcessIntentRejectsIntentWhileBlocked(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "another.tool",
+			ToolID: "another_tool",
 		},
 	})
 	if !errors.Is(err, domain.ErrExecutionBlocked) {
@@ -991,7 +991,7 @@ func TestProcessIntentRejectsIntentWhileBlockedByWait(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "web.search",
+			ToolID: "web_search",
 		},
 	})
 	if !errors.Is(err, domain.ErrExecutionBlocked) {

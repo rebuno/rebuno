@@ -111,13 +111,13 @@ func TestPolicyAllowedToolPassesDenyGlob(t *testing.T) {
 		t.Fatalf("decode claim: %v", err)
 	}
 
-	// "safe.read_file" does not match "dangerous.*" — should be allowed
+	// "safe_read_file" does not match "dangerous_*" — should be allowed
 	status, body := hc.postJSON(t, "/v0/agents/intent", map[string]any{
 		"execution_id": execID,
 		"session_id":   claim.SessionID,
 		"intent": map[string]any{
 			"type":    "invoke_tool",
-			"tool_id": "safe.read_file",
+			"tool_id": "safe_read_file",
 			"arguments": map[string]string{
 				"path": "/tmp/test.txt",
 			},
@@ -181,7 +181,7 @@ func TestPolicyDenyWithArgumentInspection(t *testing.T) {
 			"session_id":   claim.SessionID,
 			"intent": map[string]any{
 				"type":    "invoke_tool",
-				"tool_id": "fs.write_file",
+				"tool_id": "fs_write_file",
 				"arguments": map[string]string{
 					"path":    "/etc/passwd",
 					"content": "evil",
@@ -208,7 +208,7 @@ func TestPolicyDenyWithArgumentInspection(t *testing.T) {
 			"session_id":   claim.SessionID,
 			"intent": map[string]any{
 				"type":    "invoke_tool",
-				"tool_id": "fs.write_file",
+				"tool_id": "fs_write_file",
 				"arguments": map[string]string{
 					"path":    "/home/user/notes.txt",
 					"content": "hello",
@@ -605,7 +605,7 @@ func TestPolicyAgentScopedVsGlobal(t *testing.T) {
 	ts := startServerWithPolicy(t, testPool, engine)
 	hc := newHTTPClient(ts.URL)
 
-	// Subtest: agent with specific rules — "special-agent" allows "secret.read"
+	// Subtest: agent with specific rules — "special-agent" allows "secret_read"
 	t.Run("agent_specific_allows", func(t *testing.T) {
 		agentID := "special-agent"
 		consumerID := "consumer-scoped-allow"
@@ -630,7 +630,7 @@ func TestPolicyAgentScopedVsGlobal(t *testing.T) {
 			"session_id":   claim.SessionID,
 			"intent": map[string]any{
 				"type":    "invoke_tool",
-				"tool_id": "secret.read",
+				"tool_id": "secret_read",
 			},
 		})
 		if status != http.StatusOK {
@@ -642,11 +642,11 @@ func TestPolicyAgentScopedVsGlobal(t *testing.T) {
 			t.Fatalf("decode: %v", err)
 		}
 		if !result.Accepted {
-			t.Fatalf("expected special-agent to be allowed secret.read, got: %s", result.Error)
+			t.Fatalf("expected special-agent to be allowed secret_read, got: %s", result.Error)
 		}
 	})
 
-	// Subtest: unknown agent falls back to global — "secret.read" is denied globally
+	// Subtest: unknown agent falls back to global — "secret_read" is denied globally
 	t.Run("unknown_agent_uses_global_deny", func(t *testing.T) {
 		agentID := "unknown-agent"
 		consumerID := "consumer-scoped-deny"
@@ -671,7 +671,7 @@ func TestPolicyAgentScopedVsGlobal(t *testing.T) {
 			"session_id":   claim.SessionID,
 			"intent": map[string]any{
 				"type":    "invoke_tool",
-				"tool_id": "secret.read",
+				"tool_id": "secret_read",
 			},
 		})
 		if status != http.StatusOK {
@@ -683,7 +683,7 @@ func TestPolicyAgentScopedVsGlobal(t *testing.T) {
 			t.Fatalf("decode: %v", err)
 		}
 		if result.Accepted {
-			t.Fatalf("expected unknown-agent to be denied secret.read by global policy")
+			t.Fatalf("expected unknown-agent to be denied secret_read by global policy")
 		}
 	})
 }
@@ -714,7 +714,7 @@ func TestPolicyDefaultDenyWhenNoRulesMatch(t *testing.T) {
 		t.Fatalf("decode claim: %v", err)
 	}
 
-	// Only "safe.read" is explicitly allowed; everything else falls to default deny
+	// Only "safe_read" is explicitly allowed; everything else falls to default deny
 	status, body := hc.postJSON(t, "/v0/agents/intent", map[string]any{
 		"execution_id": execID,
 		"session_id":   claim.SessionID,
@@ -741,7 +741,7 @@ func TestPolicyDefaultDenyWhenNoRulesMatch(t *testing.T) {
 		"session_id":   claim.SessionID,
 		"intent": map[string]any{
 			"type":    "invoke_tool",
-			"tool_id": "safe.read",
+			"tool_id": "safe_read",
 		},
 	})
 	if status != http.StatusOK {
@@ -752,7 +752,7 @@ func TestPolicyDefaultDenyWhenNoRulesMatch(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if !result.Accepted {
-		t.Fatalf("expected safe.read to be allowed, got: %s", result.Error)
+		t.Fatalf("expected safe_read to be allowed, got: %s", result.Error)
 	}
 }
 
@@ -843,7 +843,7 @@ func buildDenyDangerousPolicy(t *testing.T) policy.Engine {
 				ID:       "deny-dangerous",
 				Priority: 0,
 				When: domain.PolicyCondition{
-					ToolID: "dangerous.*",
+					ToolID: "dangerous_*",
 				},
 				Then: domain.PolicyAction{
 					Decision: domain.PolicyDeny,
@@ -880,7 +880,7 @@ func buildArgumentInspectionPolicy(t *testing.T) policy.Engine {
 				ID:       "deny-etc-writes",
 				Priority: 0,
 				When: domain.PolicyCondition{
-					ToolID: "fs.write_file",
+					ToolID: "fs_write_file",
 					Arguments: []domain.ArgumentPredicate{
 						{
 							Field:   "path",
@@ -1038,7 +1038,7 @@ func buildAgentScopedPolicy(t *testing.T) policy.Engine {
 						ID:       "allow-secret-read",
 						Priority: 0,
 						When: domain.PolicyCondition{
-							ToolID: "secret.read",
+							ToolID: "secret_read",
 						},
 						Then: domain.PolicyAction{
 							Decision: domain.PolicyAllow,
@@ -1097,11 +1097,11 @@ func buildDefaultDenyPolicy(t *testing.T) policy.Engine {
 				ID:       "allow-safe-read",
 				Priority: 0,
 				When: domain.PolicyCondition{
-					ToolID: "safe.read",
+					ToolID: "safe_read",
 				},
 				Then: domain.PolicyAction{
 					Decision: domain.PolicyAllow,
-					Reason:   "safe.read is explicitly allowed",
+					Reason:   "safe_read is explicitly allowed",
 				},
 			},
 		},

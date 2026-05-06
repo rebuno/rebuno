@@ -1,9 +1,9 @@
 """Demo agent: LangGraph agent with shell execution (demonstrates approval flow).
 
-The shell.exec tool is governed by policy:
+The shell_exec tool is governed by policy:
   - Safe commands (ls, cat, pwd, ...) are auto-allowed by the agent policy
   - Other commands require human approval via the client
-  - The global policy denies shell.exec for any agent without explicit rules
+  - The global policy denies shell_exec for any agent without explicit rules
 """
 
 import asyncio
@@ -35,7 +35,7 @@ agent = Agent(
 )
 
 
-@tool("shell.exec")
+@tool("shell_exec")
 async def shell_exec(command: str, timeout: int = 30) -> dict:
     """Execute a shell command."""
     logger.info("Executing: %s", command)

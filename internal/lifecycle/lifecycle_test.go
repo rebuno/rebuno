@@ -171,7 +171,7 @@ func TestCheckTimeouts(t *testing.T) {
 			{
 				StepID:   "step-1",
 				Type:     domain.EventStepCreated,
-				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1}),
 				Sequence: 3,
 			},
 			{
@@ -250,7 +250,7 @@ func TestCheckTimeouts(t *testing.T) {
 			{
 				StepID:   "step-1",
 				Type:     domain.EventStepCreated,
-				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1}),
 				Sequence: 3,
 			},
 			{
@@ -590,7 +590,7 @@ func stepCreatedEvent(stepID string, seq int64) domain.Event {
 	return domain.Event{
 		StepID:   stepID,
 		Type:     domain.EventStepCreated,
-		Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local.tool", Attempt: 1}),
+		Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local_tool", Attempt: 1}),
 		Sequence: seq,
 	}
 }
@@ -677,7 +677,7 @@ func TestExecutionTimeoutCancelsActiveSteps(t *testing.T) {
 		{
 			StepID:   "step-3",
 			Type:     domain.EventStepCreated,
-			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local.tool", Attempt: 1}),
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local_tool", Attempt: 1}),
 			Sequence: 5,
 		},
 		{
@@ -740,7 +740,7 @@ func TestStepTimeoutCancelsSiblingSteps(t *testing.T) {
 		{
 			StepID:   "step-4",
 			Type:     domain.EventStepCreated,
-			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local.tool", Attempt: 1}),
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "local_tool", Attempt: 1}),
 			Sequence: 7,
 		},
 		{
@@ -807,7 +807,7 @@ func TestFailStepTimeoutSkipsTerminalExecution(t *testing.T) {
 			{
 				StepID:   "step-1",
 				Type:     domain.EventStepCreated,
-				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1}),
 				Sequence: 3,
 			},
 			{
@@ -819,7 +819,7 @@ func TestFailStepTimeoutSkipsTerminalExecution(t *testing.T) {
 			{
 				StepID:   "step-2",
 				Type:     domain.EventStepCreated,
-				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.fetch", Attempt: 1}),
+				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web_fetch", Attempt: 1}),
 				Sequence: 5,
 			},
 			{
@@ -866,7 +866,7 @@ func TestFailStepTimeoutSkipsTerminalExecution(t *testing.T) {
 			{
 				StepID:   "step-1",
 				Type:     domain.EventStepCreated,
-				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+				Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1}),
 				Sequence: 3,
 			},
 			{
@@ -910,7 +910,7 @@ func TestStepTimeoutDecrementsActiveExecutions(t *testing.T) {
 		{
 			StepID:   "step-1",
 			Type:     domain.EventStepCreated,
-			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1}),
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1}),
 			Sequence: 3,
 		},
 		{
@@ -1128,18 +1128,18 @@ func TestCheckTimeoutsSkipsBlockedExecution(t *testing.T) {
 		{
 			StepID:   "step-1",
 			Type:     domain.EventStepCreated,
-			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1, Deadline: pastDeadline}),
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1, Deadline: pastDeadline}),
 			Sequence: 3,
 		},
 		{
 			StepID:   "step-1",
 			Type:     domain.EventStepApprovalRequired,
-			Payload:  mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web.search", Reason: "policy"}),
+			Payload:  mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web_search", Reason: "policy"}),
 			Sequence: 4,
 		},
 		{
 			Type:     domain.EventExecutionBlocked,
-			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "web.search"}),
+			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "web_search"}),
 			Sequence: 5,
 		},
 	}
@@ -1166,18 +1166,18 @@ func TestFailStepTimeoutSkipsBlockedExecution(t *testing.T) {
 		{
 			StepID:   "step-1",
 			Type:     domain.EventStepCreated,
-			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web.search", Attempt: 1, Deadline: pastDeadline}),
+			Payload:  mustMarshal(domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1, Deadline: pastDeadline}),
 			Sequence: 3,
 		},
 		{
 			StepID:   "step-1",
 			Type:     domain.EventStepApprovalRequired,
-			Payload:  mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web.search", Reason: "policy"}),
+			Payload:  mustMarshal(domain.StepApprovalRequiredPayload{ToolID: "web_search", Reason: "policy"}),
 			Sequence: 4,
 		},
 		{
 			Type:     domain.EventExecutionBlocked,
-			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "web.search"}),
+			Payload:  mustMarshal(domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "web_search"}),
 			Sequence: 5,
 		},
 	}

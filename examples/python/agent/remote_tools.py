@@ -38,12 +38,12 @@ agent = Agent(
 # are used for framework schema generation. The runner provides the
 # implementation; the kernel routes each call to an idle runner.
 
-@tool("web.search", remote=True)
+@tool("web_search", remote=True)
 async def web_search(query: str) -> dict:
     """Search the web for information about a topic."""
 
 
-@tool("doc.fetch", remote=True)
+@tool("doc_fetch", remote=True)
 async def doc_fetch(url: str) -> dict:
     """Fetch and read the contents of a document at a URL."""
 

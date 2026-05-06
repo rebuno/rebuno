@@ -23,7 +23,7 @@ func TestHandleAgentDisconnectCancelsOrphanedSteps(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "local.tool",
+			ToolID: "local_tool",
 		},
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestHandleAgentDisconnectAllowsNewToolAfterReassignment(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "local.tool",
+			ToolID: "local_tool",
 		},
 	})
 	if err != nil {
@@ -109,7 +109,7 @@ func TestHandleAgentDisconnectAllowsNewToolAfterReassignment(t *testing.T) {
 		SessionID:   newSessionID,
 		Intent: domain.Intent{
 			Type:      domain.IntentInvokeTool,
-			ToolID:    "another.tool",
+			ToolID:    "another_tool",
 			Arguments: json.RawMessage(`{}`),
 		},
 	})
@@ -132,7 +132,7 @@ func TestHandleAgentDisconnectSkipsTerminalSteps(t *testing.T) {
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "local.tool",
+			ToolID: "local_tool",
 		},
 	})
 	if err != nil {

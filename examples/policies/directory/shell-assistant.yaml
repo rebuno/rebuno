@@ -6,7 +6,7 @@ rules:
     priority: 10
     when:
       action: "tool.invoke"
-      tool_id: "shell.exec"
+      tool_id: "shell_exec"
       arguments:
         - field: "command"
           pattern: "^(ls|cat|echo|pwd|whoami|date|head|tail|wc)"
@@ -24,7 +24,7 @@ rules:
     priority: 20
     when:
       action: "tool.invoke"
-      tool_id: "shell.exec"
+      tool_id: "shell_exec"
     then:
       decision: "require_approval"
       reason: "Shell commands require human approval"

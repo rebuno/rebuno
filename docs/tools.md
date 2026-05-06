@@ -17,11 +17,11 @@ See the [Python SDK](sdk/python.md) or [TypeScript SDK](sdk/typescript.md) for h
 
 ## Tool IDs
 
-Tool IDs are dot-separated strings (e.g., `web.search`, `doc.fetch`, `shell.exec`). Policy rules can use glob patterns to match groups of tools:
+Tool IDs are underscore-separated strings (e.g., `web_search`, `doc_fetch`, `shell_exec`). The first underscore-delimited segment acts as the namespace; policy rules can use glob patterns to match groups of tools:
 
 ```yaml
 when:
-  tool_ids: ["web.*"]   # matches web.search, web.fetch, etc.
+  tool_ids: ["web_*"]   # matches web_search, web_fetch, etc.
 ```
 
 ## MCP Tools
@@ -64,7 +64,7 @@ agent.mcp_servers_from_config(config)
 ## Execution Flow
 
 ```
-Agent calls ctx.invoke_tool("web.search", {"query": "..."})
+Agent calls ctx.invoke_tool("web_search", {"query": "..."})
   -> SDK submits invoke_tool intent to kernel
   -> Kernel evaluates policy
   -> If denied: PolicyError raised, tool never executes

@@ -169,7 +169,7 @@ func TestRuleEngineMatchesByAgentID(t *testing.T) {
 
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action:  "tool.invoke",
-		ToolID:  "web.search",
+		ToolID:  "web_search",
 		AgentID: "researcher",
 	})
 	if result.Decision != domain.PolicyAllow {
@@ -178,7 +178,7 @@ func TestRuleEngineMatchesByAgentID(t *testing.T) {
 
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action:  "tool.invoke",
-		ToolID:  "web.search",
+		ToolID:  "web_search",
 		AgentID: "deploy-bot",
 	})
 	if result.Decision != domain.PolicyDeny {
@@ -200,14 +200,14 @@ func TestRuleEngineMatchesByAgentIDs(t *testing.T) {
 	})
 
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", AgentID: "analyst",
+		Action: "tool.invoke", ToolID: "web_search", AgentID: "analyst",
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow for analyst, got %s", result.Decision)
 	}
 
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", AgentID: "deploy-bot",
+		Action: "tool.invoke", ToolID: "web_search", AgentID: "deploy-bot",
 	})
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for deploy-bot, got %s", result.Decision)
@@ -220,7 +220,7 @@ func TestRuleEngineWildcardToolID(t *testing.T) {
 			{
 				ID:       "allow-web-tools",
 				Priority: 1,
-				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web.*"},
+				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web_*"},
 				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 			},
 		},
@@ -228,24 +228,24 @@ func TestRuleEngineWildcardToolID(t *testing.T) {
 	})
 
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search",
+		Action: "tool.invoke", ToolID: "web_search",
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow for web.search, got %s", result.Decision)
 	}
 
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.fetch",
+		Action: "tool.invoke", ToolID: "web_fetch",
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow for web.fetch, got %s", result.Decision)
 	}
 
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "shell.exec",
+		Action: "tool.invoke", ToolID: "shell_exec",
 	})
 	if result.Decision != domain.PolicyDeny {
-		t.Errorf("expected deny for shell.exec, got %s", result.Decision)
+		t.Errorf("expected deny for shell_exec, got %s", result.Decision)
 	}
 }
 
@@ -255,7 +255,7 @@ func TestRuleEngineWildcardToolIDs(t *testing.T) {
 			{
 				ID:       "allow-safe-tools",
 				Priority: 1,
-				When:     domain.PolicyCondition{Action: "tool.invoke", ToolIDs: []string{"web.*", "doc.*"}},
+				When:     domain.PolicyCondition{Action: "tool.invoke", ToolIDs: []string{"web_*", "doc_*"}},
 				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 			},
 		},
@@ -263,17 +263,17 @@ func TestRuleEngineWildcardToolIDs(t *testing.T) {
 	})
 
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "doc.fetch",
+		Action: "tool.invoke", ToolID: "doc_fetch",
 	})
 	if result.Decision != domain.PolicyAllow {
-		t.Errorf("expected allow for doc.fetch, got %s", result.Decision)
+		t.Errorf("expected allow for doc_fetch, got %s", result.Decision)
 	}
 
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "shell.exec",
+		Action: "tool.invoke", ToolID: "shell_exec",
 	})
 	if result.Decision != domain.PolicyDeny {
-		t.Errorf("expected deny for shell.exec, got %s", result.Decision)
+		t.Errorf("expected deny for shell_exec, got %s", result.Decision)
 	}
 }
 
@@ -286,7 +286,7 @@ func TestRuleEngineAgentAndToolCombined(t *testing.T) {
 				When: domain.PolicyCondition{
 					Action:  "tool.invoke",
 					AgentID: "researcher",
-					ToolID:  "web.*",
+					ToolID:  "web_*",
 				},
 				Then: domain.PolicyAction{Decision: domain.PolicyAllow, Reason: "researcher can use web tools"},
 			},
@@ -295,21 +295,21 @@ func TestRuleEngineAgentAndToolCombined(t *testing.T) {
 	})
 
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", AgentID: "researcher",
+		Action: "tool.invoke", ToolID: "web_search", AgentID: "researcher",
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow for researcher+web.search, got %s", result.Decision)
 	}
 
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "shell.exec", AgentID: "researcher",
+		Action: "tool.invoke", ToolID: "shell_exec", AgentID: "researcher",
 	})
 	if result.Decision != domain.PolicyDeny {
-		t.Errorf("expected deny for researcher+shell.exec, got %s", result.Decision)
+		t.Errorf("expected deny for researcher+shell_exec, got %s", result.Decision)
 	}
 
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", AgentID: "deploy-bot",
+		Action: "tool.invoke", ToolID: "web_search", AgentID: "deploy-bot",
 	})
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for deploy-bot+web.search, got %s", result.Decision)
@@ -464,7 +464,7 @@ func TestRuleEngineEmptyActionMatchesAll(t *testing.T) {
 			{
 				ID:       "match-all",
 				Priority: 1,
-				When:     domain.PolicyCondition{ToolID: "web.search"},
+				When:     domain.PolicyCondition{ToolID: "web_search"},
 				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 			},
 		},
@@ -472,7 +472,7 @@ func TestRuleEngineEmptyActionMatchesAll(t *testing.T) {
 	})
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action: "tool.invoke",
-		ToolID: "web.search",
+		ToolID: "web_search",
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow (empty action matches any), got %s", result.Decision)
@@ -596,7 +596,7 @@ func TestRuleEngineStepCountCondition(t *testing.T) {
 
 	// Under limit: should allow (rule doesn't match, falls to default allow)
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", StepCount: 10,
+		Action: "tool.invoke", ToolID: "web_search", StepCount: 10,
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow for step_count=10, got %s", result.Decision)
@@ -604,7 +604,7 @@ func TestRuleEngineStepCountCondition(t *testing.T) {
 
 	// At limit: should deny (rule matches)
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", StepCount: 50,
+		Action: "tool.invoke", ToolID: "web_search", StepCount: 50,
 	})
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for step_count=50, got %s", result.Decision)
@@ -612,7 +612,7 @@ func TestRuleEngineStepCountCondition(t *testing.T) {
 
 	// Over limit: should deny
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", StepCount: 100,
+		Action: "tool.invoke", ToolID: "web_search", StepCount: 100,
 	})
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for step_count=100, got %s", result.Decision)
@@ -638,7 +638,7 @@ func TestRuleEngineDurationCondition(t *testing.T) {
 
 	// Over duration: should deny (rule matches)
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", DurationMs: 90000,
+		Action: "tool.invoke", ToolID: "web_search", DurationMs: 90000,
 	})
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for duration=90s, got %s", result.Decision)
@@ -646,7 +646,7 @@ func TestRuleEngineDurationCondition(t *testing.T) {
 
 	// Under duration: should allow (rule doesn't match, falls to default)
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", DurationMs: 30000,
+		Action: "tool.invoke", ToolID: "web_search", DurationMs: 30000,
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow for duration=30s, got %s", result.Decision)
@@ -654,7 +654,7 @@ func TestRuleEngineDurationCondition(t *testing.T) {
 
 	// At boundary: should deny (rule matches, inclusive threshold like MinStepCount)
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", DurationMs: 60000,
+		Action: "tool.invoke", ToolID: "web_search", DurationMs: 60000,
 	})
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for duration=60000 (at boundary, inclusive), got %s", result.Decision)
@@ -662,7 +662,7 @@ func TestRuleEngineDurationCondition(t *testing.T) {
 
 	// One below boundary: should allow (rule doesn't match)
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", DurationMs: 59999,
+		Action: "tool.invoke", ToolID: "web_search", DurationMs: 59999,
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow for duration=59999 (below boundary), got %s", result.Decision)
@@ -670,7 +670,7 @@ func TestRuleEngineDurationCondition(t *testing.T) {
 
 	// One above boundary: should deny
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", DurationMs: 60001,
+		Action: "tool.invoke", ToolID: "web_search", DurationMs: 60001,
 	})
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for duration=60001 (above boundary), got %s", result.Decision)
@@ -696,7 +696,7 @@ func TestRuleEngineScheduleCondition(t *testing.T) {
 	// Wednesday 12:00 UTC - within business hours
 	withinHours := time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC)
 	result, _ := engine.EvaluateAt(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search",
+		Action: "tool.invoke", ToolID: "web_search",
 	}, withinHours)
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow during business hours, got %s", result.Decision)
@@ -705,7 +705,7 @@ func TestRuleEngineScheduleCondition(t *testing.T) {
 	// Saturday 12:00 UTC - outside business hours
 	weekend := time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC)
 	result, _ = engine.EvaluateAt(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search",
+		Action: "tool.invoke", ToolID: "web_search",
 	}, weekend)
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny on weekend, got %s", result.Decision)
@@ -714,7 +714,7 @@ func TestRuleEngineScheduleCondition(t *testing.T) {
 	// Wednesday 22:00 UTC - outside business hours
 	lateNight := time.Date(2026, 3, 25, 22, 0, 0, 0, time.UTC)
 	result, _ = engine.EvaluateAt(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search",
+		Action: "tool.invoke", ToolID: "web_search",
 	}, lateNight)
 	if result.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny outside hours, got %s", result.Decision)
@@ -727,7 +727,7 @@ func TestRuleEngineRateLimitPropagated(t *testing.T) {
 			{
 				ID:        "rate-limited-shell",
 				Priority:  1,
-				When:      domain.PolicyCondition{Action: "tool.invoke", ToolID: "shell.exec"},
+				When:      domain.PolicyCondition{Action: "tool.invoke", ToolID: "shell_exec"},
 				Then:      domain.PolicyAction{Decision: domain.PolicyAllow},
 				RateLimit: &domain.RateLimitConfig{Max: 10, Window: "1m"},
 			},
@@ -735,7 +735,7 @@ func TestRuleEngineRateLimitPropagated(t *testing.T) {
 	})
 
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "shell.exec",
+		Action: "tool.invoke", ToolID: "shell_exec",
 	})
 	if result.Decision != domain.PolicyAllow {
 		t.Errorf("expected allow, got %s", result.Decision)
@@ -754,14 +754,14 @@ func TestRuleEngineNoRateLimitWhenNotConfigured(t *testing.T) {
 			{
 				ID:       "allow-search",
 				Priority: 1,
-				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web.search"},
+				When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web_search"},
 				Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 			},
 		},
 	})
 
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search",
+		Action: "tool.invoke", ToolID: "web_search",
 	})
 	if result.RateLimit != nil {
 		t.Errorf("expected nil rate limit, got %+v", result.RateLimit)
@@ -776,7 +776,7 @@ func TestRuleEngineArgumentPredicateWithToolID(t *testing.T) {
 				Priority: 1,
 				When: domain.PolicyCondition{
 					Action: "tool.invoke",
-					ToolID: "shell.exec",
+					ToolID: "shell_exec",
 					Arguments: []domain.ArgumentPredicate{
 						{Field: "command", Pattern: "^ls"},
 					},
@@ -788,7 +788,7 @@ func TestRuleEngineArgumentPredicateWithToolID(t *testing.T) {
 				Priority: 10,
 				When: domain.PolicyCondition{
 					Action: "tool.invoke",
-					ToolID: "shell.exec",
+					ToolID: "shell_exec",
 				},
 				Then: domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "shell denied by default"},
 			},
@@ -801,7 +801,7 @@ func TestRuleEngineArgumentPredicateWithToolID(t *testing.T) {
 
 	result, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action:    "tool.invoke",
-		ToolID:    "shell.exec",
+		ToolID:    "shell_exec",
 		Arguments: json.RawMessage(`{"command":"ls -la"}`),
 	})
 	if result.Decision != domain.PolicyAllow {
@@ -813,7 +813,7 @@ func TestRuleEngineArgumentPredicateWithToolID(t *testing.T) {
 
 	result, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action:    "tool.invoke",
-		ToolID:    "shell.exec",
+		ToolID:    "shell_exec",
 		Arguments: json.RawMessage(`{"command":"rm -rf /"}`),
 	})
 	if result.Decision != domain.PolicyDeny {

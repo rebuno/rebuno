@@ -68,7 +68,7 @@ const agent = new ResearchAgent({
 
 agent.addRemoteTool(
   defineTool({
-    id: "web.search",
+    id: "web_search",
     description: "Search the web for information about a topic.",
     inputSchema: z.object({ query: z.string() }),
     execute: async () => ({}),
@@ -77,7 +77,7 @@ agent.addRemoteTool(
 
 agent.addRemoteTool(
   defineTool({
-    id: "doc.fetch",
+    id: "doc_fetch",
     description: "Fetch and read the contents of a document at a URL.",
     inputSchema: z.object({ url: z.string() }),
     execute: async () => ({}),

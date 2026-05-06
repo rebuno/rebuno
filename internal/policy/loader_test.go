@@ -23,7 +23,7 @@ rules:
     priority: 10
     when:
       action: "tool.invoke"
-      tool_id: "web.search"
+      tool_id: "web_search"
     then:
       decision: "allow"
 `
@@ -34,7 +34,7 @@ rules:
     priority: 10
     when:
       action: "tool.invoke"
-      tool_id: "shell.exec"
+      tool_id: "shell_exec"
     then:
       decision: "allow"
 `
@@ -160,7 +160,7 @@ func TestAgentEngineRoutesToCorrectAgent(t *testing.T) {
 					{
 						ID:       "allow-web",
 						Priority: 10,
-						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web.search"},
+						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web_search"},
 						Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 					},
 				},
@@ -170,7 +170,7 @@ func TestAgentEngineRoutesToCorrectAgent(t *testing.T) {
 					{
 						ID:       "allow-shell",
 						Priority: 10,
-						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "shell.exec"},
+						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "shell_exec"},
 						Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 					},
 				},
@@ -185,38 +185,38 @@ func TestAgentEngineRoutesToCorrectAgent(t *testing.T) {
 
 	r, err := engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action:  "tool.invoke",
-		ToolID:  "web.search",
+		ToolID:  "web_search",
 		AgentID: "researcher",
 	})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
 	if r.Decision != domain.PolicyAllow {
-		t.Errorf("expected allow for researcher+web.search, got %s", r.Decision)
+		t.Errorf("expected allow for researcher+web_search, got %s", r.Decision)
 	}
 
 	r, err = engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action:  "tool.invoke",
-		ToolID:  "shell.exec",
+		ToolID:  "shell_exec",
 		AgentID: "researcher",
 	})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
 	if r.Decision != domain.PolicyDeny {
-		t.Errorf("expected deny for researcher+shell.exec, got %s", r.Decision)
+		t.Errorf("expected deny for researcher+shell_exec, got %s", r.Decision)
 	}
 
 	r, err = engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action:  "tool.invoke",
-		ToolID:  "shell.exec",
+		ToolID:  "shell_exec",
 		AgentID: "shell",
 	})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
 	if r.Decision != domain.PolicyAllow {
-		t.Errorf("expected allow for shell+shell.exec, got %s", r.Decision)
+		t.Errorf("expected allow for shell+shell_exec, got %s", r.Decision)
 	}
 }
 
@@ -228,7 +228,7 @@ func TestAgentEngineDeniesUnknownAgent(t *testing.T) {
 					{
 						ID:       "allow-web",
 						Priority: 10,
-						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web.search"},
+						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web_search"},
 						Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 					},
 				},
@@ -243,7 +243,7 @@ func TestAgentEngineDeniesUnknownAgent(t *testing.T) {
 
 	r, err := engine.Evaluate(context.Background(), domain.PolicyInput{
 		Action:  "tool.invoke",
-		ToolID:  "web.search",
+		ToolID:  "web_search",
 		AgentID: "unknown-agent",
 	})
 	if err != nil {
@@ -293,7 +293,7 @@ rules:
     priority: 100
     when:
       action: "tool.invoke"
-      tool_id: "dangerous.tool"
+      tool_id: "dangerous_tool"
     then:
       decision: "deny"
       reason: "globally denied"
@@ -309,7 +309,7 @@ rules:
     when:
       action: "tool.invoke"
       agent_ids: ["researcher", "analyst"]
-      tool_id: "web.*"
+      tool_id: "web_*"
     then:
       decision: "allow"
       reason: "research agents can use web tools"
@@ -362,7 +362,7 @@ func TestAgentEngineGlobalRulesMergedIntoAgentEngine(t *testing.T) {
 					{
 						ID:       "allow-web",
 						Priority: 10,
-						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web.search"},
+						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web_search"},
 						Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 					},
 				},
@@ -373,7 +373,7 @@ func TestAgentEngineGlobalRulesMergedIntoAgentEngine(t *testing.T) {
 				{
 					ID:       "global-deny-dangerous",
 					Priority: 100,
-					When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "dangerous.tool"},
+					When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "dangerous_tool"},
 					Then:     domain.PolicyAction{Decision: domain.PolicyDeny, Reason: "globally denied"},
 				},
 			},
@@ -387,15 +387,15 @@ func TestAgentEngineGlobalRulesMergedIntoAgentEngine(t *testing.T) {
 
 	// Agent-specific rule still works
 	r, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", AgentID: "researcher",
+		Action: "tool.invoke", ToolID: "web_search", AgentID: "researcher",
 	})
 	if r.Decision != domain.PolicyAllow {
-		t.Errorf("expected allow for researcher+web.search, got %s", r.Decision)
+		t.Errorf("expected allow for researcher+web_search, got %s", r.Decision)
 	}
 
 	// Global rule is enforced within agent engine
 	r, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "dangerous.tool", AgentID: "researcher",
+		Action: "tool.invoke", ToolID: "dangerous_tool", AgentID: "researcher",
 	})
 	if r.Decision != domain.PolicyDeny {
 		t.Errorf("expected deny for researcher+dangerous.tool via global rule, got %s", r.Decision)
@@ -413,7 +413,7 @@ func TestAgentEngineGlobalFallbackForUnknownAgent(t *testing.T) {
 					{
 						ID:       "allow-web",
 						Priority: 10,
-						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web.search"},
+						When:     domain.PolicyCondition{Action: "tool.invoke", ToolID: "web_search"},
 						Then:     domain.PolicyAction{Decision: domain.PolicyAllow},
 					},
 				},
@@ -749,7 +749,7 @@ func TestAgentEngineGlobalAgentIDsScoping(t *testing.T) {
 				{
 					ID:       "research-agents-web",
 					Priority: 50,
-					When:     domain.PolicyCondition{Action: "tool.invoke", AgentIDs: []string{"researcher", "analyst"}, ToolID: "web.*"},
+					When:     domain.PolicyCondition{Action: "tool.invoke", AgentIDs: []string{"researcher", "analyst"}, ToolID: "web_*"},
 					Then:     domain.PolicyAction{Decision: domain.PolicyAllow, Reason: "research agents can use web tools"},
 				},
 			},
@@ -764,17 +764,17 @@ func TestAgentEngineGlobalAgentIDsScoping(t *testing.T) {
 
 	// Matching agent_ids + tool
 	r, _ := engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", AgentID: "analyst",
+		Action: "tool.invoke", ToolID: "web_search", AgentID: "analyst",
 	})
 	if r.Decision != domain.PolicyAllow {
-		t.Errorf("expected allow for analyst+web.search, got %s", r.Decision)
+		t.Errorf("expected allow for analyst+web_search, got %s", r.Decision)
 	}
 
 	// Non-matching agent_ids
 	r, _ = engine.Evaluate(context.Background(), domain.PolicyInput{
-		Action: "tool.invoke", ToolID: "web.search", AgentID: "deploy-bot",
+		Action: "tool.invoke", ToolID: "web_search", AgentID: "deploy-bot",
 	})
 	if r.Decision != domain.PolicyDeny {
-		t.Errorf("expected deny for deploy-bot+web.search, got %s", r.Decision)
+		t.Errorf("expected deny for deploy-bot+web_search, got %s", r.Decision)
 	}
 }

@@ -1,4 +1,4 @@
-// Demo runner: executes web.search, doc.fetch, and calculator tools
+// Demo runner: executes web_search, doc_fetch, and calculator tools
 // on behalf of agents that use addRemoteTool().
 
 import { BaseRunner } from "rebuno";
@@ -51,9 +51,9 @@ class DemoRunner extends BaseRunner {
     const arguments_ = args as Record<string, unknown> | undefined;
 
     switch (toolId) {
-      case "web.search":
+      case "web_search":
         return this.webSearch(arguments_);
-      case "doc.fetch":
+      case "doc_fetch":
         return this.docFetch(arguments_);
       case "calculator":
         return this.calculator(arguments_);
@@ -110,7 +110,7 @@ class DemoRunner extends BaseRunner {
 const runner = new DemoRunner({
   runnerId: "demo-runner",
   kernelUrl: process.env.REBUNO_KERNEL_URL ?? "http://localhost:8080",
-  capabilities: ["web.search", "doc.fetch", "calculator"],
+  capabilities: ["web_search", "doc_fetch", "calculator"],
   name: "Demo Runner",
 });
 

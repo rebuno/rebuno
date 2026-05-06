@@ -6,7 +6,7 @@ rules:
     priority: 10
     when:
       action: "tool.invoke"
-      tool_ids: ["doc.*", "web.*"]
+      tool_ids: ["doc_*", "web_*"]
     then:
       decision: "allow"
       timeout_ms: 30000

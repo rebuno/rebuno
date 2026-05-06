@@ -148,7 +148,7 @@ func setupApprovalBlockedExecution(t *testing.T, k *Kernel, sessions *mockSessio
 		SessionID:   sessionID,
 		Intent: domain.Intent{
 			Type:   domain.IntentInvokeTool,
-			ToolID: "dangerous.tool",
+			ToolID: "dangerous_tool",
 		},
 	})
 	if err != nil {
