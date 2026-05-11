@@ -1393,6 +1393,33 @@ func TestReassignIfNeededAssignsViaRealFlow(t *testing.T) {
 			t.Fatalf("expected no assignment when agent not connected, got %d", assignCount)
 		}
 	})
+
+	t.Run("returns false when assignment fails", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = true
+		f.assigner.assignFail = true
+
+		execID := "exec-assign-fail"
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2),
+		}
+
+		m := f.manager(time.Hour)
+		result := m.reassignIfNeeded(context.Background(), execID, "agent-1", "test")
+
+		if result {
+			t.Fatal("expected reassignIfNeeded to return false when assignment fails")
+		}
+
+		f.assigner.mu.Lock()
+		assignCount := len(f.assigner.assigned)
+		f.assigner.mu.Unlock()
+
+		if assignCount != 1 {
+			t.Fatalf("expected 1 assignment attempt, got %d", assignCount)
+		}
+	})
 }
 
 func mustMarshal(v any) json.RawMessage {

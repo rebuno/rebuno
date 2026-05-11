@@ -297,8 +297,9 @@ func (m *mockAgentHub) HasConnections(_ string) bool {
 }
 
 type mockAssigner struct {
-	mu       sync.Mutex
-	assigned []assignedExecution
+	mu         sync.Mutex
+	assigned   []assignedExecution
+	assignFail bool
 }
 
 type assignedExecution struct {
@@ -310,13 +311,14 @@ func newMockAssigner() *mockAssigner {
 	return &mockAssigner{}
 }
 
-func (m *mockAssigner) TryAssignExecution(_ context.Context, executionID, agentID string) {
+func (m *mockAssigner) TryAssignExecution(_ context.Context, executionID, agentID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.assigned = append(m.assigned, assignedExecution{
 		ExecutionID: executionID,
 		AgentID:     agentID,
 	})
+	return !m.assignFail
 }
 
 type mockLocker struct{}

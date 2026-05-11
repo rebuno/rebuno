@@ -34,7 +34,7 @@ type EventEmitter interface {
 }
 
 type ExecutionAssigner interface {
-	TryAssignExecution(ctx context.Context, executionID, agentID string)
+	TryAssignExecution(ctx context.Context, executionID, agentID string) bool
 }
 
 type Deps struct {
@@ -168,11 +168,21 @@ func (m *Manager) reapSessions(ctx context.Context) {
 		}
 		if state.Execution.Status == domain.ExecutionPending {
 			if m.assigner != nil && m.agentHub.HasConnections(state.AgentID) {
-				m.logger.Info("session reaper: pending execution has connected agent, assigning",
-					slog.String("execution_id", execID),
-					slog.String("agent_id", state.AgentID),
-				)
-				m.assigner.TryAssignExecution(ctx, execID, state.AgentID)
+				release, lockErr := m.acquireLock(ctx, execID)
+				if lockErr != nil {
+					m.logger.Warn("session reaper: failed to acquire lock for pending assignment",
+						slog.String("execution_id", execID),
+						slog.String("error", lockErr.Error()),
+					)
+				} else {
+					if m.assigner.TryAssignExecution(ctx, execID, state.AgentID) {
+						m.logger.Info("session reaper: pending execution assigned to connected agent",
+							slog.String("execution_id", execID),
+							slog.String("agent_id", state.AgentID),
+						)
+					}
+					release()
+				}
 			}
 			continue
 		}
@@ -314,12 +324,18 @@ func (m *Manager) reassignIfNeeded(ctx context.Context, executionID, agentID, ca
 	}
 
 	if m.assigner != nil && m.agentHub.HasConnections(agentID) {
-		m.assigner.TryAssignExecution(ctx, executionID, agentID)
-		m.logger.Info(caller+": assigned execution to connected agent",
+		if m.assigner.TryAssignExecution(ctx, executionID, agentID) {
+			m.logger.Info(caller+": assigned execution to connected agent",
+				slog.String("execution_id", executionID),
+				slog.String("agent_id", agentID),
+			)
+			return true
+		}
+		m.logger.Warn(caller+": assignment to connected agent failed, execution stays pending",
 			slog.String("execution_id", executionID),
 			slog.String("agent_id", agentID),
 		)
-		return true
+		return false
 	}
 
 	m.logger.Info(caller+": no agent connected, execution stays pending",
