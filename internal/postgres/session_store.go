@@ -97,6 +97,17 @@ func (s *SessionStore) Delete(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+func (s *SessionStore) DeleteByExecution(ctx context.Context, executionID string) (int, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM sessions WHERE execution_id = $1`,
+		executionID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete sessions by execution: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (s *SessionStore) DeleteAll(ctx context.Context) (int, error) {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM sessions`)
 	if err != nil {

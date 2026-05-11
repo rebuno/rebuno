@@ -202,6 +202,17 @@ func (s *stubSessionStore) DeleteAll(_ context.Context) (int, error) {
 	return count, nil
 }
 
+func (s *stubSessionStore) DeleteByExecution(_ context.Context, executionID string) (int, error) {
+	count := 0
+	for id, sess := range s.sessions {
+		if sess.ExecutionID == executionID {
+			delete(s.sessions, id)
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (s *stubSessionStore) DeleteExpired(_ context.Context, _ time.Duration) (int, error) {
 	return 0, nil
 }

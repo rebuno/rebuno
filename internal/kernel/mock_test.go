@@ -363,6 +363,31 @@ func (m *mockSessionStore) Delete(_ context.Context, sessionID string) error {
 	return nil
 }
 
+func (m *mockSessionStore) countByExecution(executionID string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, s := range m.sessions {
+		if s.ExecutionID == executionID {
+			count++
+		}
+	}
+	return count
+}
+
+func (m *mockSessionStore) DeleteByExecution(_ context.Context, executionID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for id, s := range m.sessions {
+		if s.ExecutionID == executionID {
+			delete(m.sessions, id)
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (m *mockSessionStore) DeleteAll(_ context.Context) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
