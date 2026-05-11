@@ -196,6 +196,7 @@ func runServer(cfg *config.Config) error {
 		Locker:           locker,
 		Projector:        k.Projector(),
 		Emitter:          k,
+		Assigner:         k,
 		Logger:           logger,
 		Metrics:          metrics,
 		ExecutionTimeout: cfg.ExecutionTimeout,
