@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -472,6 +473,127 @@ func TestApprovalNoSessionReCreationWhenAgentDisconnected(t *testing.T) {
 	_, found, _ = sessions.GetByExecution(ctx, execID)
 	if found {
 		t.Fatal("expected no session when agent is disconnected")
+	}
+}
+
+func TestApprovalResumeNoDuplicateSessions(t *testing.T) {
+	k, _, agentHub, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	agentHub.hasConn = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Simulate a stale session that was NOT reaped (e.g. expiry reaper has not
+	// run yet). The original session still exists in the store.
+	originalSess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist before approval")
+	}
+
+	// Mark the original session as expired so restoreSessionAfterApproval
+	// finds it, extends it, but does NOT create a duplicate.
+	// However, to trigger the re-creation path (the bug), we delete it and
+	// then manually re-insert a stale session with a different ID to simulate
+	// multiple rows for the same execution.
+	sessions.Delete(ctx, originalSess.ID)
+	staleSession := domain.Session{
+		ID:          "stale-session-id",
+		ExecutionID: execID,
+		AgentID:     "agent-1",
+		ConsumerID:  "old-consumer",
+		CreatedAt:   time.Now().Add(-10 * time.Minute),
+		ExpiresAt:   time.Now().Add(-5 * time.Minute),
+	}
+	sessions.Create(ctx, staleSession)
+
+	if sessions.countByExecution(execID) != 1 {
+		t.Fatalf("expected 1 session before approval, got %d", sessions.countByExecution(execID))
+	}
+
+	// Approve the step — restoreSessionAfterApproval should find the stale
+	// session, extend it, and NOT create a second one.
+	// Before the fix, this would create a duplicate session.
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":true}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after approval, got %s", state.Execution.Status)
+	}
+
+	// The critical assertion: at most one session must exist for this execution.
+	count := sessions.countByExecution(execID)
+	if count != 1 {
+		t.Fatalf("expected exactly 1 session after approval resume, got %d (duplicate session bug)", count)
+	}
+
+	// Verify the session belongs to the execution.
+	sess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist after approval")
+	}
+	if sess.ExecutionID != execID {
+		t.Fatalf("session execution_id mismatch: got %q, want %q", sess.ExecutionID, execID)
+	}
+}
+
+func TestApprovalResumeDeletesStaleSessionBeforeReCreation(t *testing.T) {
+	k, _, agentHub, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	agentHub.hasConn = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Delete the real session to simulate reaper, then insert two stale sessions
+	// to simulate the pre-fix duplicate accumulation.
+	sess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist")
+	}
+	sessions.Delete(ctx, sess.ID)
+
+	for i := 0; i < 2; i++ {
+		sessions.Create(ctx, domain.Session{
+			ID:          fmt.Sprintf("stale-%d", i),
+			ExecutionID: execID,
+			AgentID:     "agent-1",
+			ConsumerID:  "old-consumer",
+			CreatedAt:   time.Now().Add(-time.Duration(10+i) * time.Minute),
+			ExpiresAt:   time.Now().Add(-time.Duration(5+i) * time.Minute),
+		})
+	}
+
+	if sessions.countByExecution(execID) != 2 {
+		t.Fatalf("expected 2 stale sessions, got %d", sessions.countByExecution(execID))
+	}
+
+	// GetByExecution returns one of them (found=true), so restoreSessionAfterApproval
+	// will extend it. But we also need to verify that exactly one remains.
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":true}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	count := sessions.countByExecution(execID)
+	if count != 1 {
+		t.Fatalf("expected exactly 1 session after approval resume cleaned up stale sessions, got %d", count)
+	}
+
+	// Verify the surviving session is valid.
+	finalSess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist")
+	}
+	if finalSess.IsExpired() {
+		t.Fatal("expected surviving session to not be expired")
 	}
 }
 
