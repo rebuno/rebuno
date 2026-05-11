@@ -293,6 +293,7 @@ func (k *Kernel) restoreSessionAfterApproval(ctx context.Context, executionID st
 			slog.String("execution_id", executionID),
 			slog.String("error", err.Error()),
 		)
+		return
 	} else if n > 1 {
 		k.logger.Info("cleaned up duplicate sessions for execution",
 			slog.String("execution_id", executionID),
