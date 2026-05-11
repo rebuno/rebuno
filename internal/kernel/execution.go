@@ -51,14 +51,14 @@ func (k *Kernel) CreateExecution(ctx context.Context, req CreateExecutionRequest
 
 	release, err := k.locker.Acquire(ctx, "execution:"+executionID)
 	if err == nil {
-		k.tryAssignExecution(ctx, executionID, req.AgentID)
+		k.TryAssignExecution(ctx, executionID, req.AgentID)
 		release()
 	}
 
 	return executionID, nil
 }
 
-func (k *Kernel) tryAssignExecution(ctx context.Context, executionID, agentID string) {
+func (k *Kernel) TryAssignExecution(ctx context.Context, executionID, agentID string) {
 	connInfo, connected := k.agentHub.PickConnection(agentID)
 	if !connected {
 		k.logger.Debug("no agent connected, execution stays pending",
@@ -133,7 +133,7 @@ func (k *Kernel) AssignPendingExecutions(ctx context.Context, agentID string) {
 			)
 			continue
 		}
-		k.tryAssignExecution(ctx, execID, agentID)
+		k.TryAssignExecution(ctx, execID, agentID)
 		release()
 	}
 }

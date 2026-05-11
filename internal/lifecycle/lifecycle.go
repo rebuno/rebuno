@@ -4,7 +4,6 @@ package lifecycle
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -34,6 +33,10 @@ type EventEmitter interface {
 	) (domain.Event, error)
 }
 
+type ExecutionAssigner interface {
+	TryAssignExecution(ctx context.Context, executionID, agentID string)
+}
+
 type Deps struct {
 	Events           store.EventStore
 	Sessions         store.SessionStore
@@ -43,6 +46,7 @@ type Deps struct {
 	Locker           store.Locker
 	Projector        *projector.Projector
 	Emitter          EventEmitter
+	Assigner         ExecutionAssigner
 	Logger           *slog.Logger
 	Metrics          *observe.Metrics
 	ExecutionTimeout time.Duration
@@ -58,6 +62,7 @@ type Manager struct {
 	locker           store.Locker
 	projector        *projector.Projector
 	emitter          EventEmitter
+	assigner         ExecutionAssigner
 	logger           *slog.Logger
 	metrics          *observe.Metrics
 	executionTimeout time.Duration
@@ -82,6 +87,7 @@ func NewManager(d Deps) *Manager {
 		locker:           d.Locker,
 		projector:        d.Projector,
 		emitter:          d.Emitter,
+		assigner:         d.Assigner,
 		logger:           logger,
 		metrics:          d.Metrics,
 		executionTimeout: d.ExecutionTimeout,
@@ -161,12 +167,12 @@ func (m *Manager) reapSessions(ctx context.Context) {
 			continue
 		}
 		if state.Execution.Status == domain.ExecutionPending {
-			if m.agentHub.HasConnections(state.AgentID) {
-				m.logger.Info("session reaper: pending execution has connected agent, notifying",
+			if m.assigner != nil && m.agentHub.HasConnections(state.AgentID) {
+				m.logger.Info("session reaper: pending execution has connected agent, assigning",
 					slog.String("execution_id", execID),
 					slog.String("agent_id", state.AgentID),
 				)
-				m.notifyPendingExecution(execID, state.AgentID)
+				m.assigner.TryAssignExecution(ctx, execID, state.AgentID)
 			}
 			continue
 		}
@@ -184,25 +190,6 @@ func (m *Manager) reapSessions(ctx context.Context) {
 
 		m.handleOrphanedExecution(ctx, execID)
 	}
-}
-
-func (m *Manager) notifyPendingExecution(executionID, agentID string) {
-	claimPayload := map[string]string{
-		"execution_id": executionID,
-		"agent_id":     agentID,
-	}
-	payload, err := json.Marshal(claimPayload)
-	if err != nil {
-		m.logger.Error("failed to marshal pending notification payload",
-			slog.String("execution_id", executionID),
-			slog.String("error", err.Error()),
-		)
-		return
-	}
-	m.agentHub.Send(agentID, store.AgentMessage{
-		Type:    "execution.pending",
-		Payload: payload,
-	})
 }
 
 func (m *Manager) handleOrphanedExecution(ctx context.Context, executionID string) {
@@ -326,29 +313,13 @@ func (m *Manager) reassignIfNeeded(ctx context.Context, executionID, agentID, ca
 		return false
 	}
 
-	if m.agentHub.HasConnections(agentID) {
-		claimPayload := map[string]string{
-			"execution_id": executionID,
-			"agent_id":     agentID,
-		}
-		payload, err := json.Marshal(claimPayload)
-		if err != nil {
-			m.logger.Error("failed to marshal claim payload",
-				slog.String("execution_id", executionID),
-				slog.String("error", err.Error()),
-			)
-			return false
-		}
-		if m.agentHub.Send(agentID, store.AgentMessage{
-			Type:    "execution.pending",
-			Payload: payload,
-		}) {
-			m.logger.Info(caller+": notified agent of pending execution via hub",
-				slog.String("execution_id", executionID),
-				slog.String("agent_id", agentID),
-			)
-			return true
-		}
+	if m.assigner != nil && m.agentHub.HasConnections(agentID) {
+		m.assigner.TryAssignExecution(ctx, executionID, agentID)
+		m.logger.Info(caller+": assigned execution to connected agent",
+			slog.String("execution_id", executionID),
+			slog.String("agent_id", agentID),
+		)
+		return true
 	}
 
 	m.logger.Info(caller+": no agent connected, execution stays pending",

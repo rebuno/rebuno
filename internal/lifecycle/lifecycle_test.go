@@ -23,6 +23,7 @@ type testFixture struct {
 	checkpoints *mockCheckpointStore
 	agentHub    *mockAgentHub
 	emitter     *mockEmitter
+	assigner    *mockAssigner
 }
 
 func newTestFixture() testFixture {
@@ -33,6 +34,7 @@ func newTestFixture() testFixture {
 		checkpoints: newMockCheckpointStore(),
 		agentHub:    newMockAgentHub(),
 		emitter:     newMockEmitter(),
+		assigner:    newMockAssigner(),
 	}
 }
 
@@ -53,6 +55,7 @@ func (f testFixture) managerWithMetrics(executionTimeout time.Duration, metrics 
 		Locker:           &mockLocker{},
 		Projector:        proj,
 		Emitter:          f.emitter,
+		Assigner:         f.assigner,
 		Logger:           logger,
 		Metrics:          metrics,
 		ExecutionTimeout: executionTimeout,
@@ -519,7 +522,7 @@ func TestRecoverActiveExecutionsBlockedOrphan(t *testing.T) {
 	}
 }
 
-func TestReapSessionsPendingExecutionWithConnectedAgentNotified(t *testing.T) {
+func TestReapSessionsPendingExecutionWithConnectedAgentAssigned(t *testing.T) {
 	f := newTestFixture()
 	f.sessions.deletedExpired = 1
 	f.agentHub.hasConn = true
@@ -531,18 +534,17 @@ func TestReapSessionsPendingExecutionWithConnectedAgentNotified(t *testing.T) {
 	m := f.manager(time.Hour)
 	m.reapSessions(context.Background())
 
-	// The reaper should notify the connected agent about the pending execution.
-	f.agentHub.mu.Lock()
-	var foundPendingNotification bool
-	for _, msg := range f.agentHub.sent {
-		if msg.Type == "execution.pending" && msg.AgentID == "agent-1" {
-			foundPendingNotification = true
+	f.assigner.mu.Lock()
+	var foundAssignment bool
+	for _, a := range f.assigner.assigned {
+		if a.ExecutionID == "exec-pending" && a.AgentID == "agent-1" {
+			foundAssignment = true
 		}
 	}
-	f.agentHub.mu.Unlock()
+	f.assigner.mu.Unlock()
 
-	if !foundPendingNotification {
-		t.Fatal("expected execution.pending notification for pending execution with connected agent")
+	if !foundAssignment {
+		t.Fatal("expected TryAssignExecution call for pending execution with connected agent")
 	}
 }
 
@@ -558,13 +560,12 @@ func TestReapSessionsPendingExecutionNoAgentSkipped(t *testing.T) {
 	m := f.manager(time.Hour)
 	m.reapSessions(context.Background())
 
-	// No notification should be sent when agent is not connected.
-	f.agentHub.mu.Lock()
-	sentCount := len(f.agentHub.sent)
-	f.agentHub.mu.Unlock()
+	f.assigner.mu.Lock()
+	assignCount := len(f.assigner.assigned)
+	f.assigner.mu.Unlock()
 
-	if sentCount != 0 {
-		t.Fatalf("expected no messages sent when agent not connected, got %d", sentCount)
+	if assignCount != 0 {
+		t.Fatalf("expected no assignment when agent not connected, got %d", assignCount)
 	}
 }
 
@@ -1290,6 +1291,108 @@ func TestReapSessionsBlockedExecutionWithConnectedAgentSkipped(t *testing.T) {
 	if _, ok := f.events.statusUpdates[execID]; ok {
 		t.Fatal("did not expect status update for blocked execution with connected agent")
 	}
+}
+
+func TestReassignIfNeededAssignsViaRealFlow(t *testing.T) {
+	t.Run("orphaned running execution is assigned to connected agent without reconnect", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = true
+
+		execID := "exec-orphan-reassign"
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2),
+		}
+
+		m := f.manager(time.Hour)
+		result := m.reassignIfNeeded(context.Background(), execID, "agent-1", "test")
+
+		if !result {
+			t.Fatal("expected reassignIfNeeded to return true")
+		}
+
+		status, ok := f.events.statusUpdates[execID]
+		if !ok {
+			t.Fatal("expected status update for orphaned execution")
+		}
+		if status != domain.ExecutionPending {
+			t.Fatalf("expected status pending, got %s", status)
+		}
+
+		f.assigner.mu.Lock()
+		var foundAssignment bool
+		for _, a := range f.assigner.assigned {
+			if a.ExecutionID == execID && a.AgentID == "agent-1" {
+				foundAssignment = true
+			}
+		}
+		f.assigner.mu.Unlock()
+
+		if !foundAssignment {
+			t.Fatal("expected TryAssignExecution to be called for the orphaned execution")
+		}
+
+		f.agentHub.mu.Lock()
+		for _, msg := range f.agentHub.sent {
+			if msg.Type == "execution.pending" {
+				t.Fatal("should not send execution.pending; must use TryAssignExecution instead")
+			}
+		}
+		f.agentHub.mu.Unlock()
+	})
+
+	t.Run("pending execution with connected agent is assigned during recovery", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = true
+
+		execID := "exec-pending-recover"
+		f.events.activeIDs = []string{execID}
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+		}
+
+		m := f.manager(time.Hour)
+		m.RecoverActiveExecutions(context.Background())
+
+		f.assigner.mu.Lock()
+		var foundAssignment bool
+		for _, a := range f.assigner.assigned {
+			if a.ExecutionID == execID && a.AgentID == "agent-1" {
+				foundAssignment = true
+			}
+		}
+		f.assigner.mu.Unlock()
+
+		if !foundAssignment {
+			t.Fatal("expected TryAssignExecution to be called during recovery for pending execution with connected agent")
+		}
+	})
+
+	t.Run("no assignment when agent is disconnected", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = false
+
+		execID := "exec-orphan-no-agent"
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2),
+		}
+
+		m := f.manager(time.Hour)
+		result := m.reassignIfNeeded(context.Background(), execID, "agent-1", "test")
+
+		if result {
+			t.Fatal("expected reassignIfNeeded to return false when no agent connected")
+		}
+
+		f.assigner.mu.Lock()
+		assignCount := len(f.assigner.assigned)
+		f.assigner.mu.Unlock()
+
+		if assignCount != 0 {
+			t.Fatalf("expected no assignment when agent not connected, got %d", assignCount)
+		}
+	})
 }
 
 func mustMarshal(v any) json.RawMessage {
