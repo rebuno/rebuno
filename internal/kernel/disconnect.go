@@ -100,7 +100,7 @@ func (k *Kernel) HandleAgentDisconnect(ctx context.Context, sessionID string) {
 		k.logger.Info("disconnect: execution reset to pending, attempting reassignment",
 			slog.String("execution_id", executionID),
 		)
-		k.tryAssignExecution(ctx, executionID, state.AgentID)
+		k.TryAssignExecution(ctx, executionID, state.AgentID)
 	case domain.ExecutionBlocked:
 		k.logger.Info("disconnect: execution is blocked, leaving as-is",
 			slog.String("execution_id", executionID),

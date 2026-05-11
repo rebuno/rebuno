@@ -51,21 +51,21 @@ func (k *Kernel) CreateExecution(ctx context.Context, req CreateExecutionRequest
 
 	release, err := k.locker.Acquire(ctx, "execution:"+executionID)
 	if err == nil {
-		k.tryAssignExecution(ctx, executionID, req.AgentID)
+		k.TryAssignExecution(ctx, executionID, req.AgentID)
 		release()
 	}
 
 	return executionID, nil
 }
 
-func (k *Kernel) tryAssignExecution(ctx context.Context, executionID, agentID string) {
+func (k *Kernel) TryAssignExecution(ctx context.Context, executionID, agentID string) bool {
 	connInfo, connected := k.agentHub.PickConnection(agentID)
 	if !connected {
 		k.logger.Debug("no agent connected, execution stays pending",
 			slog.String("execution_id", executionID),
 			slog.String("agent_id", agentID),
 		)
-		return
+		return false
 	}
 
 	result, err := k.buildClaimResult(ctx, executionID, agentID, connInfo.ConsumerID)
@@ -74,7 +74,7 @@ func (k *Kernel) tryAssignExecution(ctx context.Context, executionID, agentID st
 			slog.String("execution_id", executionID),
 			slog.String("error", err.Error()),
 		)
-		return
+		return false
 	}
 
 	payload, err := json.Marshal(result)
@@ -83,7 +83,7 @@ func (k *Kernel) tryAssignExecution(ctx context.Context, executionID, agentID st
 			slog.String("execution_id", executionID),
 			slog.String("error", err.Error()),
 		)
-		return
+		return false
 	}
 
 	k.agentHub.SendTo(connInfo.ConsumerID, agentID, store.AgentMessage{
@@ -96,6 +96,7 @@ func (k *Kernel) tryAssignExecution(ctx context.Context, executionID, agentID st
 		slog.String("agent_id", agentID),
 		slog.String("consumer_id", connInfo.ConsumerID),
 	)
+	return true
 }
 
 func (k *Kernel) AssignPendingExecutions(ctx context.Context, agentID string) {
@@ -133,7 +134,7 @@ func (k *Kernel) AssignPendingExecutions(ctx context.Context, agentID string) {
 			)
 			continue
 		}
-		k.tryAssignExecution(ctx, execID, agentID)
+		k.TryAssignExecution(ctx, execID, agentID)
 		release()
 	}
 }
