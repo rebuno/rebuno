@@ -80,6 +80,22 @@ func (s *SessionStore) Delete(_ context.Context, sessionID string) error {
 	return nil
 }
 
+func (s *SessionStore) DeleteByExecution(_ context.Context, executionID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for id, sess := range s.sessions {
+		if sess.ExecutionID == executionID {
+			delete(s.sessions, id)
+			count++
+		}
+	}
+	if count > 0 {
+		delete(s.byExec, executionID)
+	}
+	return count, nil
+}
+
 func (s *SessionStore) DeleteAll(_ context.Context) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

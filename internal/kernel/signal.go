@@ -271,9 +271,11 @@ func (k *Kernel) handleApprovalSignal(
 	return nil
 }
 
-// restoreSessionAfterApproval extends the session TTL if it still exists,
-// or re-creates it when the session was reaped during the approval wait
-// and the agent still has an active SSE connection.
+// restoreSessionAfterApproval ensures exactly one live session exists for the
+// execution after an approval is resolved. It first removes all existing
+// sessions for the execution to prevent duplicates, then either re-creates
+// the canonical session (reusing the original session ID when possible) or
+// creates a new one if the agent still has an active SSE connection.
 func (k *Kernel) restoreSessionAfterApproval(ctx context.Context, executionID string, state *domain.ExecutionState) {
 	session, found, sessErr := k.sessions.GetByExecution(ctx, executionID)
 	if sessErr != nil {
@@ -284,9 +286,26 @@ func (k *Kernel) restoreSessionAfterApproval(ctx context.Context, executionID st
 		return
 	}
 
+	// Delete all sessions for this execution to enforce the single-session
+	// invariant and prevent duplicate session accumulation.
+	if n, err := k.sessions.DeleteByExecution(ctx, executionID); err != nil {
+		k.logger.Warn("failed to clean up sessions for execution",
+			slog.String("execution_id", executionID),
+			slog.String("error", err.Error()),
+		)
+	} else if n > 1 {
+		k.logger.Info("cleaned up duplicate sessions for execution",
+			slog.String("execution_id", executionID),
+			slog.Int("deleted", n),
+		)
+	}
+
 	if found {
-		if err := k.sessions.Extend(ctx, session.ID, k.config.AgentTimeout); err != nil {
-			k.logger.Warn("failed to extend session after approval",
+		// Re-insert the canonical session with a refreshed TTL.
+		sess := *session
+		sess.ExpiresAt = time.Now().Add(k.config.AgentTimeout)
+		if err := k.sessions.Create(ctx, sess); err != nil {
+			k.logger.Warn("failed to re-create session after approval",
 				slog.String("session_id", session.ID),
 				slog.String("error", err.Error()),
 			)
