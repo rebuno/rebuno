@@ -782,6 +782,65 @@ func TestEvictionCallbackAllConnectionsFull(t *testing.T) {
 	}
 }
 
+func TestSetOnEvictConcurrentWithSend(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.SetOnEvict(func(sessionIDs []string) {})
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.Send("agent-1", testMsg("test"))
+		}()
+	}
+	wg.Wait()
+}
+
+func TestCloseWaitsForEvictionCallbacks(t *testing.T) {
+	h := New(nil)
+
+	done := make(chan struct{})
+	h.SetOnEvict(func(sessionIDs []string) {
+		<-done
+	})
+
+	conn := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+
+	for i := 0; i < eventChannelSize; i++ {
+		conn.EventCh <- testMsg("fill")
+	}
+
+	h.Send("agent-1", testMsg("overflow"))
+
+	closed := make(chan struct{})
+	go func() {
+		h.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		t.Fatal("expected Close to block while eviction callback is in-flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(done)
+
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected Close to return after eviction callback completes")
+	}
+}
+
 func TestReRegisterClearsAllSessions(t *testing.T) {
 	h := New(nil)
 	defer h.Close()

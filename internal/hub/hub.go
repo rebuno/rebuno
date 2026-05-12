@@ -15,6 +15,7 @@ type Hub struct {
 	rrIndex  map[string]int              // agentID -> round-robin index
 	logger   *slog.Logger
 	onEvict  func(sessionIDs []string)
+	evictWg  sync.WaitGroup
 }
 
 func New(logger *slog.Logger) *Hub {
@@ -180,9 +181,16 @@ func (h *Hub) Send(agentID string, msg store.AgentMessage) bool {
 	}
 
 	orphaned := h.evictConns(agentID, evict)
+	onEvict := h.onEvict
 	h.mu.Unlock()
 
-	h.fireOnEvict(orphaned)
+	if len(orphaned) > 0 && onEvict != nil {
+		h.evictWg.Add(1)
+		go func() {
+			defer h.evictWg.Done()
+			onEvict(orphaned)
+		}()
+	}
 	return sent
 }
 
@@ -205,13 +213,6 @@ func (h *Hub) evictConns(agentID string, conns []*Conn) []string {
 		delete(h.rrIndex, agentID)
 	}
 	return orphaned
-}
-
-func (h *Hub) fireOnEvict(sessionIDs []string) {
-	if len(sessionIDs) == 0 || h.onEvict == nil {
-		return
-	}
-	go h.onEvict(sessionIDs)
 }
 
 func (h *Hub) SendTo(consumerID, agentID string, msg store.AgentMessage) bool {
@@ -283,6 +284,8 @@ func (h *Hub) HasConnections(agentID string) bool {
 }
 
 func (h *Hub) Close() {
+	h.evictWg.Wait()
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
