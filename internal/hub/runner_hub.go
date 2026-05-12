@@ -131,6 +131,7 @@ func (h *RunnerHub) Dispatch(toolID string, msg store.RunnerMessage) (store.Runn
 			continue
 		}
 
+		conn.Busy = true
 		h.rrIndex[toolID] = idx + 1
 		return store.RunnerConnInfo{
 			RunnerID:   ref.RunnerID,

@@ -229,6 +229,9 @@ func (k *Kernel) enqueuePendingJob(job domain.Job) {
 }
 
 func (k *Kernel) DispatchPendingJobs() {
+	k.dispatchMu.Lock()
+	defer k.dispatchMu.Unlock()
+
 	ctx := context.Background()
 	jobs, err := k.jobQueue.All(ctx)
 	if err != nil {
@@ -253,7 +256,6 @@ func (k *Kernel) DispatchPendingJobs() {
 		msg := store.RunnerMessage{Type: "job.assigned", Payload: payload}
 		info, dispatched := k.runnerHub.Dispatch(job.ToolID, msg)
 		if dispatched {
-			k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
 			if err := k.jobQueue.Remove(ctx, job.ID); err != nil {
 				k.logger.Error("failed to remove dispatched job from queue, may be dispatched again",
 					slog.String("job_id", job.ID.String()),
