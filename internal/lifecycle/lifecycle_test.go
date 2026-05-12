@@ -1504,6 +1504,49 @@ func TestRecreateSessionForRunningReusesOriginalSessionID(t *testing.T) {
 		}
 	})
 
+	t.Run("uses latest session ID when multiple execution.started events exist", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = true
+		f.agentHub.pickResult = true
+		f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-3"}
+
+		execID := "exec-reassigned"
+		staleSessionID := "sess-stale-first"
+		latestSessionID := "sess-latest-second"
+
+		f.events.activeIDs = []string{execID}
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEventWithSession(staleSessionID, 2),
+			{
+				Type:     domain.EventAgentTimeout,
+				Payload:  mustMarshal(domain.AgentTimeoutPayload{SessionID: staleSessionID}),
+				Sequence: 3,
+			},
+			{
+				Type:     domain.EventExecutionReset,
+				Payload:  mustMarshal(domain.ExecutionResetPayload{Reason: "recovery", FromStatus: "running"}),
+				Sequence: 4,
+			},
+			startedEventWithSession(latestSessionID, 5),
+		}
+
+		m := f.manager(time.Hour)
+		m.recreateSessionForRunning(context.Background(), execID, "agent-1")
+
+		f.sessions.mu.Lock()
+		_, hasLatest := f.sessions.sessions[latestSessionID]
+		_, hasStale := f.sessions.sessions[staleSessionID]
+		f.sessions.mu.Unlock()
+
+		if !hasLatest {
+			t.Fatal("expected session to be recreated with the latest session ID")
+		}
+		if hasStale {
+			t.Fatal("should not recreate session with the stale first session ID")
+		}
+	})
+
 	t.Run("agent lookup with original session ID succeeds after reaping", func(t *testing.T) {
 		f := newTestFixture()
 		f.agentHub.hasConn = true

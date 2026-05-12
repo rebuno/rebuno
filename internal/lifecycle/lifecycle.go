@@ -275,7 +275,7 @@ func (m *Manager) recreateSessionForRunning(ctx context.Context, executionID, ag
 }
 
 func (m *Manager) findOriginalSessionID(ctx context.Context, executionID string) string {
-	events, err := m.events.GetByExecution(ctx, executionID, 0, 100)
+	events, err := m.events.GetByExecution(ctx, executionID, 0, 1000)
 	if err != nil {
 		m.logger.Warn("session reaper: failed to read events for original session ID",
 			slog.String("execution_id", executionID),
@@ -283,6 +283,7 @@ func (m *Manager) findOriginalSessionID(ctx context.Context, executionID string)
 		)
 		return ""
 	}
+	var sessionID string
 	for _, evt := range events {
 		if evt.Type == domain.EventExecutionStarted {
 			var payload domain.ExecutionStartedPayload
@@ -293,10 +294,10 @@ func (m *Manager) findOriginalSessionID(ctx context.Context, executionID string)
 				)
 				return ""
 			}
-			return payload.SessionID
+			sessionID = payload.SessionID
 		}
 	}
-	return ""
+	return sessionID
 }
 
 func (m *Manager) reassignIfNeeded(ctx context.Context, executionID, agentID, caller string) bool {
