@@ -186,6 +186,7 @@ func runServer(cfg *config.Config) error {
 		},
 	})
 	defer k.Shutdown()
+	k.StartRetryDispatcher(ctx)
 
 	lm := lifecycle.NewManager(lifecycle.Deps{
 		Events:           eventStore,
