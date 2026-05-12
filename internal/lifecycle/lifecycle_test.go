@@ -1422,6 +1422,69 @@ func TestReassignIfNeededAssignsViaRealFlow(t *testing.T) {
 	})
 }
 
+func TestReapSessionsRunningExecutionRevalidatesUnderLock(t *testing.T) {
+	// Simulates the race from issue #86: execution is running when the reaper
+	// first checks, but HandleAgentDisconnect resets it to pending before
+	// recreateSessionForRunning runs. The reaper must re-project under lock
+	// and skip session recreation when the execution is no longer running.
+	f := newTestFixture()
+	f.sessions.deletedExpired = 1
+	f.agentHub.hasConn = true
+	f.agentHub.pickResult = true
+	f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID := "exec-running-race"
+	f.events.activeIDs = []string{execID}
+	f.events.events[execID] = []domain.Event{
+		createdEvent("agent-1", 1),
+		startedEvent(2),
+	}
+
+	// Use a locker that simulates HandleAgentDisconnect: when the lock is
+	// acquired, the execution is reset to pending (adding a reset event and
+	// updating status) before the reaper can re-project.
+	locker := &callbackLocker{
+		onAcquire: func() {
+			f.events.mu.Lock()
+			f.events.events[execID] = append(f.events.events[execID],
+				domain.Event{
+					Type:     domain.EventExecutionReset,
+					Payload:  mustMarshal(domain.ExecutionResetPayload{Reason: "recovery", FromStatus: "running"}),
+					Sequence: int64(len(f.events.events[execID]) + 1),
+				},
+			)
+			f.events.mu.Unlock()
+		},
+	}
+
+	logger := slog.Default()
+	proj := projector.New(f.events, f.checkpoints, logger)
+	m := NewManager(Deps{
+		Events:           f.events,
+		Sessions:         f.sessions,
+		Checkpoints:      f.checkpoints,
+		Signals:          f.signals,
+		AgentHub:         f.agentHub,
+		Locker:           locker,
+		Projector:        proj,
+		Emitter:          f.emitter,
+		Assigner:         f.assigner,
+		Logger:           logger,
+		ExecutionTimeout: time.Hour,
+	})
+
+	m.reapSessions(context.Background())
+
+	// No session should be created because the execution is no longer running.
+	f.sessions.mu.Lock()
+	sessionCount := len(f.sessions.sessions)
+	f.sessions.mu.Unlock()
+
+	if sessionCount != 0 {
+		t.Fatalf("expected no session recreation when execution was reset to pending under lock, got %d sessions", sessionCount)
+	}
+}
+
 func mustMarshal(v any) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
