@@ -176,7 +176,26 @@ func (k *Kernel) notifyAgentStepResult(ctx context.Context, executionID string, 
 }
 
 func (k *Kernel) RecordStepStarted(ctx context.Context, executionID, stepID, runnerID string) error {
-	_, err := k.EmitEvent(ctx, executionID, stepID,
+	release, err := k.locker.Acquire(ctx, "execution:"+executionID)
+	if err != nil {
+		return fmt.Errorf("acquiring lock: %w", err)
+	}
+	defer release()
+
+	state, err := k.projector.Project(ctx, executionID)
+	if err != nil {
+		return err
+	}
+
+	step := state.Steps[stepID]
+	if step == nil {
+		return fmt.Errorf("%w: step %s", domain.ErrNotFound, stepID)
+	}
+	if step.Status.IsTerminal() || step.Status == domain.StepRunning {
+		return nil
+	}
+
+	_, err = k.EmitEvent(ctx, executionID, stepID,
 		domain.EventStepStarted,
 		domain.StepStartedPayload{RunnerID: runnerID},
 		uuid.Nil, uuid.Nil)
