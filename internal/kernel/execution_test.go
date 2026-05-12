@@ -206,6 +206,153 @@ func TestCancelRunningExecutionWithActiveStep(t *testing.T) {
 	}
 }
 
+func TestTryAssignExecutionSendFailureResetsExecution(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newConnectedMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+	})
+
+	ctx := context.Background()
+
+	// Create execution without auto-assign (disconnect agent first).
+	agentHub.mu.Lock()
+	agentHub.hasConn = false
+	agentHub.mu.Unlock()
+
+	execID, err := k.CreateExecution(ctx, CreateExecutionRequest{
+		AgentID: "agent-1",
+		Input:   json.RawMessage(`{"q":"test"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Reconnect the agent but make SendTo fail (simulates full channel).
+	agentHub.mu.Lock()
+	agentHub.hasConn = true
+	agentHub.sendFail = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "test-consumer"}
+	agentHub.mu.Unlock()
+
+	assigned := k.TryAssignExecution(ctx, execID, "agent-1")
+	if assigned {
+		t.Fatal("expected TryAssignExecution to return false when send fails")
+	}
+
+	// Execution should be back to pending.
+	state, err := k.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if state.Execution.Status != domain.ExecutionPending {
+		t.Fatalf("expected pending after failed send, got %s", state.Execution.Status)
+	}
+
+	// Session should have been cleaned up.
+	sessionCount := sessions.countByExecution(execID)
+	if sessionCount != 0 {
+		t.Fatalf("expected 0 sessions after failed send, got %d", sessionCount)
+	}
+
+	// An execution.reset event should have been emitted.
+	var foundReset bool
+	for _, e := range events.events[execID] {
+		if e.Type == domain.EventExecutionReset {
+			foundReset = true
+			break
+		}
+	}
+	if !foundReset {
+		t.Fatal("expected execution.reset event after failed send")
+	}
+}
+
+func TestTryAssignExecutionSendFailureAllowsRetry(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newConnectedMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+	})
+
+	ctx := context.Background()
+
+	// Create execution without auto-assign.
+	agentHub.mu.Lock()
+	agentHub.hasConn = false
+	agentHub.mu.Unlock()
+
+	execID, err := k.CreateExecution(ctx, CreateExecutionRequest{
+		AgentID: "agent-1",
+		Input:   json.RawMessage(`{"q":"retry"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// First attempt: send fails.
+	agentHub.mu.Lock()
+	agentHub.hasConn = true
+	agentHub.sendFail = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "test-consumer"}
+	agentHub.mu.Unlock()
+
+	if k.TryAssignExecution(ctx, execID, "agent-1") {
+		t.Fatal("expected first attempt to fail")
+	}
+
+	// Second attempt: send succeeds.
+	agentHub.mu.Lock()
+	agentHub.sendFail = false
+	agentHub.mu.Unlock()
+
+	if !k.TryAssignExecution(ctx, execID, "agent-1") {
+		t.Fatal("expected second attempt to succeed")
+	}
+
+	state, err := k.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if state.Execution.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after successful retry, got %s", state.Execution.Status)
+	}
+
+	// Exactly one session should exist.
+	sessionCount := sessions.countByExecution(execID)
+	if sessionCount != 1 {
+		t.Fatalf("expected 1 session after successful retry, got %d", sessionCount)
+	}
+}
+
 func TestAssignPendingExecutionsWithRealLocker(t *testing.T) {
 	events := newMockEventStore()
 	checkpoints := newMockCheckpointStore()

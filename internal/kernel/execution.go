@@ -86,10 +86,24 @@ func (k *Kernel) TryAssignExecution(ctx context.Context, executionID, agentID st
 		return false
 	}
 
-	k.agentHub.SendTo(connInfo.ConsumerID, agentID, store.AgentMessage{
+	if !k.agentHub.SendTo(connInfo.ConsumerID, agentID, store.AgentMessage{
 		Type:    "execution.assigned",
 		Payload: payload,
-	})
+	}) {
+		k.logger.Warn("failed to send execution.assigned, resetting execution to pending",
+			slog.String("execution_id", executionID),
+			slog.String("agent_id", agentID),
+			slog.String("consumer_id", connInfo.ConsumerID),
+		)
+		k.sessions.Delete(ctx, result.SessionID)
+		k.EmitEvent(ctx, executionID, "", domain.EventExecutionReset,
+			domain.ExecutionResetPayload{
+				Reason:     "send_failed",
+				FromStatus: string(domain.ExecutionRunning),
+			}, uuid.Nil, uuid.Nil)
+		k.events.UpdateExecutionStatus(ctx, executionID, domain.ExecutionPending)
+		return false
+	}
 
 	k.logger.Info("execution assigned via SSE",
 		slog.String("execution_id", executionID),

@@ -170,6 +170,7 @@ type mockAgentHub struct {
 	sent     []store.AgentMessage
 	sessions map[string]store.AgentMessage
 	hasConn  bool
+	sendFail bool
 	connInfo store.ConnInfo
 }
 
@@ -199,6 +200,9 @@ func (m *mockAgentHub) SendTo(_ string, _ string, msg store.AgentMessage) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, msg)
+	if m.sendFail {
+		return false
+	}
 	return m.hasConn
 }
 
