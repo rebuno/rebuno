@@ -196,8 +196,13 @@ func (m *Manager) reapSessions(ctx context.Context) {
 					)
 				} else {
 					freshState, projErr := m.projector.Project(ctx, execID)
-					if projErr == nil && freshState.Execution.Status == domain.ExecutionRunning {
-						m.recreateSessionForRunning(ctx, execID, state.AgentID)
+					if projErr != nil {
+						m.logger.Warn("session reaper: failed to re-project after lock for session recreation",
+							slog.String("execution_id", execID),
+							slog.String("error", projErr.Error()),
+						)
+					} else if freshState.Execution.Status == domain.ExecutionRunning {
+						m.recreateSessionForRunning(ctx, execID, freshState.AgentID)
 					}
 					release()
 				}
