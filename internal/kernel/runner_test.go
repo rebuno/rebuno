@@ -1043,6 +1043,83 @@ func TestRecoverPendingRetriesSkipsExhaustedRetries(t *testing.T) {
 	}
 }
 
+func TestRecoverPendingRetriesAfterRecoverActiveExecutions(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// Clear the queue and simulate crash: step.failed + step.retried emitted,
+	// but retry job never enqueued.
+	jq.mu.Lock()
+	jq.jobs = nil
+	jq.mu.Unlock()
+
+	correlationID := uuid.Must(uuid.NewV7())
+	_, err := k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "transient", Retryable: true},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.failed: %v", err)
+	}
+	_, err = k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.retried: %v", err)
+	}
+
+	// Simulate startup sequence: RecoverPendingRetries runs after active
+	// execution recovery, matching the order in server.go and dev.go.
+	// RecoverPendingRetries should detect and re-enqueue the orphaned retry.
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		t.Fatalf("RecoverPendingRetries: %v", err)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 recovered job after startup sequence, got %d", len(jobs))
+	}
+	if jobs[0].StepID != result.StepID {
+		t.Fatalf("expected recovered job for step %s, got %s", result.StepID, jobs[0].StepID)
+	}
+	if jobs[0].Attempt != 2 {
+		t.Fatalf("expected attempt 2, got %d", jobs[0].Attempt)
+	}
+}
+
 func TestSubmitStepResultRejectsTaintedExecution(t *testing.T) {
 	k, events, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()

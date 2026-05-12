@@ -155,6 +155,9 @@ func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string,
 	lm.StartSessionReaper(ctx)
 	lm.StartTimeoutWatcher(ctx)
 	lm.RecoverActiveExecutions(ctx)
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		logger.Error("failed to recover pending retries", "error", err)
+	}
 
 	srv := api.NewServer(api.ServerDeps{
 		Kernel:      k,
