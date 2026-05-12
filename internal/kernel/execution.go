@@ -95,13 +95,29 @@ func (k *Kernel) TryAssignExecution(ctx context.Context, executionID, agentID st
 			slog.String("agent_id", agentID),
 			slog.String("consumer_id", connInfo.ConsumerID),
 		)
-		k.sessions.Delete(ctx, result.SessionID)
-		k.EmitEvent(ctx, executionID, "", domain.EventExecutionReset,
+		if err := k.sessions.Delete(ctx, result.SessionID); err != nil {
+			k.logger.Warn("assign rollback: failed to delete session",
+				slog.String("execution_id", executionID),
+				slog.String("session_id", result.SessionID),
+				slog.String("error", err.Error()),
+			)
+		}
+		if _, err := k.EmitEvent(ctx, executionID, "", domain.EventExecutionReset,
 			domain.ExecutionResetPayload{
 				Reason:     "send_failed",
 				FromStatus: string(domain.ExecutionRunning),
-			}, uuid.Nil, uuid.Nil)
-		k.events.UpdateExecutionStatus(ctx, executionID, domain.ExecutionPending)
+			}, uuid.Nil, uuid.Nil); err != nil {
+			k.logger.Warn("assign rollback: failed to emit execution.reset",
+				slog.String("execution_id", executionID),
+				slog.String("error", err.Error()),
+			)
+		}
+		if err := k.events.UpdateExecutionStatus(ctx, executionID, domain.ExecutionPending); err != nil {
+			k.logger.Warn("assign rollback: failed to reset execution to pending",
+				slog.String("execution_id", executionID),
+				slog.String("error", err.Error()),
+			)
+		}
 		return false
 	}
 
