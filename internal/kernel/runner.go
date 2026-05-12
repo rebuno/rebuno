@@ -24,6 +24,13 @@ func (k *Kernel) SubmitJobResult(ctx context.Context, result domain.JobResult) e
 	}
 	defer release()
 
+	defer func() {
+		if result.RunnerID != "" && result.ConsumerID != "" {
+			k.runnerHub.MarkIdle(result.RunnerID, result.ConsumerID)
+		}
+		k.DispatchPendingJobs()
+	}()
+
 	state, err := k.projector.Project(ctx, result.ExecutionID)
 	if err != nil {
 		return err
@@ -65,11 +72,6 @@ func (k *Kernel) SubmitJobResult(ctx context.Context, result domain.JobResult) e
 			k.maybeCheckpoint(ctx, updated, checkpointEventType)
 		}
 	}
-
-	if result.RunnerID != "" && result.ConsumerID != "" {
-		k.runnerHub.MarkIdle(result.RunnerID, result.ConsumerID)
-	}
-	k.DispatchPendingJobs()
 
 	return nil
 }
