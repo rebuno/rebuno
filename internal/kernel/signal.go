@@ -361,6 +361,7 @@ func (k *Kernel) sendApprovalResolved(ctx context.Context, executionID, stepID s
 		"execution_id": executionID,
 		"step_id":      stepID,
 		"approved":     approved,
+		"session_id":   session.ID,
 	}
 	payload, err := json.Marshal(msg)
 	if err != nil {
