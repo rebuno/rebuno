@@ -224,10 +224,8 @@ func (k *Kernel) executeInvokeTool(
 			return domain.IntentResult{}, fmt.Errorf("marshaling job: %w", err)
 		}
 		msg := store.RunnerMessage{Type: "job.assigned", Payload: payload}
-		info, dispatched := k.runnerHub.Dispatch(req.Intent.ToolID, msg)
-		if dispatched {
-			k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
-		} else {
+		_, dispatched := k.runnerHub.Dispatch(req.Intent.ToolID, msg)
+		if !dispatched {
 			k.enqueuePendingJob(job)
 		}
 	} else {

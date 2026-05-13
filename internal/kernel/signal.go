@@ -221,10 +221,8 @@ func (k *Kernel) handleApprovalSignal(
 			return fmt.Errorf("marshaling job: %w", err)
 		}
 		msg := store.RunnerMessage{Type: "job.assigned", Payload: jobPayload}
-		info, dispatched := k.runnerHub.Dispatch(step.ToolID, msg)
-		if dispatched {
-			k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
-		} else {
+		_, dispatched := k.runnerHub.Dispatch(step.ToolID, msg)
+		if !dispatched {
 			k.enqueuePendingJob(job)
 		}
 	} else {
