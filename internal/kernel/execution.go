@@ -113,7 +113,7 @@ func (k *Kernel) TryAssignExecution(ctx context.Context, executionID, agentID st
 			)
 		}
 		if err := k.events.UpdateExecutionStatus(ctx, executionID, domain.ExecutionPending); err != nil {
-			k.logger.Warn("assign rollback: failed to reset execution to pending",
+			k.logger.Error("assign rollback: failed to reset execution to pending; execution may be stuck in running with no session and require manual intervention",
 				slog.String("execution_id", executionID),
 				slog.String("error", err.Error()),
 			)

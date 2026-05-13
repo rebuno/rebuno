@@ -12,10 +12,13 @@ import (
 )
 
 type mockEventStore struct {
-	mu         sync.Mutex
-	events     map[string][]domain.Event
-	executions map[string]*domain.ExecutionSummary
-	appendErr  error
+	mu                    sync.Mutex
+	events                map[string][]domain.Event
+	executions            map[string]*domain.ExecutionSummary
+	appendErr             error
+	updateStatusErr       error
+	updateStatusErrAfter  int // fail after this many successful calls (-1 or 0 = fail immediately)
+	updateStatusCallCount int
 }
 
 func newMockEventStore() *mockEventStore {
@@ -117,6 +120,12 @@ func (m *mockEventStore) CreateExecution(_ context.Context, id, agentID string, 
 func (m *mockEventStore) UpdateExecutionStatus(_ context.Context, executionID string, status domain.ExecutionStatus) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.updateStatusErr != nil {
+		m.updateStatusCallCount++
+		if m.updateStatusCallCount > m.updateStatusErrAfter {
+			return m.updateStatusErr
+		}
+	}
 	if s, ok := m.executions[executionID]; ok {
 		s.Status = status
 	}
