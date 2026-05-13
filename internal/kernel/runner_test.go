@@ -1038,6 +1038,36 @@ func TestStartRetryDispatcherDispatchesDelayedJob(t *testing.T) {
 	}
 }
 
+func TestStartRetryDispatcherDoubleStartIsNoop(t *testing.T) {
+	k, _, _, _, _, _ := newTestKernel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer k.Shutdown()
+
+	k.StartRetryDispatcher(ctx)
+	k.StartRetryDispatcher(ctx)
+	k.StartRetryDispatcher(ctx)
+
+	// If the guard works, Shutdown should complete quickly because only one
+	// goroutine was started. Without the guard, retryWg would have count 3
+	// but only one context cancel, potentially causing issues.
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		k.retryWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — only one goroutine was running
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry dispatcher goroutine did not exit — double-start guard may be broken")
+	}
+}
+
 func TestStartRetryDispatcherStopsOnShutdown(t *testing.T) {
 	k, _, _, _, _, _ := newTestKernel()
 

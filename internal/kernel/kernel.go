@@ -58,9 +58,10 @@ type Kernel struct {
 	rateLimiter ratelimit.Limiter
 	tools       *toolDirectory
 
-	retryWg   sync.WaitGroup
-	done      chan struct{}
-	closeOnce sync.Once
+	retryWg        sync.WaitGroup
+	done           chan struct{}
+	closeOnce      sync.Once
+	retryStartOnce sync.Once
 }
 
 type Deps struct {
@@ -153,6 +154,12 @@ func (k *Kernel) Shutdown() {
 }
 
 func (k *Kernel) StartRetryDispatcher(ctx context.Context) {
+	k.retryStartOnce.Do(func() {
+		k.startRetryDispatcher(ctx)
+	})
+}
+
+func (k *Kernel) startRetryDispatcher(ctx context.Context) {
 	k.retryWg.Add(1)
 	go func() {
 		defer k.retryWg.Done()
