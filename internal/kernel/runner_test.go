@@ -319,6 +319,131 @@ func TestSubmitJobResultAlreadyResolved(t *testing.T) {
 	}
 }
 
+func TestSubmitJobResultAlreadyResolvedMarksIdle(t *testing.T) {
+	k, _, _, runnerHub, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "calculator",
+			Remote: true,
+		},
+	})
+
+	// First submit succeeds and marks idle.
+	_ = k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "runner-A",
+		ConsumerID:  "consumer-A",
+		Success:     true,
+		Data:        json.RawMessage(`{"result":42}`),
+	})
+
+	// Mark runner-B as busy to simulate a second runner picking up the same job.
+	runnerHub.MarkBusy("runner-B", "consumer-B")
+
+	// Second submit returns ErrStepAlreadyResolved but must still mark idle.
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "runner-B",
+		ConsumerID:  "consumer-B",
+		Success:     true,
+		Data:        json.RawMessage(`{"result":42}`),
+	})
+	if !errors.Is(err, domain.ErrStepAlreadyResolved) {
+		t.Fatalf("expected ErrStepAlreadyResolved, got %v", err)
+	}
+
+	runnerHub.mu.Lock()
+	isIdle := runnerHub.idle["runner-B"]
+	runnerHub.mu.Unlock()
+	if !isIdle {
+		t.Fatal("expected runner-B to be marked idle after ErrStepAlreadyResolved")
+	}
+}
+
+func TestSubmitJobResultStepNotFoundMarksIdle(t *testing.T) {
+	k, _, _, runnerHub, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, _ := setupRunningExecution(t, k, sessions)
+
+	runnerHub.MarkBusy("runner-X", "consumer-X")
+
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      "nonexistent-step",
+		RunnerID:    "runner-X",
+		ConsumerID:  "consumer-X",
+		Success:     true,
+		Data:        json.RawMessage(`{}`),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	runnerHub.mu.Lock()
+	isIdle := runnerHub.idle["runner-X"]
+	runnerHub.mu.Unlock()
+	if !isIdle {
+		t.Fatal("expected runner-X to be marked idle after ErrNotFound")
+	}
+}
+
+func TestSubmitJobResultTaintedMarksIdle(t *testing.T) {
+	k, events, _, runnerHub, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// Taint the execution by injecting a sequence gap.
+	events.mu.Lock()
+	evts := events.events[execID]
+	if len(evts) > 0 {
+		evts[len(evts)-1].Sequence = evts[len(evts)-1].Sequence + 1
+	}
+	events.events[execID] = evts
+	events.mu.Unlock()
+
+	runnerHub.MarkBusy("runner-T", "consumer-T")
+
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "runner-T",
+		ConsumerID:  "consumer-T",
+		Success:     true,
+		Data:        json.RawMessage(`{"result":"ok"}`),
+	})
+	if !errors.Is(err, domain.ErrExecutionTainted) {
+		t.Fatalf("expected ErrExecutionTainted, got %v", err)
+	}
+
+	runnerHub.mu.Lock()
+	isIdle := runnerHub.idle["runner-T"]
+	runnerHub.mu.Unlock()
+	if !isIdle {
+		t.Fatal("expected runner-T to be marked idle after ErrExecutionTainted")
+	}
+}
+
 func TestSubmitJobResultFailureExhaustsRetries(t *testing.T) {
 	k, _, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
