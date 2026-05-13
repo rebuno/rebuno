@@ -168,21 +168,21 @@ func (m *mockCheckpointStore) Delete(_ context.Context, executionID string) erro
 type mockAgentHub struct {
 	mu       sync.Mutex
 	sent     []store.AgentMessage
-	sessions map[string]store.AgentMessage
+	sessions map[string][]store.AgentMessage
 	hasConn  bool
 	connInfo store.ConnInfo
 }
 
 func newMockAgentHub() *mockAgentHub {
 	return &mockAgentHub{
-		sessions: make(map[string]store.AgentMessage),
+		sessions: make(map[string][]store.AgentMessage),
 		hasConn:  false,
 	}
 }
 
 func newConnectedMockAgentHub() *mockAgentHub {
 	return &mockAgentHub{
-		sessions: make(map[string]store.AgentMessage),
+		sessions: make(map[string][]store.AgentMessage),
 		hasConn:  true,
 		connInfo: store.ConnInfo{ConsumerID: "test-consumer"},
 	}
@@ -205,7 +205,7 @@ func (m *mockAgentHub) SendTo(_ string, _ string, msg store.AgentMessage) bool {
 func (m *mockAgentHub) SendToSession(sessionID string, msg store.AgentMessage) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sessions[sessionID] = msg
+	m.sessions[sessionID] = append(m.sessions[sessionID], msg)
 	return true
 }
 

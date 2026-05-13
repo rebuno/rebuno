@@ -597,6 +597,124 @@ func TestApprovalResumeDeletesStaleSessionBeforeReCreation(t *testing.T) {
 	}
 }
 
+func TestApprovalResolvedIncludesSessionIDWhenSessionRecreated(t *testing.T) {
+	k, _, agentHub, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	agentHub.hasConn = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Simulate the session reaper deleting the expired session.
+	sess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist before deletion")
+	}
+	sessions.Delete(ctx, sess.ID)
+
+	// Approve the step — should re-create the session and include the new
+	// session_id in the approval.resolved message.
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":true}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Look up the new session created by restoreSessionAfterApproval.
+	newSess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected new session to exist after approval")
+	}
+	if newSess.ID == sess.ID {
+		t.Fatal("expected a new session ID, got the same old one")
+	}
+
+	// Verify the approval.resolved message was sent to the new session and
+	// includes the new session_id so the agent can discover it.
+	agentHub.mu.Lock()
+	msgs := agentHub.sessions[newSess.ID]
+	agentHub.mu.Unlock()
+
+	var resolved map[string]any
+	for _, m := range msgs {
+		if m.Type == "approval.resolved" {
+			if err := json.Unmarshal(m.Payload, &resolved); err != nil {
+				t.Fatalf("failed to unmarshal approval.resolved payload: %v", err)
+			}
+			break
+		}
+	}
+	if resolved == nil {
+		t.Fatal("expected approval.resolved message to be sent to the new session")
+	}
+	gotSessionID, _ := resolved["session_id"].(string)
+	if gotSessionID != newSess.ID {
+		t.Fatalf("expected session_id %q in approval.resolved, got %q", newSess.ID, gotSessionID)
+	}
+
+	// The agent should be able to use the new session_id to submit results.
+	err = k.SubmitStepResult(ctx, StepResultRequest{
+		ExecutionID: execID,
+		SessionID:   newSess.ID,
+		StepID:      stepID,
+		Success:     true,
+		Data:        json.RawMessage(`{"result":"done"}`),
+	})
+	if err != nil {
+		t.Fatalf("expected agent to submit step result with new session, got error: %v", err)
+	}
+}
+
+func TestApprovalResolvedIncludesSessionIDWhenSessionExists(t *testing.T) {
+	k, _, agentHub, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	agentHub.hasConn = true
+	agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+	execID, _, stepID := setupApprovalBlockedExecution(t, k, sessions)
+
+	// Session still exists (not reaped). Approval should still include session_id.
+	sess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to exist")
+	}
+
+	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":true}`)
+	err := k.SendSignal(ctx, execID, "step.approve", payload)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The session should be extended (same ID since it wasn't reaped).
+	extSess, found, _ := sessions.GetByExecution(ctx, execID)
+	if !found {
+		t.Fatal("expected session to still exist")
+	}
+
+	agentHub.mu.Lock()
+	msgs := agentHub.sessions[extSess.ID]
+	agentHub.mu.Unlock()
+
+	var resolved map[string]any
+	for _, m := range msgs {
+		if m.Type == "approval.resolved" {
+			if err := json.Unmarshal(m.Payload, &resolved); err != nil {
+				t.Fatalf("failed to unmarshal approval.resolved payload: %v", err)
+			}
+			break
+		}
+	}
+	if resolved == nil {
+		t.Fatal("expected approval.resolved message to be sent")
+	}
+	gotSessionID, _ := resolved["session_id"].(string)
+	if gotSessionID != sess.ID {
+		t.Fatalf("expected session_id %q in approval.resolved, got %q", sess.ID, gotSessionID)
+	}
+}
+
 func TestApprovalExtendsExistingSession(t *testing.T) {
 	k, _, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
