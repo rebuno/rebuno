@@ -186,6 +186,9 @@ func (k *Kernel) RecordStepStarted(ctx context.Context, executionID, stepID, run
 	if err != nil {
 		return err
 	}
+	if state.Tainted {
+		return domain.ErrExecutionTainted
+	}
 
 	step := state.Steps[stepID]
 	if step == nil {

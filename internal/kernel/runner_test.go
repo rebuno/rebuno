@@ -1215,3 +1215,38 @@ func TestSubmitStepResultRejectsTaintedExecution(t *testing.T) {
 		t.Fatalf("expected ErrExecutionTainted, got %v", err)
 	}
 }
+
+func TestRecordStepStartedRejectsTaintedExecution(t *testing.T) {
+	k, events, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Create a remote step.
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("process intent: %v", err)
+	}
+
+	// Taint the execution by injecting a sequence gap.
+	events.mu.Lock()
+	evts := events.events[execID]
+	if len(evts) > 0 {
+		evts[len(evts)-1].Sequence = evts[len(evts)-1].Sequence + 1
+	}
+	events.events[execID] = evts
+	events.mu.Unlock()
+
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if !errors.Is(err, domain.ErrExecutionTainted) {
+		t.Fatalf("expected ErrExecutionTainted, got %v", err)
+	}
+}
