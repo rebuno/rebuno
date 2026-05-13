@@ -231,6 +231,9 @@ func (k *Kernel) enqueuePendingJob(job domain.Job) {
 }
 
 func (k *Kernel) DispatchPendingJobs() {
+	k.dispatchMu.Lock()
+	defer k.dispatchMu.Unlock()
+
 	ctx := context.Background()
 	jobs, err := k.jobQueue.All(ctx)
 	if err != nil {

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 func TestSubmitJobResultSuccess(t *testing.T) {
@@ -1285,3 +1287,165 @@ func TestSubmitStepResultRejectsTaintedExecution(t *testing.T) {
 		t.Fatalf("expected ErrExecutionTainted, got %v", err)
 	}
 }
+
+func TestDispatchPendingJobsConcurrentNoDuplicate(t *testing.T) {
+	runnerHub := &countingRunnerHub{
+		idle: make(map[string]bool),
+	}
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      newMockEventStore(),
+		Checkpoints: newMockCheckpointStore(),
+		AgentHub:    newMockAgentHub(),
+		RunnerHub:   runnerHub,
+		Signals:     newMockSignalStore(),
+		Sessions:    newMockSessionStore(),
+		Runners:     newMockRunnerStore(),
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		job := domain.Job{
+			ID:     uuid.Must(uuid.NewV7()),
+			ToolID: "web_search",
+		}
+		if err := jq.Enqueue(ctx, job); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			k.DispatchPendingJobs()
+		}()
+	}
+	wg.Wait()
+
+	runnerHub.mu.Lock()
+	dispatched := runnerHub.dispatchCount
+	runnerHub.mu.Unlock()
+
+	if dispatched != 5 {
+		t.Fatalf("expected exactly 5 dispatches (one per job), got %d", dispatched)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected all jobs removed from queue, got %d remaining", len(jobs))
+	}
+}
+
+func TestDispatchPendingJobsConcurrentBusyMarkingRace(t *testing.T) {
+	runnerHub := &singleConnRunnerHub{}
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      newMockEventStore(),
+		Checkpoints: newMockCheckpointStore(),
+		AgentHub:    newMockAgentHub(),
+		RunnerHub:   runnerHub,
+		Signals:     newMockSignalStore(),
+		Sessions:    newMockSessionStore(),
+		Runners:     newMockRunnerStore(),
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		job := domain.Job{
+			ID:     uuid.Must(uuid.NewV7()),
+			ToolID: "tool",
+		}
+		if err := jq.Enqueue(ctx, job); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			k.DispatchPendingJobs()
+		}()
+	}
+	wg.Wait()
+
+	runnerHub.mu.Lock()
+	dispatched := runnerHub.dispatchCount
+	runnerHub.mu.Unlock()
+
+	if dispatched != 1 {
+		t.Fatalf("expected exactly 1 dispatch (runner has 1 conn, becomes busy), got %d", dispatched)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs remaining (only 1 runner conn), got %d", len(jobs))
+	}
+}
+
+type countingRunnerHub struct {
+	mu            sync.Mutex
+	dispatchCount int
+	idle          map[string]bool
+}
+
+func (m *countingRunnerHub) Dispatch(_ string, _ store.RunnerMessage) (store.RunnerConnInfo, bool) {
+	m.mu.Lock()
+	m.dispatchCount++
+	m.mu.Unlock()
+	return store.RunnerConnInfo{RunnerID: "runner", ConsumerID: "c1"}, true
+}
+
+func (m *countingRunnerHub) SendTo(_, _ string, _ store.RunnerMessage) bool { return true }
+func (m *countingRunnerHub) MarkBusy(runnerID, _ string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.idle[runnerID] = false
+}
+func (m *countingRunnerHub) MarkIdle(runnerID, _ string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.idle[runnerID] = true
+}
+func (m *countingRunnerHub) HasCapability(_ string) bool             { return true }
+func (m *countingRunnerHub) UpdateCapabilities(_ string, _ []string) {}
+
+type singleConnRunnerHub struct {
+	mu            sync.Mutex
+	dispatchCount int
+	busy          bool
+}
+
+func (m *singleConnRunnerHub) Dispatch(_ string, _ store.RunnerMessage) (store.RunnerConnInfo, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.busy {
+		return store.RunnerConnInfo{}, false
+	}
+	m.busy = true
+	m.dispatchCount++
+	return store.RunnerConnInfo{RunnerID: "runner", ConsumerID: "c1"}, true
+}
+
+func (m *singleConnRunnerHub) SendTo(_, _ string, _ store.RunnerMessage) bool { return true }
+func (m *singleConnRunnerHub) MarkBusy(_, _ string)                           {}
+func (m *singleConnRunnerHub) MarkIdle(_ string, _ string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.busy = false
+}
+func (m *singleConnRunnerHub) HasCapability(_ string) bool             { return true }
+func (m *singleConnRunnerHub) UpdateCapabilities(_ string, _ []string) {}

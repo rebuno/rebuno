@@ -131,6 +131,7 @@ func TestRunnerRoundRobin(t *testing.T) {
 		seen[info.RunnerID]++
 		consumers := h.runners[info.RunnerID]
 		<-consumers[info.ConsumerID].EventCh
+		h.MarkIdle(info.RunnerID, info.ConsumerID)
 	}
 
 	if len(seen) < 2 {
@@ -534,4 +535,67 @@ func TestRunnerMarkBusyNonexistent(t *testing.T) {
 	// Should not panic
 	h.MarkBusy("nonexistent", "c1")
 	h.MarkIdle("nonexistent", "c1")
+}
+
+func TestRunnerDispatchSetsBusyAtomically(t *testing.T) {
+	h := NewRunnerHub(nil)
+	defer h.Close()
+
+	conn := h.Register("runner-1", "c1", []string{"tool"})
+
+	info, ok := h.Dispatch("tool", runnerMsg("job.assigned"))
+	if !ok {
+		t.Fatal("expected dispatch to succeed")
+	}
+	<-conn.EventCh
+
+	if !conn.Busy {
+		t.Fatal("expected conn to be busy immediately after Dispatch")
+	}
+
+	_, ok = h.Dispatch("tool", runnerMsg("job.assigned"))
+	if ok {
+		t.Fatal("expected second dispatch to fail because conn is busy")
+	}
+
+	h.MarkIdle(info.RunnerID, info.ConsumerID)
+	if conn.Busy {
+		t.Fatal("expected conn to be idle after MarkIdle")
+	}
+}
+
+func TestRunnerDispatchConcurrentSingleConn(t *testing.T) {
+	h := NewRunnerHub(nil)
+	defer h.Close()
+
+	conn := h.Register("runner-1", "c1", []string{"tool"})
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	dispatched := 0
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, ok := h.Dispatch("tool", runnerMsg("job"))
+			if ok {
+				mu.Lock()
+				dispatched++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if dispatched != 1 {
+		t.Fatalf("expected exactly 1 successful dispatch to a single conn, got %d", dispatched)
+	}
+
+	select {
+	case <-conn.EventCh:
+	default:
+		t.Fatal("expected message on conn")
+	}
 }
