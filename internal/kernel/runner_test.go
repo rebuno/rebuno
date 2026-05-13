@@ -393,15 +393,16 @@ func TestDispatchPendingJobsRemoveFailureKeepsJobInQueue(t *testing.T) {
 
 	k.DispatchPendingJobs()
 
-	// Job should still be dispatched to the runner.
+	// Dispatch is now claim-first: if Remove fails we must NOT dispatch,
+	// otherwise the job could be sent to a runner more than once.
 	runnerHub.mu.Lock()
 	dispatched := len(runnerHub.dispatched)
 	runnerHub.mu.Unlock()
-	if dispatched != 1 {
-		t.Fatalf("expected 1 dispatch, got %d", dispatched)
+	if dispatched != 0 {
+		t.Fatalf("expected 0 dispatches when claim fails, got %d", dispatched)
 	}
 
-	// But the job should remain in the queue because Remove failed.
+	// Job stays in the queue for the next attempt.
 	jobs, err := jq.All(ctx)
 	if err != nil {
 		t.Fatalf("All: %v", err)

@@ -188,6 +188,18 @@ func (k *Kernel) CancelExecution(ctx context.Context, executionID string) error 
 		}
 	}
 
+	if removed, err := k.jobQueue.RemoveByExecution(ctx, executionID); err != nil {
+		k.logger.Warn("cancel: failed to drain queued jobs",
+			slog.String("execution_id", executionID),
+			slog.String("error", err.Error()),
+		)
+	} else if removed > 0 {
+		k.logger.Info("cancel: drained queued jobs",
+			slog.String("execution_id", executionID),
+			slog.Int("removed", removed),
+		)
+	}
+
 	payload := domain.ExecutionCancelledPayload{
 		Reason: "cancelled by request",
 	}
