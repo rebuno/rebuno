@@ -188,7 +188,24 @@ func (m *Manager) reapSessions(ctx context.Context) {
 		}
 		if m.agentHub.HasConnections(state.AgentID) {
 			if state.Execution.Status == domain.ExecutionRunning {
-				m.recreateSessionForRunning(ctx, execID, state.AgentID)
+				release, lockErr := m.acquireLock(ctx, execID)
+				if lockErr != nil {
+					m.logger.Warn("session reaper: failed to acquire lock for session recreation",
+						slog.String("execution_id", execID),
+						slog.String("error", lockErr.Error()),
+					)
+				} else {
+					freshState, projErr := m.projector.Project(ctx, execID)
+					if projErr != nil {
+						m.logger.Warn("session reaper: failed to re-project after lock for session recreation",
+							slog.String("execution_id", execID),
+							slog.String("error", projErr.Error()),
+						)
+					} else if freshState.Execution.Status == domain.ExecutionRunning {
+						m.recreateSessionForRunning(ctx, execID, freshState.AgentID)
+					}
+					release()
+				}
 			} else {
 				m.logger.Debug("session reaper: agent still connected, skipping",
 					slog.String("execution_id", execID),
