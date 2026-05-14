@@ -43,7 +43,7 @@ func TestPolicyDenial(t *testing.T) {
 		"session_id":   claim.SessionID,
 		"intent": map[string]any{
 			"type":    "invoke_tool",
-			"tool_id": "dangerous.delete_all",
+			"tool_id": "dangerous_delete_all",
 			"arguments": map[string]string{
 				"target": "everything",
 			},
@@ -790,7 +790,7 @@ func TestPolicyMultipleDenialsDoNotCorruptState(t *testing.T) {
 			"session_id":   claim.SessionID,
 			"intent": map[string]any{
 				"type":    "invoke_tool",
-				"tool_id": "dangerous.nuke",
+				"tool_id": "dangerous_nuke",
 			},
 		})
 		if status != http.StatusOK {
@@ -1058,7 +1058,7 @@ func buildAgentScopedPolicy(t *testing.T) policy.Engine {
 					ID:       "global-deny-secrets",
 					Priority: 50,
 					When: domain.PolicyCondition{
-						ToolID: "secret.*",
+						ToolID: "secret_*",
 					},
 					Then: domain.PolicyAction{
 						Decision: domain.PolicyDeny,
