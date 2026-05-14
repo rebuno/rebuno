@@ -130,7 +130,7 @@ func TestWriteJSON(t *testing.T) {
 	}
 
 	var body map[string]string
-	json.Unmarshal(w.Body.Bytes(), &body)
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body["status"] != "ok" {
 		t.Fatalf("expected ok, got %s", body["status"])
 	}
@@ -179,7 +179,7 @@ func TestWriteErrorFromErr_RunnerNotFound(t *testing.T) {
 		t.Fatalf("expected 404, got %d", w.Code)
 	}
 	var body domain.APIError
-	json.Unmarshal(w.Body.Bytes(), &body)
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body.Code != domain.CodeNotFound {
 		t.Fatalf("expected NOT_FOUND, got %s", body.Code)
 	}
@@ -193,7 +193,7 @@ func TestWriteErrorFromErr_InvalidTransition(t *testing.T) {
 		t.Fatalf("expected 409, got %d", w.Code)
 	}
 	var body domain.APIError
-	json.Unmarshal(w.Body.Bytes(), &body)
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body.Code != domain.CodeConflict {
 		t.Fatalf("expected CONFLICT, got %s", body.Code)
 	}

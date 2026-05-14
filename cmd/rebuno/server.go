@@ -82,7 +82,7 @@ func runServer(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("initializing tracer: %w", err)
 	}
-	defer shutdownTracer(context.Background())
+	defer func() { _ = shutdownTracer(context.Background()) }()
 
 	metrics := observe.NewMetrics()
 

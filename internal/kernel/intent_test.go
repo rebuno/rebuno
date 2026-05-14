@@ -60,7 +60,7 @@ func setupRunningExecution(t *testing.T, k *Kernel, sessions *mockSessionStore) 
 	}
 
 	sessionID := "test-session-" + execID[:8]
-	sessions.Create(ctx, domain.Session{
+	_ = sessions.Create(ctx, domain.Session{
 		ID:          sessionID,
 		ExecutionID: execID,
 		AgentID:     "agent-1",
@@ -74,7 +74,7 @@ func setupRunningExecution(t *testing.T, k *Kernel, sessions *mockSessionStore) 
 	if err != nil {
 		t.Fatalf("emit execution.started: %v", err)
 	}
-	k.events.UpdateExecutionStatus(ctx, execID, domain.ExecutionRunning)
+	_ = k.events.UpdateExecutionStatus(ctx, execID, domain.ExecutionRunning)
 
 	return execID, sessionID
 }
@@ -432,7 +432,7 @@ func TestProcessIntentSessionExpired(t *testing.T) {
 	k, _, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
 
-	sessions.Create(ctx, domain.Session{
+	_ = sessions.Create(ctx, domain.Session{
 		ID:          "session-1",
 		ExecutionID: "exec-1",
 		ExpiresAt:   time.Now().Add(-time.Hour),
@@ -509,7 +509,7 @@ func TestProcessIntentOnTerminalExecution(t *testing.T) {
 	execID, sessionID := setupRunningExecution(t, k, sessions)
 
 	// Complete the execution first.
-	k.ProcessIntent(ctx, domain.IntentRequest{
+	_, _ = k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
 		SessionID:   sessionID,
 		Intent:      domain.Intent{Type: domain.IntentComplete, Output: json.RawMessage(`{}`)},
@@ -535,7 +535,7 @@ func TestProcessIntentSessionExecutionMismatch(t *testing.T) {
 	// Create a second execution with its own session.
 	execID2, _ := k.CreateExecution(ctx, CreateExecutionRequest{AgentID: "agent-2"})
 	sessionID2 := "session-for-exec2"
-	sessions.Create(ctx, domain.Session{
+	_ = sessions.Create(ctx, domain.Session{
 		ID:          sessionID2,
 		ExecutionID: execID2,
 		AgentID:     "agent-2",
@@ -720,7 +720,7 @@ func TestProcessIntentRateLimited(t *testing.T) {
 
 		// Complete the step so we can invoke another
 		if result.StepID != "" {
-			k.SubmitStepResult(ctx, StepResultRequest{
+			_ = k.SubmitStepResult(ctx, StepResultRequest{
 				ExecutionID: execID,
 				StepID:      result.StepID,
 				SessionID:   sessionID,

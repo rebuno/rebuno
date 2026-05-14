@@ -161,7 +161,7 @@ func TestHandleAgentDisconnectTerminalExecution(t *testing.T) {
 	}
 
 	// Cancel the execution to put it in terminal state.
-	k.CancelExecution(ctx, execID)
+	_ = k.CancelExecution(ctx, execID)
 
 	eventCountBefore := len(events.events[execID])
 
@@ -182,7 +182,7 @@ func TestHandleAgentDisconnectBlockedExecution(t *testing.T) {
 	execID, sessionID := setupRunningExecution(t, k, sessions)
 
 	// Block the execution on a signal.
-	k.ProcessIntent(ctx, domain.IntentRequest{
+	_, _ = k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
 		SessionID:   sessionID,
 		Intent:      domain.Intent{Type: domain.IntentWait, SignalType: "approval"},

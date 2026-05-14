@@ -290,7 +290,7 @@ func (m *mockRunnerHub) HasCapability(_ string) bool {
 func (m *mockRunnerHub) UpdateCapabilities(_ string, _ []string) {}
 
 type noDispatchRunnerHub struct {
-	mockRunnerHub
+	*mockRunnerHub
 }
 
 func (m *noDispatchRunnerHub) Dispatch(_ string, _ store.RunnerMessage) (store.RunnerConnInfo, bool) {

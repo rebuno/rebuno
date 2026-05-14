@@ -46,7 +46,7 @@ func TestSendSignalResumesBlockedExecution(t *testing.T) {
 
 	execID, sessionID := setupRunningExecution(t, k, sessions)
 
-	k.ProcessIntent(ctx, domain.IntentRequest{
+	_, _ = k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
 		SessionID:   sessionID,
 		Intent: domain.Intent{
@@ -91,7 +91,7 @@ func TestSendSignalToTerminalExecution(t *testing.T) {
 	ctx := context.Background()
 
 	execID, _ := k.CreateExecution(ctx, CreateExecutionRequest{AgentID: "agent-1"})
-	k.CancelExecution(ctx, execID)
+	_ = k.CancelExecution(ctx, execID)
 
 	err := k.SendSignal(ctx, execID, "approval", json.RawMessage(`{}`))
 	if !errors.Is(err, domain.ErrTerminalExecution) {
@@ -106,7 +106,7 @@ func TestSendSignalNonMatchingTypeDoesNotResume(t *testing.T) {
 	execID, sessionID := setupRunningExecution(t, k, sessions)
 
 	// Block on "approval" signal type.
-	k.ProcessIntent(ctx, domain.IntentRequest{
+	_, _ = k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
 		SessionID:   sessionID,
 		Intent:      domain.Intent{Type: domain.IntentWait, SignalType: "approval"},
@@ -289,7 +289,7 @@ func TestApprovalGrantedRefreshesDeadlineForNonRemoteStep(t *testing.T) {
 	for _, evt := range events.events[execID] {
 		if evt.Type == domain.EventStepCreated {
 			var p domain.StepCreatedPayload
-			json.Unmarshal(evt.Payload, &p)
+			_ = json.Unmarshal(evt.Payload, &p)
 			originalDeadline = p.Deadline
 		}
 	}
@@ -314,7 +314,7 @@ func TestApprovalGrantedRefreshesDeadlineForNonRemoteStep(t *testing.T) {
 		if evt.Type == domain.EventStepDispatched && evt.StepID == stepID {
 			foundDispatched = true
 			var p domain.StepDispatchedPayload
-			json.Unmarshal(evt.Payload, &p)
+			_ = json.Unmarshal(evt.Payload, &p)
 			refreshedDeadline = p.Deadline
 		}
 	}
@@ -353,7 +353,7 @@ func TestApprovalGrantedReCreatesSessionWhenExpired(t *testing.T) {
 	if !found {
 		t.Fatal("expected session to exist before deletion")
 	}
-	sessions.Delete(ctx, sess.ID)
+	_ = sessions.Delete(ctx, sess.ID)
 
 	// Verify the session is gone.
 	_, found, _ = sessions.GetByExecution(ctx, execID)
@@ -418,7 +418,7 @@ func TestApprovalDeniedReCreatesSessionWhenExpired(t *testing.T) {
 	if !found {
 		t.Fatal("expected session to exist before deletion")
 	}
-	sessions.Delete(ctx, sess.ID)
+	_ = sessions.Delete(ctx, sess.ID)
 
 	// Deny the step — should re-create the session.
 	payload := json.RawMessage(`{"step_id":"` + stepID + `","approved":false,"reason":"nope"}`)
@@ -457,7 +457,7 @@ func TestApprovalNoSessionReCreationWhenAgentDisconnected(t *testing.T) {
 	if !found {
 		t.Fatal("expected session to exist")
 	}
-	sessions.Delete(ctx, sess.ID)
+	_ = sessions.Delete(ctx, sess.ID)
 	agentHub.mu.Lock()
 	agentHub.hasConn = false
 	agentHub.mu.Unlock()
@@ -497,7 +497,7 @@ func TestApprovalResumeNoDuplicateSessions(t *testing.T) {
 	// However, to trigger the re-creation path (the bug), we delete it and
 	// then manually re-insert a stale session with a different ID to simulate
 	// multiple rows for the same execution.
-	sessions.Delete(ctx, originalSess.ID)
+	_ = sessions.Delete(ctx, originalSess.ID)
 	staleSession := domain.Session{
 		ID:          "stale-session-id",
 		ExecutionID: execID,
@@ -506,7 +506,7 @@ func TestApprovalResumeNoDuplicateSessions(t *testing.T) {
 		CreatedAt:   time.Now().Add(-10 * time.Minute),
 		ExpiresAt:   time.Now().Add(-5 * time.Minute),
 	}
-	sessions.Create(ctx, staleSession)
+	_ = sessions.Create(ctx, staleSession)
 
 	if sessions.countByExecution(execID) != 1 {
 		t.Fatalf("expected 1 session before approval, got %d", sessions.countByExecution(execID))
@@ -557,10 +557,10 @@ func TestApprovalResumeDeletesStaleSessionBeforeReCreation(t *testing.T) {
 	if !found {
 		t.Fatal("expected session to exist")
 	}
-	sessions.Delete(ctx, sess.ID)
+	_ = sessions.Delete(ctx, sess.ID)
 
 	for i := 0; i < 2; i++ {
-		sessions.Create(ctx, domain.Session{
+		_ = sessions.Create(ctx, domain.Session{
 			ID:          fmt.Sprintf("stale-%d", i),
 			ExecutionID: execID,
 			AgentID:     "agent-1",
@@ -611,7 +611,7 @@ func TestApprovalResolvedIncludesSessionIDWhenSessionRecreated(t *testing.T) {
 	if !found {
 		t.Fatal("expected session to exist before deletion")
 	}
-	sessions.Delete(ctx, sess.ID)
+	_ = sessions.Delete(ctx, sess.ID)
 
 	// Approve the step — should re-create the session and include the new
 	// session_id in the approval.resolved message.

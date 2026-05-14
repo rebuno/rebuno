@@ -302,22 +302,6 @@ default:
   reason: "global default deny"
 `
 
-const globalPolicyWithAgentIDs = `
-rules:
-  - id: "research-agents-web"
-    priority: 50
-    when:
-      action: "tool.invoke"
-      agent_ids: ["researcher", "analyst"]
-      tool_id: "web_*"
-    then:
-      decision: "allow"
-      reason: "research agents can use web tools"
-default:
-  decision: "deny"
-  reason: "global default deny"
-`
-
 func TestLoadDirGlobalFile(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "researcher.yaml", validAgentPolicy)

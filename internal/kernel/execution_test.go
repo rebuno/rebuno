@@ -154,7 +154,7 @@ func TestCancelTerminalExecutionFails(t *testing.T) {
 	ctx := context.Background()
 
 	execID, _ := k.CreateExecution(ctx, CreateExecutionRequest{AgentID: "agent-1"})
-	k.CancelExecution(ctx, execID) // cancel once
+	_ = k.CancelExecution(ctx, execID) // cancel once
 
 	err := k.CancelExecution(ctx, execID) // cancel again
 	if !errors.Is(err, domain.ErrTerminalExecution) {
@@ -169,7 +169,7 @@ func TestCancelRunningExecutionWithActiveStep(t *testing.T) {
 	execID, sessionID := setupRunningExecution(t, k, sessions)
 
 	// Create a step so there's an active non-terminal step.
-	k.ProcessIntent(ctx, domain.IntentRequest{
+	_, _ = k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
 		SessionID:   sessionID,
 		Intent: domain.Intent{
