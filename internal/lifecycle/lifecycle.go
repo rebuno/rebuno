@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -256,9 +257,13 @@ func (m *Manager) recreateSessionForRunning(ctx context.Context, executionID, ag
 		return
 	}
 
-	newSessionID := uuid.Must(uuid.NewV7()).String()
+	sessionID := m.findOriginalSessionID(ctx, executionID)
+	if sessionID == "" {
+		sessionID = uuid.Must(uuid.NewV7()).String()
+	}
+
 	newSession := domain.Session{
-		ID:          newSessionID,
+		ID:          sessionID,
 		ExecutionID: executionID,
 		AgentID:     agentID,
 		ConsumerID:  connInfo.ConsumerID,
@@ -276,14 +281,40 @@ func (m *Manager) recreateSessionForRunning(ctx context.Context, executionID, ag
 	if hub, ok := m.agentHub.(interface {
 		SetSession(agentID, consumerID, sessionID string)
 	}); ok {
-		hub.SetSession(agentID, connInfo.ConsumerID, newSessionID)
+		hub.SetSession(agentID, connInfo.ConsumerID, sessionID)
 	}
 
 	m.logger.Info("session reaper: recreated session for running execution",
 		slog.String("execution_id", executionID),
-		slog.String("session_id", newSessionID),
+		slog.String("session_id", sessionID),
 		slog.String("agent_id", agentID),
 	)
+}
+
+func (m *Manager) findOriginalSessionID(ctx context.Context, executionID string) string {
+	events, err := m.events.GetByExecution(ctx, executionID, 0, 1000)
+	if err != nil {
+		m.logger.Warn("session reaper: failed to read events for original session ID",
+			slog.String("execution_id", executionID),
+			slog.String("error", err.Error()),
+		)
+		return ""
+	}
+	var sessionID string
+	for _, evt := range events {
+		if evt.Type == domain.EventExecutionStarted {
+			var payload domain.ExecutionStartedPayload
+			if err := json.Unmarshal(evt.Payload, &payload); err != nil {
+				m.logger.Warn("session reaper: failed to unmarshal execution.started payload",
+					slog.String("execution_id", executionID),
+					slog.String("error", err.Error()),
+				)
+				return ""
+			}
+			sessionID = payload.SessionID
+		}
+	}
+	return sessionID
 }
 
 func (m *Manager) reassignIfNeeded(ctx context.Context, executionID, agentID, caller string) bool {
