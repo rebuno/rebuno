@@ -340,6 +340,17 @@ func (m *mockLocker) Acquire(_ context.Context, _ string) (func(), error) {
 	return func() {}, nil
 }
 
+type callbackLocker struct {
+	onAcquire func()
+}
+
+func (c *callbackLocker) Acquire(_ context.Context, _ string) (func(), error) {
+	if c.onAcquire != nil {
+		c.onAcquire()
+	}
+	return func() {}, nil
+}
+
 type emittedEvent struct {
 	ExecutionID string
 	StepID      string
