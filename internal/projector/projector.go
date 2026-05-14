@@ -171,6 +171,7 @@ func (p *Projector) markTainted(state *domain.ExecutionState, reason string) {
 func ShouldCheckpoint(eventType domain.EventType) bool {
 	switch eventType {
 	case domain.EventStepCompleted,
+		domain.EventStepFailed,
 		domain.EventExecutionStarted,
 		domain.EventExecutionBlocked,
 		domain.EventExecutionResumed,
