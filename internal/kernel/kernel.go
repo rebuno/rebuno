@@ -58,6 +58,7 @@ type Kernel struct {
 	rateLimiter ratelimit.Limiter
 	tools       *toolDirectory
 
+	dispatchMu     sync.Mutex
 	retryWg        sync.WaitGroup
 	done           chan struct{}
 	closeOnce      sync.Once

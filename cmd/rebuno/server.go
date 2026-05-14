@@ -208,6 +208,9 @@ func runServer(cfg *config.Config) error {
 	lm.StartTimeoutWatcher(ctx)
 	lm.StartCleanup(ctx, cfg.RetentionPeriod, cfg.CleanupInterval)
 	lm.RecoverActiveExecutions(ctx)
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		logger.Error("failed to recover pending retries", "error", err)
+	}
 
 	srv := api.NewServer(api.ServerDeps{
 		Kernel:      k,

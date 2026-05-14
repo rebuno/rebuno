@@ -24,6 +24,13 @@ func (k *Kernel) SubmitJobResult(ctx context.Context, result domain.JobResult) e
 	}
 	defer release()
 
+	defer func() {
+		if result.RunnerID != "" && result.ConsumerID != "" {
+			k.runnerHub.MarkIdle(result.RunnerID, result.ConsumerID)
+		}
+		k.DispatchPendingJobs()
+	}()
+
 	state, err := k.projector.Project(ctx, result.ExecutionID)
 	if err != nil {
 		return err
@@ -65,11 +72,6 @@ func (k *Kernel) SubmitJobResult(ctx context.Context, result domain.JobResult) e
 			k.maybeCheckpoint(ctx, updated, checkpointEventType)
 		}
 	}
-
-	if result.RunnerID != "" && result.ConsumerID != "" {
-		k.runnerHub.MarkIdle(result.RunnerID, result.ConsumerID)
-	}
-	k.DispatchPendingJobs()
 
 	return nil
 }
@@ -229,6 +231,9 @@ func (k *Kernel) enqueuePendingJob(job domain.Job) {
 }
 
 func (k *Kernel) DispatchPendingJobs() {
+	k.dispatchMu.Lock()
+	defer k.dispatchMu.Unlock()
+
 	ctx := context.Background()
 	jobs, err := k.jobQueue.All(ctx)
 	if err != nil {
@@ -241,31 +246,58 @@ func (k *Kernel) DispatchPendingJobs() {
 		if !job.NotBefore.IsZero() && now.Before(job.NotBefore) {
 			continue
 		}
+		k.dispatchOnePendingJob(ctx, job)
+	}
+}
 
-		payload, err := json.Marshal(job)
-		if err != nil {
-			k.logger.Warn("failed to marshal pending job",
-				slog.String("job_id", job.ID.String()),
-				slog.String("error", err.Error()),
-			)
-			continue
-		}
-		msg := store.RunnerMessage{Type: "job.assigned", Payload: payload}
-		info, dispatched := k.runnerHub.Dispatch(job.ToolID, msg)
-		if dispatched {
-			k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
-			if err := k.jobQueue.Remove(ctx, job.ID); err != nil {
-				k.logger.Error("failed to remove dispatched job from queue, may be dispatched again",
-					slog.String("job_id", job.ID.String()),
-					slog.String("runner_id", info.RunnerID),
-					slog.String("error", err.Error()),
-				)
-			}
-			k.logger.Debug("dispatched pending job",
-				slog.String("job_id", job.ID.String()),
-				slog.String("runner_id", info.RunnerID),
-			)
-		}
+func (k *Kernel) dispatchOnePendingJob(ctx context.Context, job domain.Job) {
+	release, err := k.locker.Acquire(ctx, "execution:"+job.ExecutionID)
+	if err != nil {
+		k.logger.Warn("dispatch: failed to acquire execution lock",
+			slog.String("job_id", job.ID.String()),
+			slog.String("execution_id", job.ExecutionID),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	defer release()
+
+	claimed, err := k.jobQueue.Remove(ctx, job.ID)
+	if err != nil {
+		k.logger.Warn("dispatch: failed to claim job",
+			slog.String("job_id", job.ID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	if !claimed {
+		return
+	}
+
+	payload, err := json.Marshal(job)
+	if err != nil {
+		k.logger.Warn("failed to marshal pending job",
+			slog.String("job_id", job.ID.String()),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	msg := store.RunnerMessage{Type: "job.assigned", Payload: payload}
+	info, dispatched := k.runnerHub.Dispatch(job.ToolID, msg)
+	if dispatched {
+		k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
+		k.logger.Debug("dispatched pending job",
+			slog.String("job_id", job.ID.String()),
+			slog.String("runner_id", info.RunnerID),
+		)
+		return
+	}
+
+	if err := k.jobQueue.Enqueue(ctx, job); err != nil {
+		k.logger.Error("failed to re-enqueue undispatched job",
+			slog.String("job_id", job.ID.String()),
+			slog.String("error", err.Error()),
+		)
 	}
 }
 
