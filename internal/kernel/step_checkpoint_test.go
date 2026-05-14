@@ -74,7 +74,7 @@ func TestSubmitStepResultSuccessCreatesCheckpoint(t *testing.T) {
 	}
 }
 
-func TestSubmitStepResultFailureDoesNotCheckpoint(t *testing.T) {
+func TestSubmitStepResultFailureCreatesCheckpoint(t *testing.T) {
 	k, _, checkpoints, sessions := newTestKernelWithCheckpoints()
 	ctx := context.Background()
 
@@ -106,9 +106,12 @@ func TestSubmitStepResultFailureDoesNotCheckpoint(t *testing.T) {
 		t.Fatalf("submit step result: %v", err)
 	}
 
-	// EventStepFailed is NOT in ShouldCheckpoint, so no checkpoint expected.
-	if _, found := checkpoints.checkpoints[execID]; found {
-		t.Fatal("did not expect checkpoint after step failure (EventStepFailed is not checkpoint-worthy)")
+	cp, found := checkpoints.checkpoints[execID]
+	if !found {
+		t.Fatal("expected checkpoint after step failure (terminal step state should be checkpointed)")
+	}
+	if cp.Sequence == 0 {
+		t.Fatal("checkpoint sequence should be > 0")
 	}
 }
 
@@ -155,7 +158,7 @@ func TestSubmitJobResultSuccessCreatesCheckpoint(t *testing.T) {
 	}
 }
 
-func TestSubmitJobResultFailureNoRetryDoesNotCheckpoint(t *testing.T) {
+func TestSubmitJobResultFailureNoRetryCreatesCheckpoint(t *testing.T) {
 	k, _, checkpoints, sessions := newTestKernelWithCheckpoints()
 	ctx := context.Background()
 
@@ -189,8 +192,11 @@ func TestSubmitJobResultFailureNoRetryDoesNotCheckpoint(t *testing.T) {
 		t.Fatalf("submit job result: %v", err)
 	}
 
-	// EventStepFailed is NOT in ShouldCheckpoint, so no checkpoint expected.
-	if _, found := checkpoints.checkpoints[execID]; found {
-		t.Fatal("did not expect checkpoint after non-retryable job failure")
+	cp, found := checkpoints.checkpoints[execID]
+	if !found {
+		t.Fatal("expected checkpoint after non-retryable job failure (terminal step state should be checkpointed)")
+	}
+	if cp.Sequence == 0 {
+		t.Fatal("checkpoint sequence should be > 0")
 	}
 }

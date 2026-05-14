@@ -369,6 +369,7 @@ func TestHandlerRegistration(t *testing.T) {
 func TestShouldCheckpoint(t *testing.T) {
 	checkpointable := []domain.EventType{
 		domain.EventStepCompleted,
+		domain.EventStepFailed,
 		domain.EventExecutionStarted,
 		domain.EventExecutionBlocked,
 		domain.EventExecutionResumed,
@@ -387,12 +388,34 @@ func TestShouldCheckpoint(t *testing.T) {
 		domain.EventStepCreated,
 		domain.EventStepDispatched,
 		domain.EventStepStarted,
-		domain.EventStepFailed,
 		domain.EventSignalReceived,
 	}
 	for _, et := range nonCheckpointable {
 		if ShouldCheckpoint(et) {
 			t.Errorf("expected ShouldCheckpoint=false for %s", et)
+		}
+	}
+}
+
+func TestShouldCheckpointTerminalStepSymmetry(t *testing.T) {
+	// Both terminal step states (completed and failed) should trigger checkpoints.
+	// This ensures SubmitJobResult's checkpoint after step failure is not silently dropped.
+	if !ShouldCheckpoint(domain.EventStepCompleted) {
+		t.Error("EventStepCompleted must be checkpointable")
+	}
+	if !ShouldCheckpoint(domain.EventStepFailed) {
+		t.Error("EventStepFailed must be checkpointable (SubmitJobResult relies on this)")
+	}
+
+	// Non-terminal step states should not trigger checkpoints.
+	for _, et := range []domain.EventType{
+		domain.EventStepCreated,
+		domain.EventStepDispatched,
+		domain.EventStepStarted,
+		domain.EventStepRetried,
+	} {
+		if ShouldCheckpoint(et) {
+			t.Errorf("non-terminal step event %s should not be checkpointable", et)
 		}
 	}
 }
