@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 func TestSubmitJobResultSuccess(t *testing.T) {
@@ -319,6 +321,131 @@ func TestSubmitJobResultAlreadyResolved(t *testing.T) {
 	}
 }
 
+func TestSubmitJobResultAlreadyResolvedMarksIdle(t *testing.T) {
+	k, _, _, runnerHub, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "calculator",
+			Remote: true,
+		},
+	})
+
+	// First submit succeeds and marks idle.
+	_ = k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "runner-A",
+		ConsumerID:  "consumer-A",
+		Success:     true,
+		Data:        json.RawMessage(`{"result":42}`),
+	})
+
+	// Mark runner-B as busy to simulate a second runner picking up the same job.
+	runnerHub.MarkBusy("runner-B", "consumer-B")
+
+	// Second submit returns ErrStepAlreadyResolved but must still mark idle.
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "runner-B",
+		ConsumerID:  "consumer-B",
+		Success:     true,
+		Data:        json.RawMessage(`{"result":42}`),
+	})
+	if !errors.Is(err, domain.ErrStepAlreadyResolved) {
+		t.Fatalf("expected ErrStepAlreadyResolved, got %v", err)
+	}
+
+	runnerHub.mu.Lock()
+	isIdle := runnerHub.idle["runner-B"]
+	runnerHub.mu.Unlock()
+	if !isIdle {
+		t.Fatal("expected runner-B to be marked idle after ErrStepAlreadyResolved")
+	}
+}
+
+func TestSubmitJobResultStepNotFoundMarksIdle(t *testing.T) {
+	k, _, _, runnerHub, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, _ := setupRunningExecution(t, k, sessions)
+
+	runnerHub.MarkBusy("runner-X", "consumer-X")
+
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      "nonexistent-step",
+		RunnerID:    "runner-X",
+		ConsumerID:  "consumer-X",
+		Success:     true,
+		Data:        json.RawMessage(`{}`),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	runnerHub.mu.Lock()
+	isIdle := runnerHub.idle["runner-X"]
+	runnerHub.mu.Unlock()
+	if !isIdle {
+		t.Fatal("expected runner-X to be marked idle after ErrNotFound")
+	}
+}
+
+func TestSubmitJobResultTaintedMarksIdle(t *testing.T) {
+	k, events, _, runnerHub, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// Taint the execution by injecting a sequence gap.
+	events.mu.Lock()
+	evts := events.events[execID]
+	if len(evts) > 0 {
+		evts[len(evts)-1].Sequence = evts[len(evts)-1].Sequence + 1
+	}
+	events.events[execID] = evts
+	events.mu.Unlock()
+
+	runnerHub.MarkBusy("runner-T", "consumer-T")
+
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "runner-T",
+		ConsumerID:  "consumer-T",
+		Success:     true,
+		Data:        json.RawMessage(`{"result":"ok"}`),
+	})
+	if !errors.Is(err, domain.ErrExecutionTainted) {
+		t.Fatalf("expected ErrExecutionTainted, got %v", err)
+	}
+
+	runnerHub.mu.Lock()
+	isIdle := runnerHub.idle["runner-T"]
+	runnerHub.mu.Unlock()
+	if !isIdle {
+		t.Fatal("expected runner-T to be marked idle after ErrExecutionTainted")
+	}
+}
+
 func TestSubmitJobResultFailureExhaustsRetries(t *testing.T) {
 	k, _, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
@@ -393,15 +520,16 @@ func TestDispatchPendingJobsRemoveFailureKeepsJobInQueue(t *testing.T) {
 
 	k.DispatchPendingJobs()
 
-	// Job should still be dispatched to the runner.
+	// Dispatch is now claim-first: if Remove fails we must NOT dispatch,
+	// otherwise the job could be sent to a runner more than once.
 	runnerHub.mu.Lock()
 	dispatched := len(runnerHub.dispatched)
 	runnerHub.mu.Unlock()
-	if dispatched != 1 {
-		t.Fatalf("expected 1 dispatch, got %d", dispatched)
+	if dispatched != 0 {
+		t.Fatalf("expected 0 dispatches when claim fails, got %d", dispatched)
 	}
 
-	// But the job should remain in the queue because Remove failed.
+	// Job stays in the queue for the next attempt.
 	jobs, err := jq.All(ctx)
 	if err != nil {
 		t.Fatalf("All: %v", err)
@@ -974,6 +1102,145 @@ func TestRecoverPendingRetriesHandlesOrphanedFailedRetryable(t *testing.T) {
 	}
 }
 
+func TestStartRetryDispatcherDispatchesDelayedJob(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+		Config: KernelConfig{
+			RetryCheckInterval: 50 * time.Millisecond,
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Enqueue a job with NotBefore just slightly in the future.
+	job := domain.Job{
+		ID:        uuid.Must(uuid.NewV7()),
+		ToolID:    "web_search",
+		NotBefore: time.Now().Add(80 * time.Millisecond),
+	}
+	k.enqueuePendingJob(job)
+
+	// Before starting the dispatcher, the job should not be dispatched.
+	k.DispatchPendingJobs()
+	runnerHub.mu.Lock()
+	if len(runnerHub.dispatched) != 0 {
+		t.Fatal("expected no dispatches before NotBefore elapses")
+	}
+	runnerHub.mu.Unlock()
+
+	k.StartRetryDispatcher(ctx)
+	defer k.Shutdown()
+
+	// Wait for the ticker to fire after NotBefore elapses.
+	time.Sleep(300 * time.Millisecond)
+
+	runnerHub.mu.Lock()
+	dispatched := len(runnerHub.dispatched)
+	runnerHub.mu.Unlock()
+	if dispatched != 1 {
+		t.Fatalf("expected 1 dispatch after retry dispatcher fires, got %d", dispatched)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected job removed from queue after dispatch, got %d", len(jobs))
+	}
+}
+
+func TestStartRetryDispatcherDoubleStartIsNoop(t *testing.T) {
+	k, _, _, _, _, _ := newTestKernel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer k.Shutdown()
+
+	k.StartRetryDispatcher(ctx)
+	k.StartRetryDispatcher(ctx)
+	k.StartRetryDispatcher(ctx)
+
+	// If the guard works, Shutdown should complete quickly because only one
+	// goroutine was started. Without the guard, retryWg would have count 3
+	// but only one context cancel, potentially causing issues.
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		k.retryWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — only one goroutine was running
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry dispatcher goroutine did not exit — double-start guard may be broken")
+	}
+}
+
+func TestStartRetryDispatcherStopsOnShutdown(t *testing.T) {
+	k, _, _, _, _, _ := newTestKernel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	k.StartRetryDispatcher(ctx)
+
+	// Shutdown should wait for the dispatcher goroutine to exit.
+	done := make(chan struct{})
+	go func() {
+		k.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown did not return in time — retry dispatcher goroutine may be stuck")
+	}
+}
+
+func TestStartRetryDispatcherStopsOnContextCancel(t *testing.T) {
+	k, _, _, _, _, _ := newTestKernel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	k.StartRetryDispatcher(ctx)
+
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		k.retryWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry dispatcher goroutine did not exit after context cancellation")
+	}
+}
+
 func TestRecoverPendingRetriesSkipsExhaustedRetries(t *testing.T) {
 	events := newMockEventStore()
 	checkpoints := newMockCheckpointStore()
@@ -1043,6 +1310,216 @@ func TestRecoverPendingRetriesSkipsExhaustedRetries(t *testing.T) {
 	}
 }
 
+func TestRecoverPendingRetriesAfterRecoverActiveExecutions(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// Clear the queue and simulate crash: step.failed + step.retried emitted,
+	// but retry job never enqueued.
+	jq.mu.Lock()
+	jq.jobs = nil
+	jq.mu.Unlock()
+
+	correlationID := uuid.Must(uuid.NewV7())
+	_, err := k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "transient", Retryable: true},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.failed: %v", err)
+	}
+	_, err = k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.retried: %v", err)
+	}
+
+	// Simulate startup sequence: RecoverPendingRetries runs after active
+	// execution recovery, matching the order in server.go and dev.go.
+	// RecoverPendingRetries should detect and re-enqueue the orphaned retry.
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		t.Fatalf("RecoverPendingRetries: %v", err)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 recovered job after startup sequence, got %d", len(jobs))
+	}
+	if jobs[0].StepID != result.StepID {
+		t.Fatalf("expected recovered job for step %s, got %s", result.StepID, jobs[0].StepID)
+	}
+	if jobs[0].Attempt != 2 {
+		t.Fatalf("expected attempt 2, got %d", jobs[0].Attempt)
+	}
+}
+
+func TestRecordStepStartedAfterCompletionIsIgnored(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// Complete the step via SubmitJobResult.
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
+		Success:     true,
+		Data:        json.RawMessage(`{"results":["a","b"]}`),
+	})
+	if err != nil {
+		t.Fatalf("submit job result: %v", err)
+	}
+
+	// Late RecordStepStarted after step is already completed should be silently ignored.
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if err != nil {
+		t.Fatalf("expected no error for late RecordStepStarted, got %v", err)
+	}
+
+	// Verify step is still in succeeded status, not reverted to running.
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepSucceeded {
+		t.Fatalf("expected step to remain succeeded after late RecordStepStarted, got %s", step.Status)
+	}
+}
+
+func TestRecordStepStartedForAlreadyRunningIsIgnored(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// First RecordStepStarted should succeed.
+	err := k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if err != nil {
+		t.Fatalf("first RecordStepStarted: %v", err)
+	}
+
+	// Second RecordStepStarted should be silently ignored (already running).
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if err != nil {
+		t.Fatalf("expected no error for duplicate RecordStepStarted, got %v", err)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepRunning {
+		t.Fatalf("expected step running, got %s", step.Status)
+	}
+}
+
+func TestRecordStepStartedForUnknownStepReturnsError(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, _ := setupRunningExecution(t, k, sessions)
+
+	err := k.RecordStepStarted(ctx, execID, "nonexistent-step", "mock-runner")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for nonexistent step, got %v", err)
+	}
+}
+
+func TestRecordStepStartedAfterFailureIsIgnored(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "calculator",
+			Remote: true,
+		},
+	})
+
+	// Fail the step.
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
+		Success:     false,
+		Error:       "division by zero",
+		Retryable:   false,
+	})
+	if err != nil {
+		t.Fatalf("submit job result: %v", err)
+	}
+
+	// Late RecordStepStarted after step has failed should be silently ignored.
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if err != nil {
+		t.Fatalf("expected no error for late RecordStepStarted after failure, got %v", err)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepFailed {
+		t.Fatalf("expected step to remain failed, got %s", step.Status)
+	}
+}
+
 func TestSubmitStepResultRejectsTaintedExecution(t *testing.T) {
 	k, events, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
@@ -1082,3 +1559,200 @@ func TestSubmitStepResultRejectsTaintedExecution(t *testing.T) {
 		t.Fatalf("expected ErrExecutionTainted, got %v", err)
 	}
 }
+
+func TestRecordStepStartedRejectsTaintedExecution(t *testing.T) {
+	k, events, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Create a remote step.
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("process intent: %v", err)
+	}
+
+	// Taint the execution by injecting a sequence gap.
+	events.mu.Lock()
+	evts := events.events[execID]
+	if len(evts) > 0 {
+		evts[len(evts)-1].Sequence = evts[len(evts)-1].Sequence + 1
+	}
+	events.events[execID] = evts
+	events.mu.Unlock()
+
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if !errors.Is(err, domain.ErrExecutionTainted) {
+		t.Fatalf("expected ErrExecutionTainted, got %v", err)
+	}
+}
+
+func TestDispatchPendingJobsConcurrentNoDuplicate(t *testing.T) {
+	runnerHub := &countingRunnerHub{
+		idle: make(map[string]bool),
+	}
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      newMockEventStore(),
+		Checkpoints: newMockCheckpointStore(),
+		AgentHub:    newMockAgentHub(),
+		RunnerHub:   runnerHub,
+		Signals:     newMockSignalStore(),
+		Sessions:    newMockSessionStore(),
+		Runners:     newMockRunnerStore(),
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		job := domain.Job{
+			ID:     uuid.Must(uuid.NewV7()),
+			ToolID: "web_search",
+		}
+		if err := jq.Enqueue(ctx, job); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			k.DispatchPendingJobs()
+		}()
+	}
+	wg.Wait()
+
+	runnerHub.mu.Lock()
+	dispatched := runnerHub.dispatchCount
+	runnerHub.mu.Unlock()
+
+	if dispatched != 5 {
+		t.Fatalf("expected exactly 5 dispatches (one per job), got %d", dispatched)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected all jobs removed from queue, got %d remaining", len(jobs))
+	}
+}
+
+func TestDispatchPendingJobsConcurrentBusyMarkingRace(t *testing.T) {
+	runnerHub := &singleConnRunnerHub{}
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      newMockEventStore(),
+		Checkpoints: newMockCheckpointStore(),
+		AgentHub:    newMockAgentHub(),
+		RunnerHub:   runnerHub,
+		Signals:     newMockSignalStore(),
+		Sessions:    newMockSessionStore(),
+		Runners:     newMockRunnerStore(),
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		job := domain.Job{
+			ID:     uuid.Must(uuid.NewV7()),
+			ToolID: "tool",
+		}
+		if err := jq.Enqueue(ctx, job); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			k.DispatchPendingJobs()
+		}()
+	}
+	wg.Wait()
+
+	runnerHub.mu.Lock()
+	dispatched := runnerHub.dispatchCount
+	runnerHub.mu.Unlock()
+
+	if dispatched != 1 {
+		t.Fatalf("expected exactly 1 dispatch (runner has 1 conn, becomes busy), got %d", dispatched)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs remaining (only 1 runner conn), got %d", len(jobs))
+	}
+}
+
+type countingRunnerHub struct {
+	mu            sync.Mutex
+	dispatchCount int
+	idle          map[string]bool
+}
+
+func (m *countingRunnerHub) Dispatch(_ string, _ store.RunnerMessage) (store.RunnerConnInfo, bool) {
+	m.mu.Lock()
+	m.dispatchCount++
+	m.mu.Unlock()
+	return store.RunnerConnInfo{RunnerID: "runner", ConsumerID: "c1"}, true
+}
+
+func (m *countingRunnerHub) SendTo(_, _ string, _ store.RunnerMessage) bool { return true }
+func (m *countingRunnerHub) MarkBusy(runnerID, _ string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.idle[runnerID] = false
+}
+func (m *countingRunnerHub) MarkIdle(runnerID, _ string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.idle[runnerID] = true
+}
+func (m *countingRunnerHub) HasCapability(_ string) bool             { return true }
+func (m *countingRunnerHub) UpdateCapabilities(_ string, _ []string) {}
+
+type singleConnRunnerHub struct {
+	mu            sync.Mutex
+	dispatchCount int
+	busy          bool
+}
+
+func (m *singleConnRunnerHub) Dispatch(_ string, _ store.RunnerMessage) (store.RunnerConnInfo, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.busy {
+		return store.RunnerConnInfo{}, false
+	}
+	m.busy = true
+	m.dispatchCount++
+	return store.RunnerConnInfo{RunnerID: "runner", ConsumerID: "c1"}, true
+}
+
+func (m *singleConnRunnerHub) SendTo(_, _ string, _ store.RunnerMessage) bool { return true }
+func (m *singleConnRunnerHub) MarkBusy(_, _ string)                           {}
+func (m *singleConnRunnerHub) MarkIdle(_ string, _ string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.busy = false
+}
+func (m *singleConnRunnerHub) HasCapability(_ string) bool             { return true }
+func (m *singleConnRunnerHub) UpdateCapabilities(_ string, _ []string) {}

@@ -134,8 +134,17 @@ func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string,
 	})
 	defer k.Shutdown()
 
+	agentHub.SetOnEvict(func(sessionIDs []string) {
+		for _, sid := range sessionIDs {
+			dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Second)
+			k.HandleAgentDisconnect(dctx, sid)
+			dcancel()
+		}
+	})
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	k.StartRetryDispatcher(ctx)
 
 	lm := lifecycle.NewManager(lifecycle.Deps{
 		Events:           eventStore,
@@ -155,6 +164,9 @@ func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string,
 	lm.StartSessionReaper(ctx)
 	lm.StartTimeoutWatcher(ctx)
 	lm.RecoverActiveExecutions(ctx)
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		logger.Error("failed to recover pending retries", "error", err)
+	}
 
 	srv := api.NewServer(api.ServerDeps{
 		Kernel:      k,

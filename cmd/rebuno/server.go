@@ -178,14 +178,24 @@ func runServer(cfg *config.Config) error {
 		JobQueue:    jobQueue,
 		RateLimiter: ratelimit.NewMemoryLimiter(),
 		Config: kernel.KernelConfig{
-			ExecutionTimeout: cfg.ExecutionTimeout,
-			StepTimeout:      cfg.StepTimeout,
-			AgentTimeout:     cfg.AgentTimeout,
-			RetryBaseDelay:   cfg.RetryBaseDelay,
-			RetryMaxDelay:    cfg.RetryMaxDelay,
+			ExecutionTimeout:   cfg.ExecutionTimeout,
+			StepTimeout:        cfg.StepTimeout,
+			AgentTimeout:       cfg.AgentTimeout,
+			RetryBaseDelay:     cfg.RetryBaseDelay,
+			RetryMaxDelay:      cfg.RetryMaxDelay,
+			RetryCheckInterval: cfg.RetryCheckInterval,
 		},
 	})
 	defer k.Shutdown()
+	k.StartRetryDispatcher(ctx)
+
+	agentHub.SetOnEvict(func(sessionIDs []string) {
+		for _, sid := range sessionIDs {
+			dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Second)
+			k.HandleAgentDisconnect(dctx, sid)
+			dcancel()
+		}
+	})
 
 	lm := lifecycle.NewManager(lifecycle.Deps{
 		Events:           eventStore,
@@ -206,6 +216,9 @@ func runServer(cfg *config.Config) error {
 	lm.StartTimeoutWatcher(ctx)
 	lm.StartCleanup(ctx, cfg.RetentionPeriod, cfg.CleanupInterval)
 	lm.RecoverActiveExecutions(ctx)
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		logger.Error("failed to recover pending retries", "error", err)
+	}
 
 	srv := api.NewServer(api.ServerDeps{
 		Kernel:      k,
