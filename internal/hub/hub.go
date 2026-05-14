@@ -14,6 +14,8 @@ type Hub struct {
 	sessions map[string]*Conn            // sessionID -> Conn
 	rrIndex  map[string]int              // agentID -> round-robin index
 	logger   *slog.Logger
+	onEvict  func(sessionIDs []string)
+	evictWg  sync.WaitGroup
 }
 
 func New(logger *slog.Logger) *Hub {
@@ -26,6 +28,12 @@ func New(logger *slog.Logger) *Hub {
 		rrIndex:  make(map[string]int),
 		logger:   logger,
 	}
+}
+
+func (h *Hub) SetOnEvict(fn func(sessionIDs []string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onEvict = fn
 }
 
 func (h *Hub) Register(agentID, consumerID string) *Conn {
@@ -148,10 +156,10 @@ func (h *Hub) RemoveSession(agentID, consumerID, sessionID string) {
 
 func (h *Hub) Send(agentID string, msg store.AgentMessage) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	consumers := h.agents[agentID]
 	if len(consumers) == 0 {
+		h.mu.Unlock()
 		return false
 	}
 
@@ -161,29 +169,40 @@ func (h *Hub) Send(agentID string, msg store.AgentMessage) bool {
 
 	// Try all connections starting from the round-robin pick.
 	var evict []*Conn
+	sent := false
 	for i := 0; i < len(ids); i++ {
 		idx := (startIdx + i) % len(ids)
 		conn := consumers[ids[idx]]
 		if conn.Send(msg) {
-			// Evict any full connections we skipped over.
-			h.evictConns(agentID, evict)
-			return true
+			sent = true
+			break
 		}
 		evict = append(evict, conn)
 	}
 
-	// All connections were full; evict them all.
-	h.evictConns(agentID, evict)
-	return false
+	orphaned := h.evictConns(agentID, evict)
+	onEvict := h.onEvict
+	h.mu.Unlock()
+
+	if len(orphaned) > 0 && onEvict != nil {
+		h.evictWg.Add(1)
+		go func() {
+			defer h.evictWg.Done()
+			onEvict(orphaned)
+		}()
+	}
+	return sent
 }
 
-func (h *Hub) evictConns(agentID string, conns []*Conn) {
+func (h *Hub) evictConns(agentID string, conns []*Conn) []string {
+	var orphaned []string
 	for _, conn := range conns {
 		h.logger.Warn("event channel full, closing connection",
 			slog.String("agent_id", agentID),
 			slog.String("consumer_id", conn.ConsumerID),
 		)
 		for sid := range conn.sessionIDs {
+			orphaned = append(orphaned, sid)
 			delete(h.sessions, sid)
 		}
 		close(conn.EventCh)
@@ -193,6 +212,7 @@ func (h *Hub) evictConns(agentID string, conns []*Conn) {
 		delete(h.agents, agentID)
 		delete(h.rrIndex, agentID)
 	}
+	return orphaned
 }
 
 func (h *Hub) SendTo(consumerID, agentID string, msg store.AgentMessage) bool {
@@ -264,6 +284,8 @@ func (h *Hub) HasConnections(agentID string) bool {
 }
 
 func (h *Hub) Close() {
+	h.evictWg.Wait()
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

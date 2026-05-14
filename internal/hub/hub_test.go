@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/store"
 )
@@ -646,6 +647,197 @@ func TestSendFallbackEvictsFullConnOnly(t *testing.T) {
 	// c2 should still be available.
 	if !h.HasConnections("agent-1") {
 		t.Fatal("expected c2 to remain registered")
+	}
+}
+
+func TestEvictionCallsOnEvictWithSessionIDs(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	evicted := make(chan []string, 1)
+	h.SetOnEvict(func(sessionIDs []string) {
+		evicted <- sessionIDs
+	})
+
+	conn := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+	h.SetSession("agent-1", "c1", "session-2")
+
+	for i := 0; i < eventChannelSize; i++ {
+		conn.EventCh <- testMsg("fill")
+	}
+
+	h.Send("agent-1", testMsg("overflow"))
+
+	select {
+	case ids := <-evicted:
+		got := make(map[string]bool)
+		for _, id := range ids {
+			got[id] = true
+		}
+		if !got["session-1"] || !got["session-2"] {
+			t.Fatalf("expected session-1 and session-2 in evicted IDs, got %v", ids)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for onEvict callback")
+	}
+}
+
+func TestEvictionCallbackNotCalledWithoutSessions(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	called := make(chan struct{}, 1)
+	h.SetOnEvict(func(sessionIDs []string) {
+		called <- struct{}{}
+	})
+
+	conn := h.Register("agent-1", "c1")
+
+	for i := 0; i < eventChannelSize; i++ {
+		conn.EventCh <- testMsg("fill")
+	}
+
+	h.Send("agent-1", testMsg("overflow"))
+
+	select {
+	case <-called:
+		t.Fatal("expected onEvict not to be called when no sessions exist")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestEvictionPartialCallbackOnlyFullConn(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	evicted := make(chan []string, 1)
+	h.SetOnEvict(func(sessionIDs []string) {
+		evicted <- sessionIDs
+	})
+
+	conn1 := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-c1")
+	h.Register("agent-1", "c2")
+	h.SetSession("agent-1", "c2", "session-c2")
+
+	for i := 0; i < eventChannelSize; i++ {
+		conn1.EventCh <- testMsg("fill")
+	}
+
+	ok := h.Send("agent-1", testMsg("test"))
+	if !ok {
+		t.Fatal("expected send to succeed via c2")
+	}
+
+	select {
+	case ids := <-evicted:
+		if len(ids) != 1 || ids[0] != "session-c1" {
+			t.Fatalf("expected only session-c1 evicted, got %v", ids)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for onEvict callback")
+	}
+
+	if !h.HasConnections("agent-1") {
+		t.Fatal("expected c2 to remain registered")
+	}
+}
+
+func TestEvictionCallbackAllConnectionsFull(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	evicted := make(chan []string, 1)
+	h.SetOnEvict(func(sessionIDs []string) {
+		evicted <- sessionIDs
+	})
+
+	conn1 := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+	conn2 := h.Register("agent-1", "c2")
+	h.SetSession("agent-1", "c2", "session-2")
+
+	for i := 0; i < eventChannelSize; i++ {
+		conn1.EventCh <- testMsg("fill")
+		conn2.EventCh <- testMsg("fill")
+	}
+
+	ok := h.Send("agent-1", testMsg("overflow"))
+	if ok {
+		t.Fatal("expected send to return false when all connections are full")
+	}
+
+	select {
+	case ids := <-evicted:
+		got := make(map[string]bool)
+		for _, id := range ids {
+			got[id] = true
+		}
+		if !got["session-1"] || !got["session-2"] {
+			t.Fatalf("expected both sessions evicted, got %v", ids)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for onEvict callback")
+	}
+}
+
+func TestSetOnEvictConcurrentWithSend(t *testing.T) {
+	h := New(nil)
+	defer h.Close()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.SetOnEvict(func(sessionIDs []string) {})
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.Send("agent-1", testMsg("test"))
+		}()
+	}
+	wg.Wait()
+}
+
+func TestCloseWaitsForEvictionCallbacks(t *testing.T) {
+	h := New(nil)
+
+	done := make(chan struct{})
+	h.SetOnEvict(func(sessionIDs []string) {
+		<-done
+	})
+
+	conn := h.Register("agent-1", "c1")
+	h.SetSession("agent-1", "c1", "session-1")
+
+	for i := 0; i < eventChannelSize; i++ {
+		conn.EventCh <- testMsg("fill")
+	}
+
+	h.Send("agent-1", testMsg("overflow"))
+
+	closed := make(chan struct{})
+	go func() {
+		h.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		t.Fatal("expected Close to block while eviction callback is in-flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(done)
+
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected Close to return after eviction callback completes")
 	}
 }
 

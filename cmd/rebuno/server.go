@@ -189,6 +189,14 @@ func runServer(cfg *config.Config) error {
 	defer k.Shutdown()
 	k.StartRetryDispatcher(ctx)
 
+	agentHub.SetOnEvict(func(sessionIDs []string) {
+		for _, sid := range sessionIDs {
+			dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Second)
+			k.HandleAgentDisconnect(dctx, sid)
+			dcancel()
+		}
+	})
+
 	lm := lifecycle.NewManager(lifecycle.Deps{
 		Events:           eventStore,
 		Sessions:         sessionStore,
