@@ -73,6 +73,9 @@ func applyStepStarted(state *domain.ExecutionState, evt *domain.Event) error {
 	if step == nil {
 		return fmt.Errorf("step.started for unknown step %s", evt.StepID)
 	}
+	if step.Status.IsTerminal() || step.Status == domain.StepRunning {
+		return nil
+	}
 	now := evt.Timestamp
 	step.Status = domain.StepRunning
 	step.StartedAt = &now

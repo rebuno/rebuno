@@ -1248,6 +1248,139 @@ func TestRecoverPendingRetriesAfterRecoverActiveExecutions(t *testing.T) {
 	}
 }
 
+func TestRecordStepStartedAfterCompletionIsIgnored(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// Complete the step via SubmitJobResult.
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
+		Success:     true,
+		Data:        json.RawMessage(`{"results":["a","b"]}`),
+	})
+	if err != nil {
+		t.Fatalf("submit job result: %v", err)
+	}
+
+	// Late RecordStepStarted after step is already completed should be silently ignored.
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if err != nil {
+		t.Fatalf("expected no error for late RecordStepStarted, got %v", err)
+	}
+
+	// Verify step is still in succeeded status, not reverted to running.
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepSucceeded {
+		t.Fatalf("expected step to remain succeeded after late RecordStepStarted, got %s", step.Status)
+	}
+}
+
+func TestRecordStepStartedForAlreadyRunningIsIgnored(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// First RecordStepStarted should succeed.
+	err := k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if err != nil {
+		t.Fatalf("first RecordStepStarted: %v", err)
+	}
+
+	// Second RecordStepStarted should be silently ignored (already running).
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if err != nil {
+		t.Fatalf("expected no error for duplicate RecordStepStarted, got %v", err)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepRunning {
+		t.Fatalf("expected step running, got %s", step.Status)
+	}
+}
+
+func TestRecordStepStartedForUnknownStepReturnsError(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, _ := setupRunningExecution(t, k, sessions)
+
+	err := k.RecordStepStarted(ctx, execID, "nonexistent-step", "mock-runner")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for nonexistent step, got %v", err)
+	}
+}
+
+func TestRecordStepStartedAfterFailureIsIgnored(t *testing.T) {
+	k, _, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "calculator",
+			Remote: true,
+		},
+	})
+
+	// Fail the step.
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
+		Success:     false,
+		Error:       "division by zero",
+		Retryable:   false,
+	})
+	if err != nil {
+		t.Fatalf("submit job result: %v", err)
+	}
+
+	// Late RecordStepStarted after step has failed should be silently ignored.
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
+	if err != nil {
+		t.Fatalf("expected no error for late RecordStepStarted after failure, got %v", err)
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepFailed {
+		t.Fatalf("expected step to remain failed, got %s", step.Status)
+	}
+}
+
 func TestSubmitStepResultRejectsTaintedExecution(t *testing.T) {
 	k, events, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()
@@ -1283,6 +1416,41 @@ func TestSubmitStepResultRejectsTaintedExecution(t *testing.T) {
 		Success:     true,
 		Data:        json.RawMessage(`{"result":42}`),
 	})
+	if !errors.Is(err, domain.ErrExecutionTainted) {
+		t.Fatalf("expected ErrExecutionTainted, got %v", err)
+	}
+}
+
+func TestRecordStepStartedRejectsTaintedExecution(t *testing.T) {
+	k, events, _, _, sessions, _ := newTestKernel()
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	// Create a remote step.
+	result, err := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("process intent: %v", err)
+	}
+
+	// Taint the execution by injecting a sequence gap.
+	events.mu.Lock()
+	evts := events.events[execID]
+	if len(evts) > 0 {
+		evts[len(evts)-1].Sequence = evts[len(evts)-1].Sequence + 1
+	}
+	events.events[execID] = evts
+	events.mu.Unlock()
+
+	err = k.RecordStepStarted(ctx, execID, result.StepID, "mock-runner")
 	if !errors.Is(err, domain.ErrExecutionTainted) {
 		t.Fatalf("expected ErrExecutionTainted, got %v", err)
 	}
