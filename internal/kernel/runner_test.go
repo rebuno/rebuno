@@ -1102,6 +1102,145 @@ func TestRecoverPendingRetriesHandlesOrphanedFailedRetryable(t *testing.T) {
 	}
 }
 
+func TestStartRetryDispatcherDispatchesDelayedJob(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+		Config: KernelConfig{
+			RetryCheckInterval: 50 * time.Millisecond,
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Enqueue a job with NotBefore just slightly in the future.
+	job := domain.Job{
+		ID:        uuid.Must(uuid.NewV7()),
+		ToolID:    "web_search",
+		NotBefore: time.Now().Add(80 * time.Millisecond),
+	}
+	k.enqueuePendingJob(job)
+
+	// Before starting the dispatcher, the job should not be dispatched.
+	k.DispatchPendingJobs()
+	runnerHub.mu.Lock()
+	if len(runnerHub.dispatched) != 0 {
+		t.Fatal("expected no dispatches before NotBefore elapses")
+	}
+	runnerHub.mu.Unlock()
+
+	k.StartRetryDispatcher(ctx)
+	defer k.Shutdown()
+
+	// Wait for the ticker to fire after NotBefore elapses.
+	time.Sleep(300 * time.Millisecond)
+
+	runnerHub.mu.Lock()
+	dispatched := len(runnerHub.dispatched)
+	runnerHub.mu.Unlock()
+	if dispatched != 1 {
+		t.Fatalf("expected 1 dispatch after retry dispatcher fires, got %d", dispatched)
+	}
+
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected job removed from queue after dispatch, got %d", len(jobs))
+	}
+}
+
+func TestStartRetryDispatcherDoubleStartIsNoop(t *testing.T) {
+	k, _, _, _, _, _ := newTestKernel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer k.Shutdown()
+
+	k.StartRetryDispatcher(ctx)
+	k.StartRetryDispatcher(ctx)
+	k.StartRetryDispatcher(ctx)
+
+	// If the guard works, Shutdown should complete quickly because only one
+	// goroutine was started. Without the guard, retryWg would have count 3
+	// but only one context cancel, potentially causing issues.
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		k.retryWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — only one goroutine was running
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry dispatcher goroutine did not exit — double-start guard may be broken")
+	}
+}
+
+func TestStartRetryDispatcherStopsOnShutdown(t *testing.T) {
+	k, _, _, _, _, _ := newTestKernel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	k.StartRetryDispatcher(ctx)
+
+	// Shutdown should wait for the dispatcher goroutine to exit.
+	done := make(chan struct{})
+	go func() {
+		k.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown did not return in time — retry dispatcher goroutine may be stuck")
+	}
+}
+
+func TestStartRetryDispatcherStopsOnContextCancel(t *testing.T) {
+	k, _, _, _, _, _ := newTestKernel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	k.StartRetryDispatcher(ctx)
+
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		k.retryWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry dispatcher goroutine did not exit after context cancellation")
+	}
+}
+
 func TestRecoverPendingRetriesSkipsExhaustedRetries(t *testing.T) {
 	events := newMockEventStore()
 	checkpoints := newMockCheckpointStore()

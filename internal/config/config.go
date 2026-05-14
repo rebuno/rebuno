@@ -37,8 +37,9 @@ type Config struct {
 	RetentionPeriod time.Duration
 	CleanupInterval time.Duration
 
-	RetryBaseDelay time.Duration
-	RetryMaxDelay  time.Duration
+	RetryBaseDelay     time.Duration
+	RetryMaxDelay      time.Duration
+	RetryCheckInterval time.Duration
 
 	BearerToken string
 	CORSOrigins string
@@ -59,8 +60,9 @@ func DefaultConfig() *Config {
 		OTELInsecure:     true,
 		RetentionPeriod:  168 * time.Hour,
 		CleanupInterval:  time.Hour,
-		RetryBaseDelay:   time.Second,
-		RetryMaxDelay:    30 * time.Second,
+		RetryBaseDelay:     time.Second,
+		RetryMaxDelay:      30 * time.Second,
+		RetryCheckInterval: time.Second,
 	}
 }
 
@@ -170,6 +172,13 @@ func (c *Config) ApplyEnv() {
 			c.RetryMaxDelay = d
 		} else {
 			log.Printf("WARNING: invalid REBUNO_RETRY_MAX_DELAY value %q, using default %s", v, c.RetryMaxDelay)
+		}
+	}
+	if v := os.Getenv("REBUNO_RETRY_CHECK_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.RetryCheckInterval = d
+		} else {
+			log.Printf("WARNING: invalid REBUNO_RETRY_CHECK_INTERVAL value %q, using default %s", v, c.RetryCheckInterval)
 		}
 	}
 	if v := os.Getenv("REBUNO_BEARER_TOKEN"); v != "" {

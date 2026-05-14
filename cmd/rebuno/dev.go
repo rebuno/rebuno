@@ -136,6 +136,7 @@ func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string,
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	k.StartRetryDispatcher(ctx)
 
 	lm := lifecycle.NewManager(lifecycle.Deps{
 		Events:           eventStore,

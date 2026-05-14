@@ -178,14 +178,16 @@ func runServer(cfg *config.Config) error {
 		JobQueue:    jobQueue,
 		RateLimiter: ratelimit.NewMemoryLimiter(),
 		Config: kernel.KernelConfig{
-			ExecutionTimeout: cfg.ExecutionTimeout,
-			StepTimeout:      cfg.StepTimeout,
-			AgentTimeout:     cfg.AgentTimeout,
-			RetryBaseDelay:   cfg.RetryBaseDelay,
-			RetryMaxDelay:    cfg.RetryMaxDelay,
+			ExecutionTimeout:   cfg.ExecutionTimeout,
+			StepTimeout:        cfg.StepTimeout,
+			AgentTimeout:       cfg.AgentTimeout,
+			RetryBaseDelay:     cfg.RetryBaseDelay,
+			RetryMaxDelay:      cfg.RetryMaxDelay,
+			RetryCheckInterval: cfg.RetryCheckInterval,
 		},
 	})
 	defer k.Shutdown()
+	k.StartRetryDispatcher(ctx)
 
 	lm := lifecycle.NewManager(lifecycle.Deps{
 		Events:           eventStore,
