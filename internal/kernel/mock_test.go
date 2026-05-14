@@ -168,21 +168,21 @@ func (m *mockCheckpointStore) Delete(_ context.Context, executionID string) erro
 type mockAgentHub struct {
 	mu       sync.Mutex
 	sent     []store.AgentMessage
-	sessions map[string]store.AgentMessage
+	sessions map[string][]store.AgentMessage
 	hasConn  bool
 	connInfo store.ConnInfo
 }
 
 func newMockAgentHub() *mockAgentHub {
 	return &mockAgentHub{
-		sessions: make(map[string]store.AgentMessage),
+		sessions: make(map[string][]store.AgentMessage),
 		hasConn:  false,
 	}
 }
 
 func newConnectedMockAgentHub() *mockAgentHub {
 	return &mockAgentHub{
-		sessions: make(map[string]store.AgentMessage),
+		sessions: make(map[string][]store.AgentMessage),
 		hasConn:  true,
 		connInfo: store.ConnInfo{ConsumerID: "test-consumer"},
 	}
@@ -205,7 +205,7 @@ func (m *mockAgentHub) SendTo(_ string, _ string, msg store.AgentMessage) bool {
 func (m *mockAgentHub) SendToSession(sessionID string, msg store.AgentMessage) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sessions[sessionID] = msg
+	m.sessions[sessionID] = append(m.sessions[sessionID], msg)
 	return true
 }
 
@@ -529,19 +529,35 @@ func (q *mockJobQueue) All(_ context.Context) ([]domain.Job, error) {
 	return out, nil
 }
 
-func (q *mockJobQueue) Remove(_ context.Context, jobID uuid.UUID) error {
+func (q *mockJobQueue) Remove(_ context.Context, jobID uuid.UUID) (bool, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.removeErr != nil {
-		return q.removeErr
+		return false, q.removeErr
 	}
 	for i, j := range q.jobs {
 		if j.ID == jobID {
 			q.jobs = append(q.jobs[:i], q.jobs[i+1:]...)
-			return nil
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
+}
+
+func (q *mockJobQueue) RemoveByExecution(_ context.Context, executionID string) (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	kept := q.jobs[:0]
+	removed := 0
+	for _, j := range q.jobs {
+		if j.ExecutionID == executionID {
+			removed++
+			continue
+		}
+		kept = append(kept, j)
+	}
+	q.jobs = kept
+	return removed, nil
 }
 
 type mockRateLimitPolicy struct {

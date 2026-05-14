@@ -221,10 +221,8 @@ func (k *Kernel) handleApprovalSignal(
 			return fmt.Errorf("marshaling job: %w", err)
 		}
 		msg := store.RunnerMessage{Type: "job.assigned", Payload: jobPayload}
-		info, dispatched := k.runnerHub.Dispatch(step.ToolID, msg)
-		if dispatched {
-			k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
-		} else {
+		_, dispatched := k.runnerHub.Dispatch(step.ToolID, msg)
+		if !dispatched {
 			k.enqueuePendingJob(job)
 		}
 	} else {
@@ -363,6 +361,7 @@ func (k *Kernel) sendApprovalResolved(ctx context.Context, executionID, stepID s
 		"execution_id": executionID,
 		"step_id":      stepID,
 		"approved":     approved,
+		"session_id":   session.ID,
 	}
 	payload, err := json.Marshal(msg)
 	if err != nil {

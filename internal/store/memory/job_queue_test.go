@@ -97,8 +97,12 @@ func TestJobQueueRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := q.Remove(ctx, j1.ID); err != nil {
+	removed, err := q.Remove(ctx, j1.ID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !removed {
+		t.Fatal("expected Remove to report removed=true")
 	}
 
 	jobs, _ := q.All(ctx)
@@ -109,8 +113,12 @@ func TestJobQueueRemove(t *testing.T) {
 		t.Fatalf("expected j2 to remain, got %v", jobs[0].ID)
 	}
 
-	// Removing nonexistent ID is a no-op
-	if err := q.Remove(ctx, uuid.New()); err != nil {
+	// Removing nonexistent ID returns removed=false, no error.
+	removed, err = q.Remove(ctx, uuid.New())
+	if err != nil {
 		t.Fatal(err)
+	}
+	if removed {
+		t.Fatal("expected Remove to report removed=false for unknown id")
 	}
 }

@@ -12,5 +12,6 @@ type JobQueue interface {
 	Enqueue(ctx context.Context, job domain.Job) error
 	DequeueForTool(ctx context.Context, toolID string) (*domain.Job, error)
 	All(ctx context.Context) ([]domain.Job, error)
-	Remove(ctx context.Context, jobID uuid.UUID) error
+	Remove(ctx context.Context, jobID uuid.UUID) (bool, error)
+	RemoveByExecution(ctx context.Context, executionID string) (int, error)
 }

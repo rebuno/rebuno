@@ -83,17 +83,17 @@ func (q *JobQueue) All(ctx context.Context) ([]domain.Job, error) {
 	return jobs, nil
 }
 
-func (q *JobQueue) Remove(ctx context.Context, jobID uuid.UUID) error {
+func (q *JobQueue) Remove(ctx context.Context, jobID uuid.UUID) (bool, error) {
 	toolIDs, err := q.client.SMembers(ctx, toolsSetKey).Result()
 	if err != nil {
-		return fmt.Errorf("redis smembers: %w", err)
+		return false, fmt.Errorf("redis smembers: %w", err)
 	}
 
 	for _, toolID := range toolIDs {
 		key := toolListKey(toolID)
 		items, err := q.client.LRange(ctx, key, 0, -1).Result()
 		if err != nil {
-			return fmt.Errorf("redis lrange %s: %w", toolID, err)
+			return false, fmt.Errorf("redis lrange %s: %w", toolID, err)
 		}
 		for _, item := range items {
 			var job domain.Job
@@ -101,10 +101,45 @@ func (q *JobQueue) Remove(ctx context.Context, jobID uuid.UUID) error {
 				continue
 			}
 			if job.ID == jobID {
-				q.client.LRem(ctx, key, 1, item)
-				return nil
+				n, err := q.client.LRem(ctx, key, 1, item).Result()
+				if err != nil {
+					return false, fmt.Errorf("redis lrem %s: %w", toolID, err)
+				}
+				return n > 0, nil
 			}
 		}
 	}
-	return nil
+	return false, nil
+}
+
+func (q *JobQueue) RemoveByExecution(ctx context.Context, executionID string) (int, error) {
+	toolIDs, err := q.client.SMembers(ctx, toolsSetKey).Result()
+	if err != nil {
+		return 0, fmt.Errorf("redis smembers: %w", err)
+	}
+
+	removed := 0
+	for _, toolID := range toolIDs {
+		key := toolListKey(toolID)
+		items, err := q.client.LRange(ctx, key, 0, -1).Result()
+		if err != nil {
+			return removed, fmt.Errorf("redis lrange %s: %w", toolID, err)
+		}
+		for _, item := range items {
+			var job domain.Job
+			if err := json.Unmarshal([]byte(item), &job); err != nil {
+				continue
+			}
+			if job.ExecutionID == executionID {
+				n, err := q.client.LRem(ctx, key, 1, item).Result()
+				if err != nil {
+					return removed, fmt.Errorf("redis lrem %s: %w", toolID, err)
+				}
+				if n > 0 {
+					removed++
+				}
+			}
+		}
+	}
+	return removed, nil
 }
