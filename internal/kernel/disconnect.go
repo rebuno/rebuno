@@ -92,7 +92,7 @@ func (k *Kernel) HandleAgentDisconnect(ctx context.Context, sessionID string) {
 			)
 		}
 		if err := k.events.UpdateExecutionStatus(ctx, executionID, domain.ExecutionPending); err != nil {
-			k.logger.Warn("disconnect: failed to reset execution to pending",
+			k.logger.Error("disconnect: failed to reset execution to pending; execution may be stuck in running with no session and require manual intervention",
 				slog.String("execution_id", executionID),
 				slog.String("error", err.Error()),
 			)

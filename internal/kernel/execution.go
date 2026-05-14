@@ -86,10 +86,40 @@ func (k *Kernel) TryAssignExecution(ctx context.Context, executionID, agentID st
 		return false
 	}
 
-	k.agentHub.SendTo(connInfo.ConsumerID, agentID, store.AgentMessage{
+	if !k.agentHub.SendTo(connInfo.ConsumerID, agentID, store.AgentMessage{
 		Type:    "execution.assigned",
 		Payload: payload,
-	})
+	}) {
+		k.logger.Warn("failed to send execution.assigned, resetting execution to pending",
+			slog.String("execution_id", executionID),
+			slog.String("agent_id", agentID),
+			slog.String("consumer_id", connInfo.ConsumerID),
+		)
+		if err := k.sessions.Delete(ctx, result.SessionID); err != nil {
+			k.logger.Warn("assign rollback: failed to delete session",
+				slog.String("execution_id", executionID),
+				slog.String("session_id", result.SessionID),
+				slog.String("error", err.Error()),
+			)
+		}
+		if _, err := k.EmitEvent(ctx, executionID, "", domain.EventExecutionReset,
+			domain.ExecutionResetPayload{
+				Reason:     "send_failed",
+				FromStatus: string(domain.ExecutionRunning),
+			}, uuid.Nil, uuid.Nil); err != nil {
+			k.logger.Warn("assign rollback: failed to emit execution.reset",
+				slog.String("execution_id", executionID),
+				slog.String("error", err.Error()),
+			)
+		}
+		if err := k.events.UpdateExecutionStatus(ctx, executionID, domain.ExecutionPending); err != nil {
+			k.logger.Error("assign rollback: failed to reset execution to pending; execution may be stuck in running with no session and require manual intervention",
+				slog.String("execution_id", executionID),
+				slog.String("error", err.Error()),
+			)
+		}
+		return false
+	}
 
 	k.logger.Info("execution assigned via SSE",
 		slog.String("execution_id", executionID),
