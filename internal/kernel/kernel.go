@@ -20,20 +20,22 @@ import (
 )
 
 type KernelConfig struct {
-	ExecutionTimeout time.Duration
-	StepTimeout      time.Duration
-	AgentTimeout     time.Duration
-	RetryBaseDelay   time.Duration
-	RetryMaxDelay    time.Duration
+	ExecutionTimeout   time.Duration
+	StepTimeout        time.Duration
+	AgentTimeout       time.Duration
+	RetryBaseDelay     time.Duration
+	RetryMaxDelay      time.Duration
+	RetryCheckInterval time.Duration
 }
 
 func DefaultKernelConfig() KernelConfig {
 	return KernelConfig{
-		ExecutionTimeout: time.Hour,
-		StepTimeout:      5 * time.Minute,
-		AgentTimeout:     30 * time.Second,
-		RetryBaseDelay:   1 * time.Second,
-		RetryMaxDelay:    30 * time.Second,
+		ExecutionTimeout:   time.Hour,
+		StepTimeout:        5 * time.Minute,
+		AgentTimeout:       30 * time.Second,
+		RetryBaseDelay:     1 * time.Second,
+		RetryMaxDelay:      30 * time.Second,
+		RetryCheckInterval: 1 * time.Second,
 	}
 }
 
@@ -56,10 +58,11 @@ type Kernel struct {
 	rateLimiter ratelimit.Limiter
 	tools       *toolDirectory
 
-	dispatchMu sync.Mutex
-	retryWg    sync.WaitGroup
-	done       chan struct{}
-	closeOnce  sync.Once
+	dispatchMu     sync.Mutex
+	retryWg        sync.WaitGroup
+	done           chan struct{}
+	closeOnce      sync.Once
+	retryStartOnce sync.Once
 }
 
 type Deps struct {
@@ -101,6 +104,9 @@ func NewKernel(d Deps) *Kernel {
 	}
 	if cfg.RetryMaxDelay == 0 {
 		cfg.RetryMaxDelay = defaults.RetryMaxDelay
+	}
+	if cfg.RetryCheckInterval == 0 {
+		cfg.RetryCheckInterval = defaults.RetryCheckInterval
 	}
 
 	proj := projector.New(d.Events, d.Checkpoints, logger)
@@ -146,6 +152,32 @@ func (k *Kernel) Close() {
 func (k *Kernel) Shutdown() {
 	k.Close()
 	k.retryWg.Wait()
+}
+
+func (k *Kernel) StartRetryDispatcher(ctx context.Context) {
+	k.retryStartOnce.Do(func() {
+		k.startRetryDispatcher(ctx)
+	})
+}
+
+func (k *Kernel) startRetryDispatcher(ctx context.Context) {
+	k.retryWg.Add(1)
+	go func() {
+		defer k.retryWg.Done()
+		ticker := time.NewTicker(k.config.RetryCheckInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-k.done:
+				return
+			case <-ticker.C:
+				k.DispatchPendingJobs()
+			}
+		}
+	}()
 }
 
 func (k *Kernel) StepTimeout() time.Duration {
