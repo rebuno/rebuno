@@ -134,6 +134,14 @@ func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string,
 	})
 	defer k.Shutdown()
 
+	agentHub.SetOnEvict(func(sessionIDs []string) {
+		for _, sid := range sessionIDs {
+			dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Second)
+			k.HandleAgentDisconnect(dctx, sid)
+			dcancel()
+		}
+	})
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	k.StartRetryDispatcher(ctx)
