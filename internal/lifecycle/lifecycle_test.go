@@ -91,6 +91,14 @@ func startedEvent(seq int64) domain.Event {
 	}
 }
 
+func startedEventWithSession(sessionID string, seq int64) domain.Event {
+	return domain.Event{
+		Type:     domain.EventExecutionStarted,
+		Payload:  mustMarshal(domain.ExecutionStartedPayload{SessionID: sessionID}),
+		Sequence: seq,
+	}
+}
+
 func TestReapSessions(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -1202,27 +1210,28 @@ func TestReapSessionsRunningExecutionWithConnectedAgentRecreatesSession(t *testi
 	f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
 
 	execID := "exec-running"
+	originalSessionID := "sess-original-A"
 	f.events.activeIDs = []string{execID}
 	f.events.events[execID] = []domain.Event{
 		createdEvent("agent-1", 1),
-		startedEvent(2),
+		startedEventWithSession(originalSessionID, 2),
 	}
 
 	m := f.manager(time.Hour)
 	m.reapSessions(context.Background())
 
-	// The reaper should have recreated a session for the running execution.
+	// The reaper should have recreated a session reusing the original ID.
 	f.sessions.mu.Lock()
 	var foundSession bool
 	for _, s := range f.sessions.sessions {
-		if s.ExecutionID == execID && s.AgentID == "agent-1" && s.ConsumerID == "consumer-1" {
+		if s.ID == originalSessionID && s.ExecutionID == execID && s.AgentID == "agent-1" && s.ConsumerID == "consumer-1" {
 			foundSession = true
 		}
 	}
 	f.sessions.mu.Unlock()
 
 	if !foundSession {
-		t.Fatal("expected session to be recreated for running execution with connected agent")
+		t.Fatal("expected session to be recreated with original session ID for running execution with connected agent")
 	}
 
 	// The execution should NOT be reset to pending — it should stay running.
@@ -1418,6 +1427,156 @@ func TestReassignIfNeededAssignsViaRealFlow(t *testing.T) {
 
 		if assignCount != 1 {
 			t.Fatalf("expected 1 assignment attempt, got %d", assignCount)
+		}
+	})
+}
+
+func TestRecreateSessionForRunningReusesOriginalSessionID(t *testing.T) {
+	t.Run("agent can use original session ID after session reaping", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = true
+		f.agentHub.pickResult = true
+		f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+		execID := "exec-running-recover"
+		originalSessionID := "sess-original-42"
+
+		f.events.activeIDs = []string{execID}
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEventWithSession(originalSessionID, 2),
+		}
+
+		m := f.manager(time.Hour)
+		m.recreateSessionForRunning(context.Background(), execID, "agent-1")
+
+		// Verify the session was recreated with the original ID.
+		f.sessions.mu.Lock()
+		sess, ok := f.sessions.sessions[originalSessionID]
+		f.sessions.mu.Unlock()
+
+		if !ok {
+			t.Fatal("expected session to be recreated with the original session ID")
+		}
+		if sess.ExecutionID != execID {
+			t.Errorf("expected execution ID %s, got %s", execID, sess.ExecutionID)
+		}
+		if sess.AgentID != "agent-1" {
+			t.Errorf("expected agent ID agent-1, got %s", sess.AgentID)
+		}
+		if sess.ConsumerID != "consumer-1" {
+			t.Errorf("expected consumer ID consumer-1, got %s", sess.ConsumerID)
+		}
+	})
+
+	t.Run("falls back to new ID when execution.started has no session ID", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = true
+		f.agentHub.pickResult = true
+		f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+
+		execID := "exec-running-no-sess"
+
+		f.events.activeIDs = []string{execID}
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEvent(2), // no session ID in payload
+		}
+
+		m := f.manager(time.Hour)
+		m.recreateSessionForRunning(context.Background(), execID, "agent-1")
+
+		f.sessions.mu.Lock()
+		sessionCount := len(f.sessions.sessions)
+		var foundForExec bool
+		for _, s := range f.sessions.sessions {
+			if s.ExecutionID == execID {
+				foundForExec = true
+			}
+		}
+		f.sessions.mu.Unlock()
+
+		if sessionCount != 1 {
+			t.Fatalf("expected 1 session created, got %d", sessionCount)
+		}
+		if !foundForExec {
+			t.Fatal("expected a session to be created for the execution")
+		}
+	})
+
+	t.Run("uses latest session ID when multiple execution.started events exist", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = true
+		f.agentHub.pickResult = true
+		f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-3"}
+
+		execID := "exec-reassigned"
+		staleSessionID := "sess-stale-first"
+		latestSessionID := "sess-latest-second"
+
+		f.events.activeIDs = []string{execID}
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEventWithSession(staleSessionID, 2),
+			{
+				Type:     domain.EventAgentTimeout,
+				Payload:  mustMarshal(domain.AgentTimeoutPayload{SessionID: staleSessionID}),
+				Sequence: 3,
+			},
+			{
+				Type:     domain.EventExecutionReset,
+				Payload:  mustMarshal(domain.ExecutionResetPayload{Reason: "recovery", FromStatus: "running"}),
+				Sequence: 4,
+			},
+			startedEventWithSession(latestSessionID, 5),
+		}
+
+		m := f.manager(time.Hour)
+		m.recreateSessionForRunning(context.Background(), execID, "agent-1")
+
+		f.sessions.mu.Lock()
+		_, hasLatest := f.sessions.sessions[latestSessionID]
+		_, hasStale := f.sessions.sessions[staleSessionID]
+		f.sessions.mu.Unlock()
+
+		if !hasLatest {
+			t.Fatal("expected session to be recreated with the latest session ID")
+		}
+		if hasStale {
+			t.Fatal("should not recreate session with the stale first session ID")
+		}
+	})
+
+	t.Run("agent lookup with original session ID succeeds after reaping", func(t *testing.T) {
+		f := newTestFixture()
+		f.agentHub.hasConn = true
+		f.agentHub.pickResult = true
+		f.agentHub.connInfo = store.ConnInfo{ConsumerID: "consumer-1"}
+		f.sessions.deletedExpired = 1
+
+		execID := "exec-agent-recovery"
+		originalSessionID := "sess-agent-known"
+
+		f.events.activeIDs = []string{execID}
+		f.events.events[execID] = []domain.Event{
+			createdEvent("agent-1", 1),
+			startedEventWithSession(originalSessionID, 2),
+		}
+
+		m := f.manager(time.Hour)
+		m.reapSessions(context.Background())
+
+		// Simulate what the agent would do: look up its session by the
+		// original session ID that it received via execution.assigned.
+		sess, found, err := f.sessions.Get(context.Background(), originalSessionID)
+		if err != nil {
+			t.Fatalf("unexpected error looking up session: %v", err)
+		}
+		if !found {
+			t.Fatal("agent's original session ID should resolve after session recreation")
+		}
+		if sess.ExecutionID != execID {
+			t.Errorf("expected execution ID %s, got %s", execID, sess.ExecutionID)
 		}
 	})
 }
