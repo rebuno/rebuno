@@ -93,7 +93,7 @@ func TestHandleAgentDisconnectAllowsNewToolAfterReassignment(t *testing.T) {
 	k.HandleAgentDisconnect(ctx, sessionID)
 
 	newSessionID := "new-session-" + execID[:8]
-	sessions.Create(ctx, domain.Session{
+	_ = sessions.Create(ctx, domain.Session{
 		ID:          newSessionID,
 		ExecutionID: execID,
 		AgentID:     "agent-1",
@@ -101,8 +101,8 @@ func TestHandleAgentDisconnectAllowsNewToolAfterReassignment(t *testing.T) {
 		CreatedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(2 * time.Minute),
 	})
-	k.EmitEvent(ctx, execID, "", domain.EventExecutionStarted, nil, uuid.Nil, uuid.Nil)
-	k.events.UpdateExecutionStatus(ctx, execID, domain.ExecutionRunning)
+	_, _ = k.EmitEvent(ctx, execID, "", domain.EventExecutionStarted, nil, uuid.Nil, uuid.Nil)
+	_ = k.events.UpdateExecutionStatus(ctx, execID, domain.ExecutionRunning)
 
 	result, err = k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
@@ -139,7 +139,7 @@ func TestHandleAgentDisconnectSkipsTerminalSteps(t *testing.T) {
 		t.Fatalf("invoke tool: %v", err)
 	}
 
-	k.SubmitStepResult(ctx, StepResultRequest{
+	_ = k.SubmitStepResult(ctx, StepResultRequest{
 		ExecutionID: execID,
 		StepID:      result.StepID,
 		SessionID:   sessionID,
@@ -235,7 +235,7 @@ func TestHandleAgentDisconnectTerminalExecutionNoOp(t *testing.T) {
 
 	execID, sessionID := setupRunningExecution(t, k, sessions)
 
-	k.ProcessIntent(ctx, domain.IntentRequest{
+	_, _ = k.ProcessIntent(ctx, domain.IntentRequest{
 		ExecutionID: execID,
 		SessionID:   sessionID,
 		Intent:      domain.Intent{Type: domain.IntentComplete, Output: json.RawMessage(`{}`)},

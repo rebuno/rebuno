@@ -148,9 +148,9 @@ func TestExecutionLifecycle(t *testing.T) {
 
 func TestExecutionFailed(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
 
 	err := applyExecutionFailed(state, makeEvent("e1", 3, domain.EventExecutionFailed, nil))
 	if err != nil {
@@ -163,7 +163,7 @@ func TestExecutionFailed(t *testing.T) {
 
 func TestExecutionCancelled(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
 
 	err := applyExecutionCancelled(state, makeEvent("e1", 2, domain.EventExecutionCancelled, nil))
@@ -249,7 +249,7 @@ func TestStepLifecycle(t *testing.T) {
 func TestStepFailed(t *testing.T) {
 	state := emptyState()
 	stepID := "step-1"
-	applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "t1", Attempt: 1}))
 
 	err := applyStepFailed(state, makeStepEvent("e1", stepID, 2, domain.EventStepFailed,
@@ -272,7 +272,7 @@ func TestStepFailed(t *testing.T) {
 func TestStepTimedOut(t *testing.T) {
 	state := emptyState()
 	stepID := "step-1"
-	applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "t1"}))
 
 	err := applyStepTimedOut(state, makeStepEvent("e1", stepID, 2, domain.EventStepTimedOut, nil))
@@ -422,10 +422,10 @@ func TestShouldCheckpointTerminalStepSymmetry(t *testing.T) {
 
 func TestExecutionReset(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
-	applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "signal", Ref: "approval"}))
 
 	err := applyExecutionReset(state, makeEvent("e1", 4, domain.EventExecutionReset, nil))
@@ -445,9 +445,9 @@ func TestExecutionReset(t *testing.T) {
 
 func TestExecutionBlockedWithApproval(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
 
 	err := applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{
@@ -480,22 +480,22 @@ func TestExecutionBlockedWithApproval(t *testing.T) {
 
 func TestExecutionBlockedNonApprovalClearsPendingApproval(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
 
 	// First block with approval
-	applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
+	_ = applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "t1"}))
 	if len(state.PendingApprovals) == 0 {
 		t.Fatal("expected PendingApprovals non-empty")
 	}
 
-	applyExecutionResumed(state, makeEvent("e1", 4, domain.EventExecutionResumed,
+	_ = applyExecutionResumed(state, makeEvent("e1", 4, domain.EventExecutionResumed,
 		domain.ExecutionResumedPayload{Reason: "approved"}))
 
 	// Block again with non-approval reason — approvals should have been cleared by resume
-	applyExecutionBlocked(state, makeEvent("e1", 5, domain.EventExecutionBlocked,
+	_ = applyExecutionBlocked(state, makeEvent("e1", 5, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "signal", Ref: "wait"}))
 	if len(state.PendingApprovals) != 0 {
 		t.Fatal("expected PendingApprovals empty after resume + non-approval block")
@@ -505,7 +505,7 @@ func TestExecutionBlockedNonApprovalClearsPendingApproval(t *testing.T) {
 func TestStepCancelled(t *testing.T) {
 	state := emptyState()
 	stepID := "step-1"
-	applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "t1"}))
 
 	err := applyStepCancelled(state, makeStepEvent("e1", stepID, 2, domain.EventStepCancelled, nil))
@@ -526,7 +526,7 @@ func TestStepCancelled(t *testing.T) {
 func TestStepCancelledWithCustomReason(t *testing.T) {
 	state := emptyState()
 	stepID := "step-1"
-	applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "t1"}))
 
 	err := applyStepCancelled(state, makeStepEvent("e1", stepID, 2, domain.EventStepCancelled,
@@ -548,10 +548,10 @@ func TestStepCancelledWithCustomReason(t *testing.T) {
 func TestStepFailedAddsToHistory(t *testing.T) {
 	state := emptyState()
 	stepID := "step-1"
-	applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "t1", Attempt: 1}))
 
-	applyStepFailed(state, makeStepEvent("e1", stepID, 2, domain.EventStepFailed,
+	_ = applyStepFailed(state, makeStepEvent("e1", stepID, 2, domain.EventStepFailed,
 		domain.StepFailedPayload{Error: "timeout", Retryable: false}))
 
 	if len(state.History) != 1 {
@@ -568,10 +568,10 @@ func TestStepFailedAddsToHistory(t *testing.T) {
 func TestStepTimedOutAddsToHistory(t *testing.T) {
 	state := emptyState()
 	stepID := "step-1"
-	applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent("e1", stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "t1"}))
 
-	applyStepTimedOut(state, makeStepEvent("e1", stepID, 2, domain.EventStepTimedOut, nil))
+	_ = applyStepTimedOut(state, makeStepEvent("e1", stepID, 2, domain.EventStepTimedOut, nil))
 
 	if len(state.History) != 1 {
 		t.Fatalf("expected 1 history entry, got %d", len(state.History))
@@ -653,9 +653,9 @@ func TestCorruptPayloadOnExecutionCompleted(t *testing.T) {
 func TestMultipleStepsTracked(t *testing.T) {
 	state := emptyState()
 
-	applyStepCreated(state, makeStepEvent("e1", "s1", 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent("e1", "s1", 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "tool-a"}))
-	applyStepCreated(state, makeStepEvent("e1", "s2", 2, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent("e1", "s2", 2, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "tool-b"}))
 
 	if len(state.Steps) != 2 {
@@ -742,14 +742,14 @@ func TestSequenceGapMarksTainted(t *testing.T) {
 
 	// Create normal events at seq 1, 2.
 	createdPayload, _ := json.Marshal(domain.ExecutionCreatedPayload{AgentID: "a1"})
-	es.Append(ctx, domain.Event{
+	_ = es.Append(ctx, domain.Event{
 		ID:          uuid.Must(uuid.NewV7()),
 		ExecutionID: execID,
 		Type:        domain.EventExecutionCreated,
 		Payload:     createdPayload,
 		Timestamp:   time.Now(),
 	})
-	es.Append(ctx, domain.Event{
+	_ = es.Append(ctx, domain.Event{
 		ID:          uuid.Must(uuid.NewV7()),
 		ExecutionID: execID,
 		Type:        domain.EventExecutionStarted,
@@ -780,14 +780,14 @@ func TestCorruptCheckpointFallsBackToFullReplay(t *testing.T) {
 
 	// Add events.
 	createdPayload, _ := json.Marshal(domain.ExecutionCreatedPayload{AgentID: "a1"})
-	es.Append(ctx, domain.Event{
+	_ = es.Append(ctx, domain.Event{
 		ID:          uuid.Must(uuid.NewV7()),
 		ExecutionID: execID,
 		Type:        domain.EventExecutionCreated,
 		Payload:     createdPayload,
 		Timestamp:   time.Now(),
 	})
-	es.Append(ctx, domain.Event{
+	_ = es.Append(ctx, domain.Event{
 		ID:          uuid.Must(uuid.NewV7()),
 		ExecutionID: execID,
 		Type:        domain.EventExecutionStarted,
@@ -821,7 +821,7 @@ func TestUnknownEventTypeDuringReplayContinues(t *testing.T) {
 
 	// Create a normal event.
 	createdPayload, _ := json.Marshal(domain.ExecutionCreatedPayload{AgentID: "a1"})
-	es.Append(ctx, domain.Event{
+	_ = es.Append(ctx, domain.Event{
 		ID:          uuid.Must(uuid.NewV7()),
 		ExecutionID: execID,
 		Type:        domain.EventExecutionCreated,
@@ -830,7 +830,7 @@ func TestUnknownEventTypeDuringReplayContinues(t *testing.T) {
 	})
 
 	// Inject an unknown event type.
-	es.Append(ctx, domain.Event{
+	_ = es.Append(ctx, domain.Event{
 		ID:          uuid.Must(uuid.NewV7()),
 		ExecutionID: execID,
 		Type:        domain.EventType("unknown.future.event"),
@@ -839,7 +839,7 @@ func TestUnknownEventTypeDuringReplayContinues(t *testing.T) {
 	})
 
 	// Add another normal event after the unknown one.
-	es.Append(ctx, domain.Event{
+	_ = es.Append(ctx, domain.Event{
 		ID:          uuid.Must(uuid.NewV7()),
 		ExecutionID: execID,
 		Type:        domain.EventExecutionStarted,
@@ -866,17 +866,17 @@ func TestUnknownEventTypeDuringReplayContinues(t *testing.T) {
 
 func TestResumedClearsPendingApproval(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
-	applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyExecutionBlocked(state, makeEvent("e1", 3, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "t1"}))
 
 	if len(state.PendingApprovals) == 0 {
 		t.Fatal("expected PendingApprovals non-empty")
 	}
 
-	applyExecutionResumed(state, makeEvent("e1", 4, domain.EventExecutionResumed,
+	_ = applyExecutionResumed(state, makeEvent("e1", 4, domain.EventExecutionResumed,
 		domain.ExecutionResumedPayload{Reason: "approved"}))
 
 	if len(state.PendingApprovals) != 0 {
@@ -886,19 +886,19 @@ func TestResumedClearsPendingApproval(t *testing.T) {
 
 func TestResetClearsActiveStepsAndPendingApprovals(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
-	applyStepCreated(state, makeStepEvent("e1", "s1", 3, domain.EventStepCreated,
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyStepCreated(state, makeStepEvent("e1", "s1", 3, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "tool-a", Attempt: 1}))
 
 	if len(state.ActiveSteps) == 0 {
 		t.Fatal("expected ActiveSteps to be non-empty before reset")
 	}
 
-	applyStepCancelled(state, makeStepEvent("e1", "s1", 4, domain.EventStepCancelled,
+	_ = applyStepCancelled(state, makeStepEvent("e1", "s1", 4, domain.EventStepCancelled,
 		domain.StepCancelledPayload{Reason: "agent disconnected"}))
-	applyExecutionReset(state, makeEvent("e1", 5, domain.EventExecutionReset,
+	_ = applyExecutionReset(state, makeEvent("e1", 5, domain.EventExecutionReset,
 		domain.ExecutionResetPayload{Reason: "agent_disconnect", FromStatus: "running"}))
 
 	if state.Execution.Status != domain.ExecutionPending {
@@ -914,16 +914,16 @@ func TestResetClearsActiveStepsAndPendingApprovals(t *testing.T) {
 
 func TestResumedBySignalRemovesConsumedSignal(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
 
 	// Receive multiple signals.
-	applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+	_ = applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
 		domain.SignalReceivedPayload{SignalType: "signal-1", Payload: json.RawMessage(`{"n":1}`)}))
-	applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
+	_ = applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
 		domain.SignalReceivedPayload{SignalType: "signal-2", Payload: json.RawMessage(`{"n":2}`)}))
-	applySignalReceived(state, makeEvent("e1", 5, domain.EventSignalReceived,
+	_ = applySignalReceived(state, makeEvent("e1", 5, domain.EventSignalReceived,
 		domain.SignalReceivedPayload{SignalType: "signal-3", Payload: json.RawMessage(`{"n":3}`)}))
 
 	if len(state.PendingSignals) != 3 {
@@ -931,9 +931,9 @@ func TestResumedBySignalRemovesConsumedSignal(t *testing.T) {
 	}
 
 	// Block on signal, then resume by signal-2.
-	applyExecutionBlocked(state, makeEvent("e1", 6, domain.EventExecutionBlocked,
+	_ = applyExecutionBlocked(state, makeEvent("e1", 6, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "signal", Ref: "signal-2"}))
-	applyExecutionResumed(state, makeEvent("e1", 7, domain.EventExecutionResumed,
+	_ = applyExecutionResumed(state, makeEvent("e1", 7, domain.EventExecutionResumed,
 		domain.ExecutionResumedPayload{Reason: "signal received: signal-2"}))
 
 	if len(state.PendingSignals) != 2 {
@@ -948,16 +948,16 @@ func TestResumedBySignalRemovesConsumedSignal(t *testing.T) {
 
 func TestResumedByNonSignalDoesNotAffectPendingSignals(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
 
-	applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+	_ = applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
 		domain.SignalReceivedPayload{SignalType: "signal-1", Payload: json.RawMessage(`{}`)}))
 
-	applyExecutionBlocked(state, makeEvent("e1", 4, domain.EventExecutionBlocked,
+	_ = applyExecutionBlocked(state, makeEvent("e1", 4, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "step-1", ToolID: "t1"}))
-	applyExecutionResumed(state, makeEvent("e1", 5, domain.EventExecutionResumed,
+	_ = applyExecutionResumed(state, makeEvent("e1", 5, domain.EventExecutionResumed,
 		domain.ExecutionResumedPayload{Reason: "approved"}))
 
 	if len(state.PendingSignals) != 1 {
@@ -967,23 +967,23 @@ func TestResumedByNonSignalDoesNotAffectPendingSignals(t *testing.T) {
 
 func TestResumedBySignalRemovesOnlyFirstMatch(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
 
 	// Two signals of the same type.
-	applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+	_ = applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
 		domain.SignalReceivedPayload{SignalType: "dup", Payload: json.RawMessage(`{"n":1}`)}))
-	applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
+	_ = applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
 		domain.SignalReceivedPayload{SignalType: "dup", Payload: json.RawMessage(`{"n":2}`)}))
 
 	if len(state.PendingSignals) != 2 {
 		t.Fatalf("expected 2 pending signals, got %d", len(state.PendingSignals))
 	}
 
-	applyExecutionBlocked(state, makeEvent("e1", 5, domain.EventExecutionBlocked,
+	_ = applyExecutionBlocked(state, makeEvent("e1", 5, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "signal", Ref: "dup"}))
-	applyExecutionResumed(state, makeEvent("e1", 6, domain.EventExecutionResumed,
+	_ = applyExecutionResumed(state, makeEvent("e1", 6, domain.EventExecutionResumed,
 		domain.ExecutionResumedPayload{Reason: "signal received: dup"}))
 
 	if len(state.PendingSignals) != 1 {
@@ -1022,12 +1022,12 @@ func TestTerminalStatesClearPendingSignals(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			state := emptyState()
-			applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+			_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 				domain.ExecutionCreatedPayload{AgentID: "a1"}))
-			applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
-			applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+			_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+			_ = applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
 				domain.SignalReceivedPayload{SignalType: "s1", Payload: json.RawMessage(`{}`)}))
-			applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
+			_ = applySignalReceived(state, makeEvent("e1", 4, domain.EventSignalReceived,
 				domain.SignalReceivedPayload{SignalType: "s2", Payload: json.RawMessage(`{}`)}))
 
 			if len(state.PendingSignals) != 2 {
@@ -1047,17 +1047,17 @@ func TestTerminalStatesClearPendingSignals(t *testing.T) {
 
 func TestResetClearsPendingSignals(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
-	applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applySignalReceived(state, makeEvent("e1", 3, domain.EventSignalReceived,
 		domain.SignalReceivedPayload{SignalType: "s1", Payload: json.RawMessage(`{}`)}))
 
 	if len(state.PendingSignals) != 1 {
 		t.Fatalf("expected 1 pending signal, got %d", len(state.PendingSignals))
 	}
 
-	applyExecutionReset(state, makeEvent("e1", 4, domain.EventExecutionReset,
+	_ = applyExecutionReset(state, makeEvent("e1", 4, domain.EventExecutionReset,
 		domain.ExecutionResetPayload{Reason: "recovery", FromStatus: "running"}))
 
 	if len(state.PendingSignals) != 0 {
@@ -1070,14 +1070,14 @@ func TestStepRetriedReAddsToActiveSteps(t *testing.T) {
 	execID := "exec-1"
 	stepID := "step-1"
 
-	applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1, MaxAttempts: 3}))
 
 	if !state.HasActiveSteps() {
 		t.Fatal("expected active steps after creation")
 	}
 
-	applyStepFailed(state, makeStepEvent(execID, stepID, 2, domain.EventStepFailed,
+	_ = applyStepFailed(state, makeStepEvent(execID, stepID, 2, domain.EventStepFailed,
 		domain.StepFailedPayload{Error: "connection timeout", Retryable: true}))
 
 	if state.HasActiveSteps() {
@@ -1119,13 +1119,13 @@ func TestStepRetriedClearsTimingFields(t *testing.T) {
 	execID := "exec-1"
 	stepID := "step-1"
 
-	applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1, MaxAttempts: 3}))
 
 	deadline := time.Now().Add(5 * time.Minute)
-	applyStepDispatched(state, makeStepEvent(execID, stepID, 2, domain.EventStepDispatched,
+	_ = applyStepDispatched(state, makeStepEvent(execID, stepID, 2, domain.EventStepDispatched,
 		domain.StepDispatchedPayload{RunnerID: "runner-1", JobID: "job-1", Deadline: deadline}))
-	applyStepStarted(state, makeStepEvent(execID, stepID, 3, domain.EventStepStarted,
+	_ = applyStepStarted(state, makeStepEvent(execID, stepID, 3, domain.EventStepStarted,
 		domain.StepStartedPayload{RunnerID: "runner-1"}))
 
 	step := state.Steps[stepID]
@@ -1133,9 +1133,9 @@ func TestStepRetriedClearsTimingFields(t *testing.T) {
 		t.Fatal("expected timing fields to be set before retry")
 	}
 
-	applyStepFailed(state, makeStepEvent(execID, stepID, 4, domain.EventStepFailed,
+	_ = applyStepFailed(state, makeStepEvent(execID, stepID, 4, domain.EventStepFailed,
 		domain.StepFailedPayload{Error: "connection timeout", Retryable: true}))
-	applyStepRetried(state, makeStepEvent(execID, stepID, 5, domain.EventStepRetried,
+	_ = applyStepRetried(state, makeStepEvent(execID, stepID, 5, domain.EventStepRetried,
 		domain.StepRetriedPayload{NextAttempt: 2}))
 
 	step = state.Steps[stepID]
@@ -1155,18 +1155,18 @@ func TestStepRetriedThenCompletedClearsActiveSteps(t *testing.T) {
 	execID := "exec-1"
 	stepID := "step-1"
 
-	applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
+	_ = applyStepCreated(state, makeStepEvent(execID, stepID, 1, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "web_search", Attempt: 1, MaxAttempts: 3}))
-	applyStepFailed(state, makeStepEvent(execID, stepID, 2, domain.EventStepFailed,
+	_ = applyStepFailed(state, makeStepEvent(execID, stepID, 2, domain.EventStepFailed,
 		domain.StepFailedPayload{Error: "timeout", Retryable: true}))
-	applyStepRetried(state, makeStepEvent(execID, stepID, 3, domain.EventStepRetried,
+	_ = applyStepRetried(state, makeStepEvent(execID, stepID, 3, domain.EventStepRetried,
 		domain.StepRetriedPayload{NextAttempt: 2}))
 
 	if !state.HasActiveSteps() {
 		t.Fatal("expected active steps after retry")
 	}
 
-	applyStepCompleted(state, makeStepEvent(execID, stepID, 4, domain.EventStepCompleted,
+	_ = applyStepCompleted(state, makeStepEvent(execID, stepID, 4, domain.EventStepCompleted,
 		domain.StepCompletedPayload{Result: json.RawMessage(`{"ok":true}`)}))
 
 	if state.HasActiveSteps() {
@@ -1185,12 +1185,12 @@ func TestStepRetriedUnknownStepReturnsError(t *testing.T) {
 
 func TestResetClearsBlockedApprovalState(t *testing.T) {
 	state := emptyState()
-	applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
+	_ = applyExecutionCreated(state, makeEvent("e1", 1, domain.EventExecutionCreated,
 		domain.ExecutionCreatedPayload{AgentID: "a1"}))
-	applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
-	applyStepCreated(state, makeStepEvent("e1", "s1", 3, domain.EventStepCreated,
+	_ = applyExecutionStarted(state, makeEvent("e1", 2, domain.EventExecutionStarted, nil))
+	_ = applyStepCreated(state, makeStepEvent("e1", "s1", 3, domain.EventStepCreated,
 		domain.StepCreatedPayload{ToolID: "tool-a", Attempt: 1}))
-	applyExecutionBlocked(state, makeEvent("e1", 4, domain.EventExecutionBlocked,
+	_ = applyExecutionBlocked(state, makeEvent("e1", 4, domain.EventExecutionBlocked,
 		domain.ExecutionBlockedPayload{Reason: "approval", Ref: "s1", ToolID: "tool-a"}))
 
 	if len(state.PendingApprovals) == 0 {
@@ -1200,9 +1200,9 @@ func TestResetClearsBlockedApprovalState(t *testing.T) {
 		t.Fatal("expected ActiveSteps non-empty before reset")
 	}
 
-	applyStepCancelled(state, makeStepEvent("e1", "s1", 5, domain.EventStepCancelled,
+	_ = applyStepCancelled(state, makeStepEvent("e1", "s1", 5, domain.EventStepCancelled,
 		domain.StepCancelledPayload{Reason: "agent disconnected"}))
-	applyExecutionReset(state, makeEvent("e1", 6, domain.EventExecutionReset,
+	_ = applyExecutionReset(state, makeEvent("e1", 6, domain.EventExecutionReset,
 		domain.ExecutionResetPayload{Reason: "recovery", FromStatus: "blocked"}))
 
 	if state.Execution.Status != domain.ExecutionPending {

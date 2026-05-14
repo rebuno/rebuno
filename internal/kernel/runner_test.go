@@ -599,7 +599,7 @@ func TestDispatchPendingJobsNoRunnerDoesNotRemove(t *testing.T) {
 	jq := newMockJobQueue()
 
 	// Override Dispatch to return false (no runner available).
-	noDispatchHub := &noDispatchRunnerHub{}
+	noDispatchHub := &noDispatchRunnerHub{mockRunnerHub: newMockRunnerHub()}
 
 	k := NewKernel(Deps{
 		Events:      events,
@@ -796,7 +796,7 @@ func TestRecoverPendingRetriesAfterCrash(t *testing.T) {
 		Events:      events,
 		Checkpoints: checkpoints,
 		AgentHub:    agentHub,
-		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: runnerHub},
 		Signals:     signals,
 		Sessions:    sessions,
 		Runners:     runners,
@@ -933,25 +933,25 @@ func TestRecoverPendingRetriesSkipsTerminalExecution(t *testing.T) {
 
 	// Emit retried events.
 	correlationID := uuid.Must(uuid.NewV7())
-	k.EmitEvent(ctx, execID, result.StepID,
+	_, _ = k.EmitEvent(ctx, execID, result.StepID,
 		domain.EventStepFailed,
 		domain.StepFailedPayload{Error: "err", Retryable: true},
 		uuid.Nil, correlationID)
-	k.EmitEvent(ctx, execID, result.StepID,
+	_, _ = k.EmitEvent(ctx, execID, result.StepID,
 		domain.EventStepRetried,
 		domain.StepRetriedPayload{NextAttempt: 2},
 		uuid.Nil, correlationID)
 
 	// Cancel the step and mark execution as failed.
-	k.EmitEvent(ctx, execID, result.StepID,
+	_, _ = k.EmitEvent(ctx, execID, result.StepID,
 		domain.EventStepCancelled,
 		domain.StepCancelledPayload{Reason: "cancelled"},
 		uuid.Nil, correlationID)
-	k.EmitEvent(ctx, execID, "",
+	_, _ = k.EmitEvent(ctx, execID, "",
 		domain.EventExecutionFailed,
 		domain.ExecutionFailedPayload{Error: "cancelled"},
 		uuid.Nil, correlationID)
-	k.events.UpdateExecutionStatus(ctx, execID, domain.ExecutionFailed)
+	_ = k.events.UpdateExecutionStatus(ctx, execID, domain.ExecutionFailed)
 
 	if err := k.RecoverPendingRetries(ctx); err != nil {
 		t.Fatalf("RecoverPendingRetries: %v", err)
@@ -1028,7 +1028,7 @@ func TestRecoverPendingRetriesHandlesOrphanedFailedRetryable(t *testing.T) {
 		Events:      events,
 		Checkpoints: checkpoints,
 		AgentHub:    agentHub,
-		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: runnerHub},
 		Signals:     signals,
 		Sessions:    sessions,
 		Runners:     runners,
@@ -1255,7 +1255,7 @@ func TestRecoverPendingRetriesSkipsExhaustedRetries(t *testing.T) {
 		Events:      events,
 		Checkpoints: checkpoints,
 		AgentHub:    agentHub,
-		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: runnerHub},
 		Signals:     signals,
 		Sessions:    sessions,
 		Runners:     runners,
@@ -1284,19 +1284,19 @@ func TestRecoverPendingRetriesSkipsExhaustedRetries(t *testing.T) {
 	// Simulate retries up to attempt 3, then a final failed+retryable on attempt 3.
 	// Emit step.failed + step.retried for attempt 1→2.
 	cid := uuid.Must(uuid.NewV7())
-	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
+	_, _ = k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
 		domain.StepFailedPayload{Error: "err", Retryable: true}, uuid.Nil, cid)
-	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepRetried,
+	_, _ = k.EmitEvent(ctx, execID, result.StepID, domain.EventStepRetried,
 		domain.StepRetriedPayload{NextAttempt: 2}, uuid.Nil, cid)
 	// Emit step.failed + step.retried for attempt 2→3.
 	cid2 := uuid.Must(uuid.NewV7())
-	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
+	_, _ = k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
 		domain.StepFailedPayload{Error: "err", Retryable: true}, uuid.Nil, cid2)
-	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepRetried,
+	_, _ = k.EmitEvent(ctx, execID, result.StepID, domain.EventStepRetried,
 		domain.StepRetriedPayload{NextAttempt: 3}, uuid.Nil, cid2)
 	// Now fail on attempt 3 (max_attempts=3) with retryable=true — but should NOT retry.
 	cid3 := uuid.Must(uuid.NewV7())
-	k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
+	_, _ = k.EmitEvent(ctx, execID, result.StepID, domain.EventStepFailed,
 		domain.StepFailedPayload{Error: "err", Retryable: true}, uuid.Nil, cid3)
 
 	// Recovery should NOT create a job because attempt == maxAttempts.
@@ -1324,7 +1324,7 @@ func TestRecoverPendingRetriesAfterRecoverActiveExecutions(t *testing.T) {
 		Events:      events,
 		Checkpoints: checkpoints,
 		AgentHub:    agentHub,
-		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: *runnerHub},
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: runnerHub},
 		Signals:     signals,
 		Sessions:    sessions,
 		Runners:     runners,

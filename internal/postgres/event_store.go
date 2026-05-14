@@ -28,7 +28,7 @@ func (s *EventStore) Append(ctx context.Context, event domain.Event) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := s.appendInTx(ctx, tx, event); err != nil {
 		return err
@@ -46,7 +46,7 @@ func (s *EventStore) AppendBatch(ctx context.Context, events []domain.Event) err
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	for _, event := range events {
 		if err := s.appendInTx(ctx, tx, event); err != nil {

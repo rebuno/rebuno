@@ -21,7 +21,7 @@ func TestMemoryLimiter_AllowsWithinLimit(t *testing.T) {
 func TestMemoryLimiter_DeniesOverLimit(t *testing.T) {
 	lim := NewMemoryLimiter()
 	for i := 0; i < 5; i++ {
-		lim.Allow("agent:tool", 5, time.Minute)
+		_, _ = lim.Allow("agent:tool", 5, time.Minute)
 	}
 	allowed, err := lim.Allow("agent:tool", 5, time.Minute)
 	if err != nil {
@@ -35,7 +35,7 @@ func TestMemoryLimiter_DeniesOverLimit(t *testing.T) {
 func TestMemoryLimiter_SeparateKeys(t *testing.T) {
 	lim := NewMemoryLimiter()
 	for i := 0; i < 5; i++ {
-		lim.Allow("agent-a:tool", 5, time.Minute)
+		_, _ = lim.Allow("agent-a:tool", 5, time.Minute)
 	}
 	// Different key should still be allowed
 	allowed, _ := lim.Allow("agent-b:tool", 5, time.Minute)
@@ -48,7 +48,7 @@ func TestMemoryLimiter_WindowExpiry(t *testing.T) {
 	lim := NewMemoryLimiter()
 	// Use a very short window
 	for i := 0; i < 3; i++ {
-		lim.Allow("key", 3, 50*time.Millisecond)
+		_, _ = lim.Allow("key", 3, 50*time.Millisecond)
 	}
 	// Should be denied
 	allowed, _ := lim.Allow("key", 3, 50*time.Millisecond)

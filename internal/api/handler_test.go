@@ -422,7 +422,7 @@ func TestListExecutions_EmptyResult(t *testing.T) {
 	var resp struct {
 		Executions []any `json:"executions"`
 	}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.Executions == nil {
 		t.Fatal("expected non-nil executions array (empty but present)")
 	}
