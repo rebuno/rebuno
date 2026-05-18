@@ -28,11 +28,11 @@ when:
 
 MCP servers can be connected to agents and runners, making their tools available through the kernel with full policy enforcement and audit logging.
 
-MCP tools are namespaced with the server name as prefix (e.g., `filesystem.read_file`, `github.list_repos`). Policy rules can match them with globs:
+MCP tools are namespaced with the server name as prefix (e.g., `filesystem_read_file`, `github_list_repos`). Policy rules can match them with globs:
 
 ```yaml
 when:
-  tool_ids: ["filesystem.*"]
+  tool_ids: ["filesystem_*"]
 then: allow
 ```
 

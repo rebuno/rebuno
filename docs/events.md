@@ -341,7 +341,7 @@ Emitted when a step requires human approval before it can proceed. This is an in
 
 ```json
 {
-  "tool_id": "deploy.production",
+  "tool_id": "deploy_production",
   "arguments": {"service": "api", "version": "v2.1.0"},
   "remote": false,
   "reason": "Production deployments require approval"
