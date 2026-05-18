@@ -204,7 +204,7 @@ When a rule returns `require_approval`, the kernel creates the step but blocks t
   priority: 15
   when:
     action: "tool.invoke"
-    tool_id: "deploy.*"
+    tool_id: "deploy_*"
   then:
     decision: "require_approval"
     reason: "Production deployments require human approval"
@@ -241,7 +241,7 @@ When `timeout_ms` is set on an allow rule, the kernel uses it as the step deadli
 - id: "data-pipeline"
   priority: 50
   when:
-    tool_id: "data.transform"
+    tool_id: "data_transform"
     labels:
       pipeline: "etl"
   then:
