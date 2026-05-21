@@ -965,9 +965,6 @@ func TestRecoverPendingRetriesSkipsTerminalExecution(t *testing.T) {
 }
 
 func TestDispatchPendingRetryEmitsStepDispatched(t *testing.T) {
-	// Regression for #108: a retry-dispatched step must get a fresh
-	// step.dispatched event so the projector re-establishes Deadline and
-	// DispatchedAt — without it, the timeout watcher skips stalled retries.
 	events := newMockEventStore()
 	checkpoints := newMockCheckpointStore()
 	agentHub := newMockAgentHub()
