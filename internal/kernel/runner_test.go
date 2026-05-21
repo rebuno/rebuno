@@ -964,6 +964,267 @@ func TestRecoverPendingRetriesSkipsTerminalExecution(t *testing.T) {
 	}
 }
 
+func TestDispatchPendingRetryEmitsStepDispatched(t *testing.T) {
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+		Config:      KernelConfig{RetryBaseDelay: 1}, // ~0 delay so retry is ready immediately
+	})
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// Submitting a retryable failure clears the step's Deadline via step.retried
+	// and enqueues a retry job. SubmitJobResult's deferred DispatchPendingJobs
+	// then claims the retry and must emit step.dispatched.
+	before := time.Now()
+	err := k.SubmitJobResult(ctx, domain.JobResult{
+		ExecutionID: execID,
+		StepID:      result.StepID,
+		RunnerID:    "mock-runner",
+		ConsumerID:  "mock-consumer",
+		Success:     false,
+		Error:       "timeout",
+		Retryable:   true,
+	})
+	if err != nil {
+		t.Fatalf("submit retryable failure: %v", err)
+	}
+
+	// Retry job must have been claimed off the queue and dispatched.
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected retry job to be claimed and dispatched, got %d in queue", len(jobs))
+	}
+
+	// A step.dispatched event must be emitted for the retry, carrying the
+	// claimed job's deadline and the dispatching runner's ID.
+	events.mu.Lock()
+	var retryDispatched *domain.Event
+	for i := range events.events[execID] {
+		evt := events.events[execID][i]
+		if evt.Type != domain.EventStepDispatched || evt.StepID != result.StepID {
+			continue
+		}
+		var p domain.StepDispatchedPayload
+		if err := json.Unmarshal(evt.Payload, &p); err != nil {
+			t.Fatalf("unmarshal step.dispatched payload: %v", err)
+		}
+		if p.RunnerID == "mock-runner" {
+			retryDispatched = &events.events[execID][i]
+			break
+		}
+	}
+	events.mu.Unlock()
+	if retryDispatched == nil {
+		t.Fatal("expected a step.dispatched event for the retry with the real runner ID")
+	}
+
+	var payload domain.StepDispatchedPayload
+	if err := json.Unmarshal(retryDispatched.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal step.dispatched payload: %v", err)
+	}
+	if payload.Deadline.Before(before.Add(k.config.StepTimeout - time.Second)) {
+		t.Fatalf("expected retry deadline near now+StepTimeout, got %v", payload.Deadline)
+	}
+
+	// Projected state must reflect a fresh Deadline so the timeout watcher
+	// will see the stalled retry.
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepDispatched {
+		t.Fatalf("expected step dispatched after retry, got %s", step.Status)
+	}
+	if step.Deadline == nil {
+		t.Fatal("expected retry to set a fresh Deadline via step.dispatched")
+	}
+	if !step.Deadline.After(before) {
+		t.Fatalf("expected fresh Deadline after %v, got %v", before, step.Deadline)
+	}
+	if step.DispatchedAt == nil {
+		t.Fatal("expected retry to set DispatchedAt via step.dispatched")
+	}
+	if step.RunnerID != "mock-runner" {
+		t.Fatalf("expected step RunnerID set to mock-runner, got %q", step.RunnerID)
+	}
+}
+
+func TestDispatchPendingRetryNoEventWhenNoRunner(t *testing.T) {
+	// When no runner is available, the job is re-enqueued and no
+	// step.dispatched should be emitted — otherwise the projector would
+	// believe the step is dispatched while it's still sitting in the queue.
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   &noDispatchRunnerHub{mockRunnerHub: runnerHub},
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	execID := "exec-" + uuid.Must(uuid.NewV7()).String()
+	if err := events.CreateExecution(ctx, execID, "agent-1", nil); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	job := domain.Job{
+		ID:          uuid.Must(uuid.NewV7()),
+		ExecutionID: execID,
+		StepID:      "step-1",
+		ToolID:      "web_search",
+		Deadline:    time.Now().Add(time.Minute),
+	}
+	if err := jq.Enqueue(ctx, job); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	k.DispatchPendingJobs()
+
+	// Job stays in queue because no runner picked it up.
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("expected job re-enqueued, got %d in queue", len(jobs))
+	}
+
+	events.mu.Lock()
+	for _, evt := range events.events[execID] {
+		if evt.Type == domain.EventStepDispatched {
+			events.mu.Unlock()
+			t.Fatal("expected no step.dispatched when no runner accepted the job")
+		}
+	}
+	events.mu.Unlock()
+}
+
+func TestRecoverPendingRetryDispatchEmitsStepDispatched(t *testing.T) {
+	// Regression for #108: jobs recovered via RecoverPendingRetries must
+	// also emit step.dispatched on dispatch so the timeout watcher sees a
+	// fresh Deadline.
+	events := newMockEventStore()
+	checkpoints := newMockCheckpointStore()
+	agentHub := newMockAgentHub()
+	runnerHub := newMockRunnerHub()
+	signals := newMockSignalStore()
+	sessions := newMockSessionStore()
+	runners := newMockRunnerStore()
+	jq := newMockJobQueue()
+
+	k := NewKernel(Deps{
+		Events:      events,
+		Checkpoints: checkpoints,
+		AgentHub:    agentHub,
+		RunnerHub:   runnerHub,
+		Signals:     signals,
+		Sessions:    sessions,
+		Runners:     runners,
+		Locker:      &mockLocker{},
+		Policy:      newAllowAllPolicy(),
+		JobQueue:    jq,
+	})
+	ctx := context.Background()
+
+	execID, sessionID := setupRunningExecution(t, k, sessions)
+
+	result, _ := k.ProcessIntent(ctx, domain.IntentRequest{
+		ExecutionID: execID,
+		SessionID:   sessionID,
+		Intent: domain.Intent{
+			Type:   domain.IntentInvokeTool,
+			ToolID: "web_search",
+			Remote: true,
+		},
+	})
+
+	// Simulate crash window: step.failed + step.retried written, but the
+	// retry job was never enqueued.
+	jq.mu.Lock()
+	jq.jobs = nil
+	jq.mu.Unlock()
+
+	correlationID := uuid.Must(uuid.NewV7())
+	_, err := k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepFailed,
+		domain.StepFailedPayload{Error: "transient", Retryable: true},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.failed: %v", err)
+	}
+	_, err = k.EmitEvent(ctx, execID, result.StepID,
+		domain.EventStepRetried,
+		domain.StepRetriedPayload{NextAttempt: 2},
+		uuid.Nil, correlationID)
+	if err != nil {
+		t.Fatalf("emit step.retried: %v", err)
+	}
+
+	before := time.Now()
+	if err := k.RecoverPendingRetries(ctx); err != nil {
+		t.Fatalf("RecoverPendingRetries: %v", err)
+	}
+
+	// Recovery enqueues and then DispatchPendingJobs claims the job.
+	jobs, _ := jq.All(ctx)
+	if len(jobs) != 0 {
+		t.Fatalf("expected recovered job to be dispatched, got %d in queue", len(jobs))
+	}
+
+	state, _ := k.GetExecution(ctx, execID)
+	step := state.Steps[result.StepID]
+	if step.Status != domain.StepDispatched {
+		t.Fatalf("expected recovered step to be dispatched, got %s", step.Status)
+	}
+	if step.Deadline == nil {
+		t.Fatal("expected recovered retry to set a fresh Deadline via step.dispatched")
+	}
+	if !step.Deadline.After(before) {
+		t.Fatalf("expected fresh Deadline after %v, got %v", before, step.Deadline)
+	}
+	if step.DispatchedAt == nil {
+		t.Fatal("expected recovered retry to set DispatchedAt via step.dispatched")
+	}
+}
+
 func TestHandleJobRetryEmitsEventsAtomically(t *testing.T) {
 	k, events, _, _, sessions, _ := newTestKernel()
 	ctx := context.Background()

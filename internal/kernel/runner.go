@@ -308,6 +308,22 @@ func (k *Kernel) dispatchOnePendingJob(ctx context.Context, job domain.Job) {
 	info, dispatched := k.runnerHub.Dispatch(job.ToolID, msg)
 	if dispatched {
 		k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
+
+		if _, err := k.EmitEvent(ctx, job.ExecutionID, job.StepID,
+			domain.EventStepDispatched,
+			domain.StepDispatchedPayload{
+				RunnerID: info.RunnerID,
+				JobID:    job.ID.String(),
+				Deadline: job.Deadline,
+			},
+			uuid.Nil, uuid.Nil); err != nil {
+			k.logger.Warn("failed to emit step.dispatched after successful dispatch",
+				slog.String("job_id", job.ID.String()),
+				slog.String("step_id", job.StepID),
+				slog.String("runner_id", info.RunnerID),
+				slog.String("error", err.Error()),
+			)
+		}
 		k.logger.Debug("dispatched pending job",
 			slog.String("job_id", job.ID.String()),
 			slog.String("runner_id", info.RunnerID),
