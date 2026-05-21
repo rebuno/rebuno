@@ -308,6 +308,27 @@ func (k *Kernel) dispatchOnePendingJob(ctx context.Context, job domain.Job) {
 	info, dispatched := k.runnerHub.Dispatch(job.ToolID, msg)
 	if dispatched {
 		k.runnerHub.MarkBusy(info.RunnerID, info.ConsumerID)
+		// Emit step.dispatched so the projector re-establishes the step's
+		// Deadline and DispatchedAt — without this, retried steps would
+		// remain Deadline==nil after step.retried cleared them, and the
+		// timeout watcher would skip stalled retries. The runner already
+		// has the job; if emission fails we log and continue rather than
+		// re-enqueue, to avoid double-dispatch.
+		if _, err := k.EmitEvent(ctx, job.ExecutionID, job.StepID,
+			domain.EventStepDispatched,
+			domain.StepDispatchedPayload{
+				RunnerID: info.RunnerID,
+				JobID:    job.ID.String(),
+				Deadline: job.Deadline,
+			},
+			uuid.Nil, uuid.Nil); err != nil {
+			k.logger.Warn("failed to emit step.dispatched after successful dispatch",
+				slog.String("job_id", job.ID.String()),
+				slog.String("step_id", job.StepID),
+				slog.String("runner_id", info.RunnerID),
+				slog.String("error", err.Error()),
+			)
+		}
 		k.logger.Debug("dispatched pending job",
 			slog.String("job_id", job.ID.String()),
 			slog.String("runner_id", info.RunnerID),
