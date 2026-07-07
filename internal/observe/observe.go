@@ -79,7 +79,7 @@ func New() *Observer {
 
 	obs := &Observer{
 		registry: reg,
-		tracer:   otel.Tracer("github.com/rebuno/kernel"),
+		tracer:   otel.Tracer("github.com/rebuno/rebuno"),
 
 		replayTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: Namespace,
