@@ -1,83 +1,118 @@
 package policy
 
 import (
-	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
-	"time"
+	"strings"
 
-	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/kernel/internal/domain"
 )
 
 type Engine interface {
 	Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error)
 }
 
-type RuleEngine struct {
-	rules         []domain.PolicyRule
-	defaultAction domain.PolicyAction
+type Rule struct {
+	ID       string              `yaml:"id"`
+	Priority int                 `yaml:"priority"`
+	When     Condition           `yaml:"when"`
+	Then     domain.PolicyResult `yaml:"then"`
 }
 
-func NewRuleEngine(cfg PolicyConfig) (*RuleEngine, error) {
+type Condition struct {
+	Target    string                  `yaml:"target,omitempty"`
+	Targets   []string                `yaml:"targets,omitempty"`
+	AgentID   string                  `yaml:"agent_id,omitempty"`
+	AgentIDs  []string                `yaml:"agent_ids,omitempty"`
+	StepKind  string                  `yaml:"step_kind,omitempty"`
+	Arguments map[string]ArgPredicate `yaml:"arguments,omitempty"`
+}
+
+type ArgPredicate struct {
+	Equals   string         `yaml:"equals,omitempty"`
+	Contains string         `yaml:"contains,omitempty"`
+	OneOf    []string       `yaml:"one_of,omitempty"`
+	Regex    string         `yaml:"regex,omitempty"`
+	rx       *regexp.Regexp // compiled at engine construction
+}
+
+type Config struct {
+	DefaultAction string `yaml:"default_action,omitempty"`
+	Rules         []Rule `yaml:"rules"`
+}
+
+type RuleEngine struct {
+	rules         []Rule
+	defaultResult domain.PolicyResult
+}
+
+func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 	seen := make(map[int]string)
 	for _, r := range cfg.Rules {
+		if r.ID == "" {
+			return nil, fmt.Errorf("rule missing id")
+		}
 		if existing, ok := seen[r.Priority]; ok {
-			return nil, fmt.Errorf("%w: priority %d used by both %q and %q",
-				domain.ErrDuplicatePriority, r.Priority, existing, r.ID)
+			return nil, fmt.Errorf("duplicate priority %d used by %q and %q", r.Priority, existing, r.ID)
 		}
 		seen[r.Priority] = r.ID
 	}
-
-	rules := make([]domain.PolicyRule, len(cfg.Rules))
+	rules := make([]Rule, len(cfg.Rules))
 	copy(rules, cfg.Rules)
-	slices.SortFunc(rules, func(a, b domain.PolicyRule) int {
-		return cmp.Compare(a.Priority, b.Priority)
-	})
+	slices.SortFunc(rules, func(a, b Rule) int { return a.Priority - b.Priority })
 
-	def := cfg.Default
-	if def.Decision == "" {
-		def = domain.PolicyAction{
-			Decision: domain.PolicyDeny,
-			Reason:   "No explicit allow rule matched",
+	def := domain.PolicyResult{Decision: domain.DecisionDeny, Reason: "no explicit allow rule matched", RuleID: "default"}
+	if cfg.DefaultAction == domain.DecisionAllow {
+		def = domain.PolicyResult{Decision: domain.DecisionAllow, Reason: "default allow", RuleID: "default"}
+	}
+
+	for i := range rules {
+		for key, pred := range rules[i].When.Arguments {
+			if pred.Regex == "" {
+				continue
+			}
+			rx, err := regexp.Compile(pred.Regex)
+			if err != nil {
+				return nil, fmt.Errorf("rule %q argument %q invalid regex: %w", rules[i].ID, key, err)
+			}
+			pred.rx = rx
+			rules[i].When.Arguments[key] = pred
 		}
 	}
 
-	return &RuleEngine{rules: rules, defaultAction: def}, nil
+	return &RuleEngine{rules: rules, defaultResult: def}, nil
+}
+
+func NewRuleEngineFromBundle(bundleYAML string) (*RuleEngine, error) {
+	cfg, err := LoadBundle(bundleYAML)
+	if err != nil {
+		return nil, err
+	}
+	return NewRuleEngine(cfg)
 }
 
 func (e *RuleEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
-	return e.EvaluateAt(ctx, input, time.Now())
-}
-
-func (e *RuleEngine) EvaluateAt(_ context.Context, input domain.PolicyInput, now time.Time) (domain.PolicyResult, error) {
 	for _, rule := range e.rules {
-		if matchesRule(rule.When, input, now) {
-			return domain.PolicyResult{
-				Decision:  rule.Then.Decision,
-				Reason:    rule.Then.Reason,
-				RuleID:    rule.ID,
-				TimeoutMs: rule.Then.TimeoutMs,
-				RateLimit: rule.RateLimit,
-			}, nil
+		if matches(rule.When, input) {
+			res := rule.Then
+			if res.RuleID == "" {
+				res.RuleID = rule.ID
+			}
+			return res, nil
 		}
 	}
-	return domain.PolicyResult{
-		Decision: e.defaultAction.Decision,
-		Reason:   e.defaultAction.Reason,
-		RuleID:   "default",
-	}, nil
+	return e.defaultResult, nil
 }
 
-func matchesRule(cond domain.PolicyCondition, input domain.PolicyInput, now time.Time) bool {
-	if cond.Action != "" && cond.Action != input.Action {
+func matches(cond Condition, input domain.PolicyInput) bool {
+	if cond.Target != "" && !globMatch(cond.Target, input.Target) {
 		return false
 	}
-	if cond.ToolID != "" && !globMatch(cond.ToolID, input.ToolID) {
-		return false
-	}
-	if len(cond.ToolIDs) > 0 && !globMatchAny(cond.ToolIDs, input.ToolID) {
+	if len(cond.Targets) > 0 && !globMatchAny(cond.Targets, input.Target) {
 		return false
 	}
 	if cond.AgentID != "" && cond.AgentID != input.AgentID {
@@ -86,38 +121,24 @@ func matchesRule(cond domain.PolicyCondition, input domain.PolicyInput, now time
 	if len(cond.AgentIDs) > 0 && !slices.Contains(cond.AgentIDs, input.AgentID) {
 		return false
 	}
-	for k, v := range cond.Labels {
-		if input.Labels[k] != v {
-			return false
-		}
-	}
-	if len(cond.Arguments) > 0 && !matchArguments(cond.Arguments, input.Arguments) {
+	if cond.StepKind != "" && cond.StepKind != string(input.StepKind) {
 		return false
 	}
-	if cond.MinStepCount != nil && input.StepCount < *cond.MinStepCount {
+	if len(cond.Arguments) > 0 && !matchArguments(cond.Arguments, input.Args) {
 		return false
-	}
-	if cond.MinDurationMs != nil && input.DurationMs < *cond.MinDurationMs {
-		return false
-	}
-	if cond.Schedule != "" {
-		sched, err := parseSchedule(cond.Schedule)
-		if err != nil {
-			return false
-		}
-		if !matchSchedule(sched, now) {
-			return false
-		}
 	}
 	return true
 }
 
 func globMatch(pattern, value string) bool {
-	matched, err := path.Match(pattern, value)
-	if err != nil {
-		return pattern == value
+	if pattern == value {
+		return true
 	}
-	return matched
+	m, err := path.Match(pattern, value)
+	if err != nil {
+		return false
+	}
+	return m
 }
 
 func globMatchAny(patterns []string, value string) bool {
@@ -129,98 +150,43 @@ func globMatchAny(patterns []string, value string) bool {
 	return false
 }
 
-type AgentEngine struct {
-	engines      map[string]*RuleEngine
-	globalEngine *RuleEngine // nil if no global config
-}
-
-func NewAgentEngine(result *LoadDirResult) (*AgentEngine, error) {
-	var globalRules []domain.PolicyRule
-	var globalDefault domain.PolicyAction
-	if result.Global != nil {
-		globalRules = result.Global.Rules
-		globalDefault = result.Global.Default
+func matchArguments(predicates map[string]ArgPredicate, args []byte) bool {
+	var obj map[string]any
+	if err := json.Unmarshal(args, &obj); err != nil {
+		return false
 	}
-
-	engines := make(map[string]*RuleEngine, len(result.Agents))
-	for agentID, cfg := range result.Agents {
-		merged := PolicyConfig{
-			Rules:   make([]domain.PolicyRule, 0, len(cfg.Rules)+len(globalRules)),
-			Default: cfg.Default,
+	for key, pred := range predicates {
+		v, ok := obj[key]
+		if !ok {
+			return false
 		}
-		merged.Rules = append(merged.Rules, cfg.Rules...)
-		merged.Rules = append(merged.Rules, globalRules...)
-
-		engine, err := NewRuleEngine(merged)
-		if err != nil {
-			return nil, fmt.Errorf("building engine for agent %q: %w", agentID, err)
+		s := fmt.Sprintf("%v", v)
+		if pred.Equals != "" && pred.Equals != s {
+			return false
 		}
-		engines[agentID] = engine
-	}
-
-	var globalEngine *RuleEngine
-	if result.Global != nil {
-		var err error
-		globalEngine, err = NewRuleEngine(PolicyConfig{
-			Rules:   globalRules,
-			Default: globalDefault,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("building global engine: %w", err)
+		if pred.Contains != "" && !strings.Contains(s, pred.Contains) {
+			return false
+		}
+		if len(pred.OneOf) > 0 && !slices.Contains(pred.OneOf, s) {
+			return false
+		}
+		if pred.Regex != "" {
+			if pred.rx == nil || !pred.rx.MatchString(s) {
+				return false
+			}
 		}
 	}
-
-	return &AgentEngine{engines: engines, globalEngine: globalEngine}, nil
+	return true
 }
 
-func (e *AgentEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
-	engine, ok := e.engines[input.AgentID]
-	if !ok {
-		if e.globalEngine != nil {
-			return e.globalEngine.Evaluate(ctx, input)
-		}
-		return domain.PolicyResult{
-			Decision: domain.PolicyDeny,
-			Reason:   fmt.Sprintf("no policy configured for agent %q", input.AgentID),
-			RuleID:   "agent-default",
-		}, nil
-	}
-	return engine.Evaluate(ctx, input)
+type PermissiveEngine struct{}
+
+func (PermissiveEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
+	return domain.PolicyResult{Decision: domain.DecisionAllow, RuleID: "permissive"}, nil
 }
 
-func (e *AgentEngine) Agents() []string {
-	agents := make([]string, 0, len(e.engines))
-	for id := range e.engines {
-		agents = append(agents, id)
-	}
-	slices.Sort(agents)
-	return agents
-}
+type DenyAllEngine struct{}
 
-type SecureDefaultEngine struct {
-	inner Engine
-}
-
-func NewSecureDefaultEngine(inner Engine) *SecureDefaultEngine {
-	return &SecureDefaultEngine{inner: inner}
-}
-
-func (e *SecureDefaultEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
-	switch input.Action {
-	case "execution.complete", "execution.fail", "execution.wait":
-		return domain.PolicyResult{
-			Decision: domain.PolicyAllow,
-			Reason:   "Execution lifecycle action allowed by default",
-			RuleID:   "secure-default",
-		}, nil
-	default:
-		if e.inner != nil {
-			return e.inner.Evaluate(ctx, input)
-		}
-		return domain.PolicyResult{
-			Decision: domain.PolicyDeny,
-			Reason:   "No policy engine configured",
-			RuleID:   "secure-default",
-		}, nil
-	}
+func (DenyAllEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
+	return domain.PolicyResult{Decision: domain.DecisionDeny, Reason: "denied by default", RuleID: "deny-all"}, nil
 }

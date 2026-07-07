@@ -3,48 +3,49 @@ package domain
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/google/uuid"
+)
+
+type StepKind string
+
+const (
+	StepKindTool StepKind = "tool_call"
+	StepKindLLM  StepKind = "llm_call"
 )
 
 type StepStatus string
 
 const (
-	StepPending    StepStatus = "pending"
-	StepDispatched StepStatus = "dispatched"
-	StepRunning    StepStatus = "running"
-	StepSucceeded  StepStatus = "succeeded"
-	StepFailed     StepStatus = "failed"
-	StepTimedOut   StepStatus = "timed_out"
-	StepCancelled  StepStatus = "cancelled"
+	StepProposed         StepStatus = "proposed"
+	StepAllowed          StepStatus = "allowed"
+	StepDenied           StepStatus = "denied"
+	StepAwaitingApproval StepStatus = "awaiting_approval"
+	StepExecuting        StepStatus = "executing"
+	StepSucceeded        StepStatus = "succeeded"
+	StepFailed           StepStatus = "failed"
 )
 
 func (s StepStatus) IsTerminal() bool {
 	switch s {
-	case StepSucceeded, StepFailed, StepTimedOut, StepCancelled:
+	case StepSucceeded, StepFailed, StepDenied:
 		return true
-	default:
-		return false
 	}
+	return false
 }
 
 type Step struct {
-	ID             string          `json:"id"`
-	ExecutionID    string          `json:"execution_id"`
-	ToolID         string          `json:"tool_id"`
-	ToolVersion    int             `json:"tool_version"`
-	Status         StepStatus      `json:"status"`
-	Attempt        int             `json:"attempt"`
-	MaxAttempts    int             `json:"max_attempts"`
-	Arguments      json.RawMessage `json:"arguments"`
-	IdempotencyKey string          `json:"idempotency_key"`
-
-	Deadline     *time.Time `json:"deadline,omitempty"`
-	RunnerID     string     `json:"runner_id,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	DispatchedAt *time.Time `json:"dispatched_at,omitempty"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
-
-	Result    json.RawMessage `json:"result,omitempty"`
-	Error     string          `json:"error,omitempty"`
-	Retryable bool            `json:"retryable"`
+	StepID      string          `json:"step_id"`
+	ExecutionID uuid.UUID       `json:"execution_id"`
+	Kind        StepKind        `json:"kind"`
+	Target      string          `json:"target"`
+	ArgsHash    string          `json:"args_hash"`
+	Occurrence  int             `json:"occurrence"`
+	Status      StepStatus      `json:"status"`
+	Idempotency string          `json:"idempotency"`
+	Args        json.RawMessage `json:"args,omitempty"`
+	Result      json.RawMessage `json:"result,omitempty"`
+	Error       json.RawMessage `json:"error,omitempty"`
+	StartedAt   *time.Time      `json:"started_at,omitempty"`
+	CompletedAt *time.Time      `json:"completed_at,omitempty"`
 }

@@ -1,0 +1,64 @@
+# Dev seed file for `rebuno dev --config`.
+#
+# Each entry registers an agent in the in-memory dev kernel. Give a policy
+# inline via `policy:` (a literal YAML block) or point at a separate bundle
+# file with `policy_file:`. Omit both to let
+# the agent run under the permissive dev fallback engine.
+#
+#   go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
+
+agents:
+  # Reproduces the agent the dev server used to auto-register, so
+  # examples/python/hello.py keeps working out of the box.
+  - id: hello
+    webhook_url: http://localhost:5000/webhook
+    secret: hello-secret
+    # No policy block: falls back to the permissive dev engine (allow all).
+
+  # examples/python/local_tools.py — LangGraph agent with local tools.
+  # Inline bundle (compare with shell-assistant's policy_file below): deny by
+  # default, allow only this agent's known tools.
+  - id: researcher
+    webhook_url: http://localhost:5001/webhook
+    secret: researcher-secret
+    policy: |
+      default_action: deny
+      rules:
+        - id: allow-llm
+          priority: 5
+          when:
+            step_kind: llm_call
+          then:
+            decision: allow
+        - id: allow-research-tools
+          priority: 10
+          when:
+            targets: ["web_search", "doc_fetch", "calculator"]
+          then:
+            decision: allow
+            reason: research tools are permitted
+
+  # examples/python/shell.py — shell tool gated by the kernel approval flow.
+  # Safe read-only commands are auto-allowed; anything else needs human approval
+  # (granted via examples/python/client.py).
+  - id: shell
+    webhook_url: http://localhost:5002/webhook
+    secret: shell-secret
+    policy_file: policies/shell.yaml
+
+  # examples/python/mcp_agent.py — LangGraph agent backed by a local stdio MCP server.
+  # Inline bundle: allow by default, but gate filesystem writes behind approval.
+  # The MCP tools are namespaced with the "fs" prefix (see wrap_mcp_tools).
+  - id: mcp
+    webhook_url: http://localhost:5003/webhook
+    secret: mcp-secret
+    policy: |
+      default_action: allow
+      rules:
+        - id: approve-fs-writes
+          priority: 10
+          when:
+            targets: ["fs_write_*", "fs_edit_*", "fs_move_*", "fs_create_*"]
+          then:
+            decision: require_approval
+            reason: filesystem writes need approval

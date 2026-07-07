@@ -9,31 +9,12 @@ import (
 
 var Version = "dev"
 
-var (
-	baseURL string
-	apiKey  string
-)
-
 func main() {
 	root := &cobra.Command{
 		Use:   "rebuno",
 		Short: "Rebuno — kernel-authoritative execution runtime for AI agents",
 	}
-
-	defaultURL := os.Getenv("REBUNO_KERNEL_URL")
-	if defaultURL == "" {
-		defaultURL = "http://localhost:8080"
-	}
-	root.PersistentFlags().StringVar(&baseURL, "url", defaultURL, "Kernel HTTP URL")
-	root.PersistentFlags().StringVar(&apiKey, "api-key", os.Getenv("REBUNO_API_KEY"), "Bearer token for auth")
-
-	root.AddCommand(
-		versionCmd(),
-		serverCmd(),
-		devCmd(),
-	)
-	addInspectCommands(root)
-
+	root.AddCommand(versionCmd(), serverCmd(), devCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
