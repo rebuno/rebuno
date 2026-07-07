@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 type EventStore interface {

@@ -3,7 +3,7 @@ package memstore
 import (
 	"context"
 
-	"github.com/rebuno/kernel/internal/store"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 type txStore struct {

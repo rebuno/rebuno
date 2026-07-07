@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/identity"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/identity"
 )
 
 func TestCanonicalizeJSONSortsKeysAndWhitespace(t *testing.T) {

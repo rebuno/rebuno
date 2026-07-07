@@ -6,10 +6,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/projector"
-	"github.com/rebuno/kernel/internal/ratelimit"
-	"github.com/rebuno/kernel/internal/store"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/projector"
+	"github.com/rebuno/rebuno/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 func (k *Kernel) ExpireApprovals(ctx context.Context, now time.Time) error {

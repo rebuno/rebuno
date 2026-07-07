@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 // A bundle whose rule is missing an id fails to compile in NewRuleEngine.

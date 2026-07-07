@@ -8,8 +8,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/policy"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/policy"
 )
 
 // agentConfigFile is the declarative provisioning manifest passed via --config.

@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 const maxEventsPageLimit = 1000

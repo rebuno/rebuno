@@ -3,7 +3,7 @@ package postgres
 import (
 	"context"
 
-	"github.com/rebuno/kernel/internal/store"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 // Compile-time interface checks for the non-transactional Store.

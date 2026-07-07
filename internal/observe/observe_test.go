@@ -9,7 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/rebuno/kernel/internal/observe"
+	"github.com/rebuno/rebuno/internal/observe"
 )
 
 func TestRecordReplayCounter(t *testing.T) {

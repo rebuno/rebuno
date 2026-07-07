@@ -1,4 +1,4 @@
-module github.com/rebuno/kernel
+module github.com/rebuno/rebuno
 
 go 1.26
 

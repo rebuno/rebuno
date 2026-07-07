@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/store"
-	"github.com/rebuno/kernel/internal/store/memstore"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/store"
+	"github.com/rebuno/rebuno/internal/store/memstore"
 )
 
 // Compile-time interface satisfaction checks.

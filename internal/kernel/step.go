@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/identity"
-	"github.com/rebuno/kernel/internal/projector"
-	"github.com/rebuno/kernel/internal/ratelimit"
-	"github.com/rebuno/kernel/internal/store"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/identity"
+	"github.com/rebuno/rebuno/internal/projector"
+	"github.com/rebuno/rebuno/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 type SubmitStepRequest struct {

@@ -10,13 +10,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/api"
-	"github.com/rebuno/kernel/internal/dispatcher"
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/identity"
-	"github.com/rebuno/kernel/internal/kernel"
-	"github.com/rebuno/kernel/internal/policy"
-	"github.com/rebuno/kernel/internal/store/memstore"
+	"github.com/rebuno/rebuno/internal/api"
+	"github.com/rebuno/rebuno/internal/dispatcher"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/identity"
+	"github.com/rebuno/rebuno/internal/kernel"
+	"github.com/rebuno/rebuno/internal/policy"
+	"github.com/rebuno/rebuno/internal/store/memstore"
 )
 
 const testAgentID = "agent-1"

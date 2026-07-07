@@ -15,13 +15,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/rebuno/kernel/internal/api"
-	"github.com/rebuno/kernel/internal/config"
-	"github.com/rebuno/kernel/internal/kernel"
-	"github.com/rebuno/kernel/internal/lifecycle"
-	"github.com/rebuno/kernel/internal/observe"
-	"github.com/rebuno/kernel/internal/policy"
-	"github.com/rebuno/kernel/internal/store/postgres"
+	"github.com/rebuno/rebuno/internal/api"
+	"github.com/rebuno/rebuno/internal/config"
+	"github.com/rebuno/rebuno/internal/kernel"
+	"github.com/rebuno/rebuno/internal/lifecycle"
+	"github.com/rebuno/rebuno/internal/observe"
+	"github.com/rebuno/rebuno/internal/policy"
+	"github.com/rebuno/rebuno/internal/store/postgres"
 )
 
 // bindServerFlags binds server flags onto cfg. cfg should already be seeded

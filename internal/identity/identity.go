@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 func ComputeArgsHash(args []byte) (string, error) {

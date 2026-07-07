@@ -3,8 +3,8 @@ package policy
 import (
 	"context"
 
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/store"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 // BundleResolver selects the right policy engine for an agent by loading the

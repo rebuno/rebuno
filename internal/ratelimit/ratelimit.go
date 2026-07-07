@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 // Key identifies the scope being rate-limited, e.g. "ruleID:executionID".

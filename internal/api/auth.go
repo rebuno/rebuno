@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/rebuno/kernel/internal/dispatcher"
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/dispatcher"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 type agentLookup interface {

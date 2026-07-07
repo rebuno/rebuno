@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/policy"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/policy"
 )
 
 func (k *Kernel) RegisterAgent(ctx context.Context, agent domain.Agent) error {

@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/dispatcher"
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/observe"
-	"github.com/rebuno/kernel/internal/policy"
-	"github.com/rebuno/kernel/internal/projector"
-	"github.com/rebuno/kernel/internal/ratelimit"
-	"github.com/rebuno/kernel/internal/store"
+	"github.com/rebuno/rebuno/internal/dispatcher"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/observe"
+	"github.com/rebuno/rebuno/internal/policy"
+	"github.com/rebuno/rebuno/internal/projector"
+	"github.com/rebuno/rebuno/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 type Config struct {

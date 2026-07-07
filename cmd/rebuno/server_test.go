@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/rebuno/kernel/internal/config"
+	"github.com/rebuno/rebuno/internal/config"
 )
 
 func TestServerFlagOverridesEnv(t *testing.T) {

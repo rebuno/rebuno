@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 func (s *Store) RegisterAgent(ctx context.Context, agent domain.Agent) error {

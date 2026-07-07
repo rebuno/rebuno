@@ -5,7 +5,7 @@ import (
 	"sort"
 
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 func (s *Store) Upsert(ctx context.Context, step domain.Step) error {

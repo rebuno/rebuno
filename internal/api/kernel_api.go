@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/kernel"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/kernel"
 )
 
 type KernelAPI struct {

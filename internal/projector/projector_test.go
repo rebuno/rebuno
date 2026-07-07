@@ -3,7 +3,7 @@ package projector
 import (
 	"testing"
 
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 // Event payloads reference the step by id; the step row is the system of record

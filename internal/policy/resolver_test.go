@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 // fakeAgentStore returns a fixed agent (or error) for GetAgent and is inert for

@@ -6,7 +6,7 @@ import (
 	"io/fs"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rebuno/kernel/migrations"
+	"github.com/rebuno/rebuno/migrations"
 )
 
 // Migrate reads the embedded migration SQL and executes it against the pool.

@@ -11,12 +11,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/rebuno/kernel/internal/config"
-	"github.com/rebuno/kernel/internal/kernel"
-	"github.com/rebuno/kernel/internal/observe"
-	"github.com/rebuno/kernel/internal/policy"
-	"github.com/rebuno/kernel/internal/ratelimit"
-	"github.com/rebuno/kernel/internal/store/memstore"
+	"github.com/rebuno/rebuno/internal/config"
+	"github.com/rebuno/rebuno/internal/kernel"
+	"github.com/rebuno/rebuno/internal/observe"
+	"github.com/rebuno/rebuno/internal/policy"
+	"github.com/rebuno/rebuno/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/store/memstore"
 )
 
 func bindDevFlags(f *pflag.FlagSet, cfg *config.Config, configPath *string) {

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rebuno/kernel/internal/observe"
-	"github.com/rebuno/kernel/internal/store"
+	"github.com/rebuno/rebuno/internal/observe"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 type Kernel interface {

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rebuno/kernel/internal/store"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 var _ store.Locker = (*Store)(nil)

@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 type Engine interface {

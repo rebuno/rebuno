@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/ratelimit"
 )
 
 var _ ratelimit.Limiter = (*Store)(nil)

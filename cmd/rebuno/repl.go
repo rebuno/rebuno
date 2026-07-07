@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/term"
 
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/kernel"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/kernel"
 )
 
 // isInteractive reports whether stdin is a terminal. When it isn't (piped

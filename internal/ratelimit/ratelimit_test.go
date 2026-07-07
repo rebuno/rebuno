@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rebuno/kernel/internal/domain"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 func TestMemoryLimiter_AllowsUpToMaxCalls(t *testing.T) {

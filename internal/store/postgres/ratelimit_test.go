@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rebuno/kernel/internal/domain"
-	"github.com/rebuno/kernel/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/ratelimit"
 )
 
 // TestPostgresLimiterEnforcesGlobalLimitUnderConcurrency proves the property the
