@@ -9,32 +9,49 @@
 
 An open-source runtime for autonomous agents.
 
-Rebuno gives your agents durable execution, an event-sourced record of everything they did, and optional governance over what they're allowed to do.
+Rebuno gives your agents durable execution (crash and resume without re-running side effects), an event-sourced record of everything they did, and optional governance over what they're allowed to do.
 
 ## Quick Start
 
 **Prerequisites:** Go 1.25+, Python 3.10+
 
-Start the kernel:
+Start the dev kernel (in-memory, no dependencies). With a terminal attached it drops you into a REPL:
 
 ```bash
 go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
 ```
 
-Start an agent:
+Start an agent in another terminal:
 
 ```bash
 pip install rebuno
 python examples/python/hello.py
 ```
 
-Create an execution:
+Create an execution from the REPL and follow its event log:
 
-```bash
-exec create hello {"query": "hello world"}
+```
+rebuno> exec create hello {"query": "hello world"}
+rebuno> exec events <id>
 ```
 
-See the full audit trail with `exec events {id}`.
+## Documentation
+
+Start here:
+
+- [Getting Started](docs/getting-started.md) — run the kernel and your first agent.
+- [Architecture](docs/architecture.md) — the domain model, state machines, and how durability works.
+
+Reference:
+
+- [Agents](docs/agents.md) — how an agent process receives work and drives its effects.
+- [Tools](docs/tools.md) — the `@tool` decorator, step identity, and idempotency.
+- [Policy](docs/policy.md) — the YAML rule language for allow / deny / require-approval.
+- [Events](docs/events.md) — the event taxonomy and payloads.
+- [HTTP API](docs/api.md) — the `/v0` client, agent, and admin endpoints.
+- [CLI](docs/cli.md) — the built-in `rebuno` REPL.
+- [Deployment](docs/deployment.md) — running the production kernel, config, and Docker.
+- [Python SDK](docs/sdk/python.md) — the `rebuno` package surface.
 
 ## License
 

@@ -15,7 +15,7 @@ agents:
     secret: hello-secret
     # No policy block: falls back to the permissive dev engine (allow all).
 
-  # examples/python/local_tools.py — LangGraph agent with local tools.
+  # examples/python/researcher.py — LangGraph agent with local tools.
   # Inline bundle (compare with shell-assistant's policy_file below): deny by
   # default, allow only this agent's known tools.
   - id: researcher
