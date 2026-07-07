@@ -7,9 +7,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?&style=for-the-badge" alt="License"></a>
 </p>
 
-A kernel-authoritative execution runtime for AI agents.
+An open-source runtime for autonomous agents.
 
-Rebuno sits between your agents and the tools they use, giving you policy control, a complete audit trail, and operational visibility over autonomous agent behavior. Agents propose actions. The kernel decides whether they're allowed. Every decision is recorded.
+Rebuno gives your agents durable execution, an event-sourced record of everything they did, and optional governance over what they're allowed to do.
 
 ## Quick Start
 
@@ -18,41 +18,23 @@ Rebuno sits between your agents and the tools they use, giving you policy contro
 Start the kernel:
 
 ```bash
-go install ./cmd/rebuno
-rebuno dev
+go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
 ```
 
 Start an agent:
 
 ```bash
 pip install rebuno
-python examples/python/agent/hello.py
+python examples/python/hello.py
 ```
 
 Create an execution:
 
 ```bash
-rebuno create --agent hello --input '{"query": "hello world"}'
+exec create hello {"query": "hello world"}
 ```
 
-See the full audit trail with `rebuno events {id}`.
-
-See [Getting Started](docs/getting-started.md) for the full walkthrough.
-
-## Documentation
-
-| Doc | Description |
-|---|---|
-| [Getting Started](docs/getting-started.md) | Quick start walkthrough |
-| [Architecture](docs/architecture.md) | Core concepts and state transitions |
-| [Deployment](docs/deployment.md) | Production setup, auth, and configuration |
-| [Python SDK](docs/sdk/python.md) | Building agents and runners in Python |
-| [TypeScript SDK](docs/sdk/typescript.md) | Building agents and runners in TypeScript |
-| [Tools](docs/tools.md) | Local, remote, and MCP tools |
-| [Policy](docs/policy.md) | Declarative policy rules |
-| [API Reference](docs/api.md) | HTTP endpoints and schemas |
-| [Events](docs/events.md) | Event types and payloads |
-| [CLI](docs/cli.md) | CLI reference |
+See the full audit trail with `exec events {id}`.
 
 ## License
 
