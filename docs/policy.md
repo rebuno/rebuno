@@ -1,418 +1,149 @@
 # Policy
 
-The policy engine controls which tool invocations are allowed. Rules are defined in YAML and evaluated on every `tool.invoke` intent. The `--policy` flag accepts a single file or a directory of files.
+Policy governs which effects an agent may perform. A rule bundle is evaluated
+**once per step submission** — for both tool calls and LLM calls — and returns
+one of three decisions: `allow`, `deny`, or `require_approval`. Policy is
+gate-keeping only; it never rewrites a request.
 
-## File Format
+Each agent has its own bundle. Provide it inline (`policy:`) or by file
+(`policy_file:`) in a provisioning manifest, or load it over the admin API
+(`POST /v0/policies/{agent_id}`). An agent with no bundle runs under the
+permissive (allow-all) engine in dev.
+
+## Bundle format
 
 ```yaml
+default_action: deny        # allow | deny (default: deny)
 rules:
-  - id: "rule-name"
+  - id: allow-llm
+    priority: 5
+    when:
+      step_kind: llm_call
+    then:
+      decision: allow
+
+  - id: allow-research-tools
     priority: 10
     when:
-      # conditions
+      targets: ["web_search", "doc_fetch", "calculator"]
     then:
-      decision: "allow"   # or "deny"
-      reason: "optional explanation"
-      timeout_ms: 30000   # optional per-rule step timeout
-
-default:
-  decision: "deny"
-  reason: "No explicit allow rule matched"
+      decision: allow
+      reason: research tools are permitted
 ```
 
-## Rule Evaluation
+## Evaluation
 
-Rules are sorted by **priority** (lowest number first). The first rule whose `when` block matches the input wins. If no rule matches, the `default` action applies.
+Rules are sorted by **priority** (lowest number first). The first rule whose
+`when` block matches wins. If none match, `default_action` applies. Priorities
+must be unique within a bundle, and every rule needs an `id`.
 
-Each rule ID must be unique. Each priority value must be unique.
+## Conditions (`when`)
 
-## Conditions
+All fields present in a `when` block must match (AND). Omitted fields are not
+checked.
 
-All conditions in a `when` block must match (AND logic). Omitted fields are not checked.
+| Field | Matches |
+|-------|---------|
+| `target` | The step target (tool name or model id). Supports glob patterns via Go's `path.Match` (`web_*`). |
+| `targets` | A list of targets/globs; matches if any matches. |
+| `agent_id` | The submitting agent's id. |
+| `agent_ids` | A list of agent ids; matches if the agent is in it. |
+| `step_kind` | `tool_call` or `llm_call`. |
+| `arguments` | Predicates against fields inside the call's JSON arguments (see below). |
 
-### action
+### Argument predicates
 
-Match the intent action. Currently only `tool.invoke` is policy-checked.
+`arguments` is a map of argument key → predicate. The key must be present in the
+call's arguments, and every listed constraint must pass. Values are compared as
+strings.
 
 ```yaml
 when:
-  action: "tool.invoke"
-```
-
-### tool_id / tool_ids
-
-Match by tool identifier. Supports glob patterns using Go's `path.Match` semantics, where `*` matches any sequence of non-`/` characters. Note that `*` is not limited to a single underscore-delimited segment -- `web_*` matches `web_search`, `web_fetch`, and also `web_search_deep`.
-
-```yaml
-when:
-  tool_id: "web_*"        # matches web_search, web_fetch, etc.
-
-when:
-  tool_ids: ["web_*", "doc_*"]   # match any in the list
-```
-
-### agent_id / agent_ids
-
-Match by the agent submitting the intent.
-
-```yaml
-when:
-  agent_id: "researcher"
-
-when:
-  agent_ids: ["researcher", "analyst"]
-```
-
-### labels
-
-Match execution labels. All specified labels must match (AND).
-
-```yaml
-when:
-  labels:
-    env: "prod"
-    team: "search"
-```
-
-### arguments
-
-Match fields inside the tool's JSON arguments. Each predicate targets a top-level field. All predicates must pass (AND logic).
-
-```yaml
-when:
+  target: shell_exec
   arguments:
-    - field: "command"
-      pattern: "^(ls|cat|echo|pwd)"
-    - field: "timeout"
-      max: 30
+    command:
+      regex: '^\s*(ls|cat|pwd|echo|whoami|date)(\s|$)'
 ```
 
-#### Argument Predicate Fields
+| Constraint | Passes when the value… |
+|------------|------------------------|
+| `equals` | equals the string exactly |
+| `contains` | contains the substring |
+| `one_of` | is one of the listed strings |
+| `regex` | matches the RE2 regular expression |
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `field` | string | **Required.** Top-level key in the arguments JSON. |
-| `pattern` | string | Regex the string value must match. |
-| `one_of` | string[] | Value must be one of these strings. |
-| `min` | number | Numeric value must be >= this. |
-| `max` | number | Numeric value must be <= this. |
-| `max_length` | int | String length must be <= this. |
-| `required` | bool | Field must exist and be non-empty. |
+## Decisions (`then`)
 
-Each predicate must have `field` set and at least one constraint.
+| Field | Meaning |
+|-------|---------|
+| `decision` | `allow`, `deny`, or `require_approval`. **Required.** |
+| `reason` | Human-readable explanation. Recorded in the decision event and returned on deny. |
 
-**Missing fields:** If a field is absent from the arguments and `required` is not set, the predicate is skipped (no violation). If `required: true`, a missing or empty field causes the predicate to fail.
+Every policy decision event (`step.allowed`, `step.denied`,
+`step.awaiting_approval`) carries the matched `rule_id` in its payload — that is
+the audit trail.
 
-**Type mismatches:** `pattern`, `one_of`, and `max_length` require string values. `min` and `max` require numeric values. A type mismatch fails the predicate.
+### require_approval
 
-### Execution State
-
-Match based on how far along the current execution is. These conditions are useful for guardrails that prevent runaway executions.
-
-#### min_step_count
-
-The rule matches when the execution's total step count (completed + in-progress) is at or above this threshold. Use with a `deny` decision to cap how many tool calls an execution can make.
-
-```yaml
-when:
-  action: "tool.invoke"
-  min_step_count: 100   # fires at 100+ steps
-```
-
-#### min_duration_ms
-
-The rule matches when the execution's elapsed time meets or exceeds this value in milliseconds. Use with a `deny` decision to cap execution duration.
+When a rule returns `require_approval`, the kernel records `step.awaiting_approval`
+and `approval.requested`, creates an approval, and transitions the execution to
+`blocked`. A human resolves it via the approvals API (`grant` / `deny`), and the
+execution resumes. See [events.md](events.md) and
+[api.md](api.md#approvals).
 
 ```yaml
-when:
-  action: "tool.invoke"
-  min_duration_ms: 3600000   # fires after 1 hour
-```
-
-### schedule
-
-Restrict a rule to specific days and times. The format is `<days> <start>-<end> <timezone>`.
-
-- **Days**: A range (`Mon-Fri`), comma-separated (`Mon,Wed,Fri`), or wrap-around (`Fri-Mon`).
-- **Time**: 24-hour format. The start is inclusive, end is exclusive (`09:00-17:00` means 09:00 through 16:59).
-- **Timezone**: Any IANA timezone (`UTC`, `America/New_York`, `Europe/London`).
-
-```yaml
-when:
-  action: "tool.invoke"
-  schedule: "Mon-Fri 09:00-17:00 America/New_York"
-```
-
-A common pattern is an allow rule with a schedule and a default deny, so tools are only usable during business hours:
-
-```yaml
-rules:
-  - id: "business-hours"
-    priority: 1
+  - id: approve-fs-writes
+    priority: 10
     when:
-      action: "tool.invoke"
-      schedule: "Mon-Fri 09:00-17:00 UTC"
+      targets: ["fs_write_*", "fs_edit_*"]
     then:
-      decision: "allow"
-
-default:
-  decision: "deny"
-  reason: "Outside business hours"
+      decision: require_approval
+      reason: filesystem writes need approval
 ```
-
-## Rate Limiting
-
-Rules can include a `rate_limit` block to cap how often a tool can be invoked per agent. The kernel enforces rate limits using a sliding window counter after the policy engine returns an `allow` decision.
-
-```yaml
-- id: "rate-limited-shell"
-  priority: 10
-  when:
-    tool_id: "shell_exec"
-  then:
-    decision: "allow"
-  rate_limit:
-    max: 30        # maximum calls allowed
-    window: "1m"   # sliding window (Go duration: "30s", "1m", "1h")
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `max` | int | **Required.** Maximum number of calls allowed in the window. Must be positive. |
-| `window` | string | **Required.** Sliding window duration in Go format (`"30s"`, `"1m"`, `"1h"`). |
-
-Rate limits are scoped per `(agent_id, tool_id)` pair. Different agents hitting the same tool have independent counters. If the limit is exceeded, the intent is denied with an `intent.denied` event and a rate limit exceeded error.
-
-The current implementation uses an in-memory sliding window. Counters reset if the kernel restarts. A Redis-backed implementation can be swapped in for multi-instance deployments.
-
-## Actions
-
-The `then` block specifies what happens when a rule matches.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `decision` | string | **Required.** `"allow"`, `"deny"`, or `"require_approval"`. |
-| `reason` | string | Human-readable explanation. Included in deny responses and events. |
-| `timeout_ms` | int | Step timeout in milliseconds for this rule. Overrides the global `StepTimeout` (default: 5 min). Only meaningful for `allow` rules. |
-
-### Approval Flow
-
-When a rule returns `require_approval`, the kernel creates the step but blocks the execution until a human sends an approval signal via `POST /v0/executions/{id}/signal`. The execution emits a `step.approval_required` event and transitions to the `blocked` state. Once approved, the step proceeds to execution (local or remote). If denied, the step is cancelled.
-
-```yaml
-- id: "approve-deploy"
-  priority: 15
-  when:
-    action: "tool.invoke"
-    tool_id: "deploy_*"
-  then:
-    decision: "require_approval"
-    reason: "Production deployments require human approval"
-```
-
-### Per-Rule Timeouts
-
-When `timeout_ms` is set on an allow rule, the kernel uses it as the step deadline instead of the global `StepTimeout`. This gives operators fine-grained control over how long individual tool invocations can run, scoped by any combination of agent, tool, labels, and arguments.
-
-```yaml
-# Web tools get 30 seconds
-- id: "researcher-web-tools"
-  priority: 10
-  when:
-    agent_ids: ["researcher"]
-    tool_ids: ["web_*"]
-  then:
-    decision: "allow"
-    timeout_ms: 30000
-
-# Shell commands get 10 seconds
-- id: "allow-safe-shell"
-  priority: 30
-  when:
-    tool_id: "shell_exec"
-    arguments:
-      - field: "command"
-        pattern: "^(ls|cat|echo|pwd)"
-  then:
-    decision: "allow"
-    timeout_ms: 10000
-
-# Long-running data processing gets 10 minutes
-- id: "data-pipeline"
-  priority: 50
-  when:
-    tool_id: "data_transform"
-    labels:
-      pipeline: "etl"
-  then:
-    decision: "allow"
-    timeout_ms: 600000
-```
-
-If `timeout_ms` is `0` or omitted, the global `StepTimeout` applies.
 
 ## Examples
 
-Allow a specific agent to use web tools with a 30-second timeout:
+**Deny by default, allow only known tools:**
 
 ```yaml
-- id: "researcher-web-tools"
-  priority: 10
-  when:
-    action: "tool.invoke"
-    agent_ids: ["researcher", "researcher-local"]
-    tool_ids: ["web_*", "doc_*"]
-  then:
-    decision: "allow"
-    timeout_ms: 30000
-```
-
-Allow shell commands only if they start with safe prefixes, with rate limiting and a bounded timeout:
-
-```yaml
-- id: "allow-safe-shell"
-  priority: 30
-  when:
-    action: "tool.invoke"
-    tool_id: "shell_exec"
-    arguments:
-      - field: "command"
-        pattern: "^(ls|cat|echo|pwd|whoami|date|head|tail|wc)"
-      - field: "timeout"
-        max: 30
-  then:
-    decision: "allow"
-    reason: "Safe read-only shell commands allowed"
-    timeout_ms: 10000
-  rate_limit:
-    max: 30
-    window: "1m"
-
-- id: "deny-shell"
-  priority: 40
-  when:
-    action: "tool.invoke"
-    tool_id: "shell_exec"
-  then:
-    decision: "deny"
-    reason: "Shell commands denied by default"
-```
-
-Global safety guardrails — cap step count, duration, and restrict to business hours:
-
-```yaml
-# _global.yaml
+default_action: deny
 rules:
-  - id: "deny-runaway-executions"
-    priority: 1
-    when:
-      action: "tool.invoke"
-      min_step_count: 100
-    then:
-      decision: "deny"
-      reason: "Execution exceeded 100 steps"
-
-  - id: "deny-long-executions"
-    priority: 2
-    when:
-      action: "tool.invoke"
-      min_duration_ms: 3600000
-    then:
-      decision: "deny"
-      reason: "Execution exceeded 1 hour"
-
-  - id: "business-hours-only"
-    priority: 3
-    when:
-      action: "tool.invoke"
-      schedule: "Mon-Fri 09:00-17:00 UTC"
-    then:
-      decision: "allow"
-      reason: "Within business hours"
-
-default:
-  decision: "deny"
-  reason: "Outside business hours"
+  - id: allow-llm
+    priority: 5
+    when: { step_kind: llm_call }
+    then: { decision: allow }
+  - id: allow-tools
+    priority: 10
+    when: { targets: ["web_search", "calculator"] }
+    then: { decision: allow }
 ```
 
-## Directory-Based Policy
+**Allow safe shell commands, gate the rest on approval:**
 
-When `--policy` points to a directory, the engine loads per-agent policy files and an optional global policy file. The filename (minus extension) is the agent ID.
-
-```bash
-rebuno server --policy examples/policies/demo/
-```
-
-### How It Works
-
-1. Each file is named after the agent it governs: `researcher.yaml`, `researcher-local.yaml`, etc.
-2. If a `_global.yaml` (or `_global.yml`) file exists, its rules apply across all agents. Use `agent_ids` in global rules to scope them to specific agents.
-3. Global rules are merged into each per-agent engine. Priority ordering works across both — a global rule at priority 100 and an agent rule at priority 10 are sorted together.
-4. Agents without a per-agent file are evaluated against the global rules only. If there is no global file either, the request is denied.
-5. Each file is parsed and validated independently. Rule IDs and priorities must be unique within the merged set (per-agent rules + global rules).
-
-### Example Layout
-
-```
-examples/policies/demo/
-  _global.yaml            # shared rules for all agents
-  researcher.yaml         # agent-specific rules for researcher
-  researcher-local.yaml   # agent-specific rules for researcher-local
-```
-
-`_global.yaml` — shared rules with `agent_ids` scoping:
 ```yaml
+default_action: deny
 rules:
-  - id: "research-agents-web"
+  - id: allow-llm
+    priority: 5
+    when: { step_kind: llm_call }
+    then: { decision: allow }
+  - id: allow-safe-shell
     priority: 10
     when:
-      action: "tool.invoke"
-      agent_ids: ["researcher", "researcher-local"]
-      tool_ids: ["web_*", "doc_*"]
-    then:
-      decision: "allow"
-      timeout_ms: 30000
-
-  - id: "allow-safe-shell"
-    priority: 30
-    when:
-      action: "tool.invoke"
-      tool_id: "shell_exec"
+      target: shell_exec
       arguments:
-        - field: "command"
-          pattern: "^(ls|cat|echo|pwd)"
+        command:
+          regex: '^\s*(ls|cat|pwd|echo|whoami|date|uname|df|head|tail|wc)(\s|$)'
     then:
-      decision: "allow"
-      timeout_ms: 10000
-
-  - id: "deny-shell"
-    priority: 40
-    when:
-      action: "tool.invoke"
-      tool_id: "shell_exec"
-    then:
-      decision: "deny"
-      reason: "Shell commands denied by default"
-
-default:
-  decision: "deny"
-  reason: "No explicit allow rule matched"
-```
-
-`researcher.yaml` — agent-specific overrides:
-```yaml
-rules:
-  - id: "calculator"
+      decision: allow
+      reason: safe read-only command
+  - id: approve-other-shell
     priority: 20
-    when:
-      action: "tool.invoke"
-      tool_id: "calculator"
+    when: { target: shell_exec }
     then:
-      decision: "allow"
+      decision: require_approval
+      reason: non-safe shell command needs approval
 ```
 
-In this setup, the `researcher` agent gets its own `calculator` rule merged with all the global rules. The `researcher-local` agent has no per-agent file, so it is evaluated against the global rules only — it can use `web_*` and `doc_*` tools (via the `agent_ids` scoping) but not the calculator.
-
-## Secure Defaults
-
-The `SecureDefaultEngine` wrapper automatically allows execution lifecycle actions (`execution.complete`, `execution.fail`, `execution.wait`) and delegates `tool.invoke` to the rule engine. If no policy is configured, all tool invocations are denied.
+See [`examples/policies/shell.yaml`](../examples/policies/shell.yaml) and
+[`examples/rebuno.dev.yaml`](../examples/rebuno.dev.yaml) for working bundles.

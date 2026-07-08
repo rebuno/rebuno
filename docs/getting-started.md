@@ -1,107 +1,74 @@
 # Getting Started
 
-## Quick Start
-
 **Prerequisites:** Go 1.25+, Python 3.10+
 
-### 1. Start the kernel
+## 1. Start the dev kernel
+
+The dev kernel runs entirely in memory — no Postgres, no auth, no external
+dependencies. Point it at a provisioning manifest to register agents and their
+policies on boot:
 
 ```bash
-go install ./cmd/rebuno
-rebuno dev
+go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
 ```
 
-You should see:
+The manifest (`examples/rebuno.dev.yaml`) registers a few example agents. Each
+entry gives the agent's `webhook_url`, its HMAC `secret`, and an optional policy:
 
+```yaml
+agents:
+  - id: hello
+    webhook_url: http://localhost:5000/webhook
+    secret: hello-secret
+    # no policy → permissive (allow all) in dev
 ```
-rebuno dev — development mode
 
-  kernel    http://127.0.0.1:8080
-  policy    permissive (all tools allowed)
-  storage   in-memory (data lost on restart)
+When stdin is a terminal, the dev kernel drops you into an interactive REPL
+(`rebuno>`). See [CLI](cli.md) for the commands.
 
-  Waiting for agents...
-```
+## 2. Run an agent
 
-### 2. Start the hello world agent
+An agent is any HTTP service that speaks the kernel's [protocol](agents.md). This
+quickstart uses the `hello` example built with the [Python SDK](sdk/python.md); it
+listens on the webhook URL the manifest registered (`:5000`) and talks back to the
+kernel at `:8080`:
+
 ```bash
 pip install rebuno
-python examples/agent/hello.py
+python examples/python/hello.py
 ```
 
-The agent connects to the kernel via SSE and waits for executions.
+See [`examples/python/hello.py`](../examples/python/hello.py) for the source, and
+the [Python SDK](sdk/python.md) doc for how it's built.
 
-### 3. Create an execution
-```bash
-rebuno create --agent hello --input '{"query": "hello world"}'
+## 3. Create an execution
+
+From the kernel's REPL:
+
+```
+rebuno> exec create hello {"query": "hello world"}
+  created a1b2c3d4 (pending) — 'exec watch a1b2c3d4' to follow
 ```
 
-Or with curl:
+Watch it run, then inspect the full event log:
 
-```bash
-curl -s -X POST http://localhost:8080/v0/executions \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "hello", "input": {"query": "hello world"}}' | jq
+```
+rebuno> exec watch a1b2c3d4
+rebuno> exec events a1b2c3d4
 ```
 
-The kernel assigns the execution to the agent. The agent proposes two tool calls (`reverse` and `word_count`) as intents, the kernel approves each one, and the agent returns the result:
-
-```json
-{
-    "query": "hello world",
-    "reversed": "dlrow olleh",
-    "word_count": 2
-}
-```
-
-### 4. View the event log
-
-Every action is recorded as an immutable event:
+You can also drive the kernel over HTTP, or use the interactive client which
+streams events and resolves any human-in-the-loop approvals:
 
 ```bash
-rebuno events {id}
+python examples/python/client.py --agent hello
 ```
 
-Or with curl:
+## Where to go next
 
-```bash
-curl -s http://localhost:8080/v0/executions/{id}/events | jq
-```
-
-Replace `{id}` with the execution ID from step 3. You'll see events like `execution.created`, `intent.accepted`, `step.created`, `step.completed`, and `execution.completed` — a full audit trail of what the agent did and what the kernel decided.
-
-You can also follow events in real time with `rebuno events --tail {id}`.
-
-### 5. Add a policy
-
-Restart the kernel with a policy to see what happens when tools are denied:
-
-```bash
-rebuno dev --policy examples/policies/hello.yaml
-```
-
-Now `reverse` and `word_count` are allowed, but any other tool will be denied. To see a denial, you can modify the hello agent to call an unlisted tool — the kernel will reject the intent and the agent will receive a `PolicyError`.
-
-### Add the Dashboard
-
-**Requires:** Node.js 18+
-
-To also start the web-based execution viewer:
-
-```bash
-git clone https://github.com/rebuno/dashboard.git
-cd dashboard
-npm install
-npm run dev
-```
-
-The dashboard is available at `http://localhost:3000`. It connects to the kernel at `http://localhost:8080` by default. It shows executions, event timelines, and step details.
-
-## Next Steps
-
-- [Architecture](architecture.md) — Core concepts, workflow, and state transitions
-- [Deployment](deployment.md) — Production setup, authentication, and configuration reference
-- [Python SDK](sdk/python.md) — Building agents and runners in Python
-- [TypeScript SDK](sdk/typescript.md) — Building agents and runners in TypeScript
-- [Policy](policy.md) — Declarative policy rules
-- [CLI](cli.md) — CLI reference
+- [Architecture](architecture.md) — how durability and replay work.
+- [Agents](agents.md) — the webhook protocol and dispatch/replay lifecycle.
+- [Tools & effects](tools.md) — step identity and idempotency modes.
+- [Policy](policy.md) — gate tool and LLM calls; require human approval.
+- [Python SDK](sdk/python.md) — build an agent in Python.
+- [Deployment](deployment.md) — run the production (Postgres-backed) kernel.

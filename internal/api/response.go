@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,57 +9,52 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		http.Error(w, `{"error":"internal encoding error","code":"INTERNAL_ERROR"}`, http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
+func WriteJSON(w http.ResponseWriter, v any, status int) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_, _ = w.Write(data)
-	_, _ = w.Write([]byte("\n"))
+	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeNoContent(w http.ResponseWriter) {
+func WriteNoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func writeError(w http.ResponseWriter, status int, code domain.ErrorCode, message string) {
-	if status == http.StatusTooManyRequests {
-		w.Header().Set("Retry-After", "5")
+func DecodeJSON(r *http.Request, v any) error {
+	if r.Body == nil {
+		return domain.ErrValidation
 	}
-	writeJSON(w, status, &domain.APIError{
-		Message: message,
-		Code:    code,
-	})
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return domain.ErrValidation
+	}
+	return nil
 }
 
-func writeErrorFromErr(w http.ResponseWriter, err error) {
+func WriteError(w http.ResponseWriter, err error) {
+	code, status := MapError(err)
+	WriteJSON(w, domain.APIError{Code: code, Message: err.Error()}, status)
+}
+
+func MapError(err error) (string, int) {
 	switch {
-	case errors.Is(err, domain.ErrNotFound),
-		errors.Is(err, domain.ErrRunnerNotFound):
-		writeError(w, http.StatusNotFound, domain.CodeNotFound, err.Error())
-	case errors.Is(err, domain.ErrConflict),
-		errors.Is(err, domain.ErrStepAlreadyResolved),
-		errors.Is(err, domain.ErrTerminalExecution),
-		errors.Is(err, domain.ErrInvalidTransition),
-		errors.Is(err, domain.ErrExecutionTainted),
-		errors.Is(err, domain.ErrIdempotencyConflict),
-		errors.Is(err, domain.ErrExecutionBlocked):
-		writeError(w, http.StatusConflict, domain.CodeConflict, err.Error())
+	case errors.Is(err, domain.ErrNotFound):
+		return "not_found", http.StatusNotFound
+	case errors.Is(err, domain.ErrConflict):
+		return "conflict", http.StatusConflict
 	case errors.Is(err, domain.ErrValidation):
-		writeError(w, http.StatusBadRequest, domain.CodeValidationError, err.Error())
-	case errors.Is(err, domain.ErrPolicyDenied):
-		writeError(w, http.StatusForbidden, domain.CodeForbidden, err.Error())
-	case errors.Is(err, domain.ErrRateLimited):
-		writeError(w, http.StatusTooManyRequests, domain.CodeRateLimited, err.Error())
-	case errors.Is(err, domain.ErrSessionExpired),
-		errors.Is(err, domain.ErrSessionNotFound):
-		writeError(w, http.StatusUnauthorized, domain.CodeUnauthorized, err.Error())
-	case errors.Is(err, domain.ErrServiceUnavailable):
-		writeError(w, http.StatusServiceUnavailable, domain.CodeServiceUnavailable, err.Error())
+		return "validation_error", http.StatusBadRequest
+	case errors.Is(err, domain.ErrUnauthorized):
+		return "unauthorized", http.StatusUnauthorized
+	case errors.Is(err, domain.ErrStepIDMismatch):
+		return "step_id_divergence", http.StatusConflict
+	case errors.Is(err, domain.ErrExecutionTerminal):
+		return "execution_terminal", http.StatusConflict
 	default:
-		writeError(w, http.StatusInternalServerError, domain.CodeInternalError, "internal error")
+		return "internal_error", http.StatusInternalServerError
 	}
+}
+
+func CtxWithValue(ctx context.Context, key, val any) context.Context {
+	return context.WithValue(ctx, key, val)
 }

@@ -1,134 +1,48 @@
-# rebuno CLI
+# CLI
 
-The `rebuno` binary includes built-in commands for operational visibility into the kernel. These inspection commands communicate through the kernel's HTTP API, making them a terminal-based counterpart to the Dashboard web UI.
-
-## Installation
-
-Build from source:
+The `rebuno` binary is the kernel. It has three commands:
 
 ```bash
-go build -o bin/rebuno ./cmd/rebuno
+rebuno dev [--config manifest.yaml]     # in-memory dev kernel (no auth, no deps)
+rebuno server --db-url … --bearer-token …   # production kernel (Postgres)
+rebuno version
 ```
 
-This produces a `rebuno` binary in the bin directory — a single binary that includes the kernel (`rebuno dev`, `rebuno server`) and all inspection commands. Alternatively, run `make build` to output to `bin/rebuno`.
+Build it with `make build` (outputs `bin/rebuno`), or run from source with
+`go run ./cmd/rebuno …`.
 
-## Connection
+## The REPL
 
-All subcommands connect to the kernel's HTTP API. Provide the URL and optional API key via flags or environment variables:
-
-```bash
-# Via flags
-rebuno --url http://localhost:8080 --api-key "my-token" executions
-
-# Via environment variables
-export REBUNO_KERNEL_URL="http://localhost:8080"
-export REBUNO_API_KEY="my-token"
-rebuno executions
-```
-
-| Flag | Env Variable | Default | Description |
-|------|-------------|---------|-------------|
-| `--url` | `REBUNO_KERNEL_URL` | `http://localhost:8080` | Kernel HTTP URL |
-| `--api-key` | `REBUNO_API_KEY` | _(none)_ | Bearer token for authentication |
-
-## Subcommands
-
-### health
-
-Check connectivity to the kernel.
-
-```bash
-rebuno health
-```
-
-### executions
-
-List executions (most recent first).
-
-```bash
-rebuno executions
-rebuno executions --status running
-rebuno executions --agent researcher
-rebuno executions --status failed --agent researcher --limit 10
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--status` | | Filter by execution status (`pending`, `running`, `blocked`, `completed`, `failed`, `cancelled`) |
-| `--agent` | | Filter by agent ID |
-| `--limit` | `50` | Maximum number of results |
-
-Output columns: `ID`, `STATUS`, `AGENT`, `CREATED`, `UPDATED`.
-
-### execution
-
-Show details for a single execution.
-
-```bash
-rebuno execution exec-abc123
-```
-
-Output fields: `ID`, `Status`, `Agent`, `Labels`, `Created`, `Updated`, `Input`, `Output`.
-
-### events
-
-Show the event log for an execution. Use `--tail` to follow live events via SSE.
-
-```bash
-rebuno events exec-abc123
-rebuno events exec-abc123 --limit 20
-rebuno events exec-abc123 --tail
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--tail` | `false` | Follow live events via server-sent events (exits on terminal events or Ctrl+C) |
-| `--limit` | `100` | Maximum number of events (ignored with `--tail`) |
-
-Each event is printed as:
+When `rebuno dev` (or `server`) runs with a terminal on stdin, it starts an
+interactive REPL that drives the kernel in-process — it shares the same store as
+the running HTTP server, so executions created here are dispatched normally. With
+no TTY (piped input, CI, Docker without `-t`) the kernel just serves HTTP.
 
 ```
-[sequence] timestamp event_type step=step_id payload_json
+rebuno> help
 ```
 
-### create
+| Command | Description |
+|---------|-------------|
+| `agent ls` | List registered agents. |
+| `agent get <id>` | Show an agent and its policy bundle. |
+| `agent add <config.yaml>` | Register agent(s) from a provisioning manifest. |
+| `agent rm <id>` | Delete an agent. |
+| `exec ls` | List executions, newest first. |
+| `exec create <agent> [json]` | Start an execution (input defaults to `{}`). |
+| `exec get <id>` | Show an execution's status and output. |
+| `exec watch <id>` | Tail an execution's events until it finishes. |
+| `exec events <id>` | Print the full event log with expanded payloads. |
+| `exec cancel <id>` | Cancel a running execution. |
+| `quit` | Stop the kernel and exit. |
 
-Create a new execution.
+IDs accept a unique short-id prefix (the 8-char form shown by `exec ls`), so you
+can type back the IDs you see.
 
-```bash
-rebuno create --agent researcher
-rebuno create --agent researcher --input '{"query": "hello"}'
-rebuno create --agent researcher --label env=prod --label team=search
+```
+rebuno> exec create hello {"query": "hello world"}
+  created a1b2c3d4 (pending) — 'exec watch a1b2c3d4' to follow
+rebuno> exec watch a1b2c3d4
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--agent` | Agent ID (required) |
-| `--input` | Input as a JSON string |
-| `--label` | Labels as `key=value` (repeatable) |
-
-### cancel
-
-Cancel a running execution.
-
-```bash
-rebuno cancel exec-abc123
-```
-
-### signal
-
-Send a signal to an execution.
-
-```bash
-rebuno signal exec-abc123 --type approve
-rebuno signal exec-abc123 --type feedback --payload '{"message": "try again"}'
-```
-
-| Flag | Description |
-|------|-------------|
-| `--type` | Signal type (required) |
-| `--payload` | Signal payload as a JSON string |
-
-## Color Output
-
-Status values are color-coded in terminal output: pending (yellow), running (cyan), blocked (magenta), completed (green), failed (red), cancelled (gray). Set the `NO_COLOR` environment variable to disable colors.
+Command history persists to `~/.rebuno_repl_history`.

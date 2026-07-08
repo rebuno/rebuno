@@ -3,8 +3,6 @@ bin/
 .venv/
 __pycache__/
 .pytest_cache/
-node_modules/
 dist/
-.next/
 .claude/
 .env

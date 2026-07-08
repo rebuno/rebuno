@@ -1,77 +1,71 @@
-# Tools
+# Tools & effects
 
-Tools are functions that agents invoke through the kernel. Every tool call goes through policy enforcement and is recorded in the event log. Tools can execute locally (in the agent process) or remotely (in a runner process).
+An agent's work is a sequence of **effects**: tool calls and LLM calls. Every
+effect becomes a **step** — it goes through policy, gets a deterministic ID, and is
+recorded in the event log. On replay, an effect that already has a recorded result
+returns it instead of running again.
 
-## Local vs Remote
+To the kernel a tool call and an LLM call are the same kind of thing,
+distinguished only by `kind` (`tool_call` or `llm_call`). Both travel the same
+submission path and obey the same replay, idempotency, and policy rules.
 
-| | Local | Remote |
-|---|---|---|
-| Latency | Lower (no network hop) | Higher (kernel -> runner -> kernel) |
-| Isolation | Runs in agent process | Separate process, can have different dependencies |
-| Scaling | Scales with agent | Scales independently |
-| Simplicity | Simpler setup | Requires runner process |
+## An effect becomes a step
 
-Use **local tools** when the tool is lightweight and doesn't need isolation. Use **remote tools** when you need process isolation, different runtime dependencies, or independent scaling.
+When the agent is about to perform an effect it submits a step
+(`POST /v0/executions/{id}/steps`) with the `kind`, the `target` (the tool name or
+model id), and the arguments. The kernel:
 
-See the [Python SDK](sdk/python.md) or [TypeScript SDK](sdk/typescript.md) for how to register and use both types.
+1. Computes the step's deterministic ID and validates the one the agent sent.
+2. Looks it up in the `steps` projection — if it already succeeded or failed, it
+   returns `replay` with the recorded outcome.
+3. Otherwise evaluates [policy](policy.md) and records the decision, returning
+   `proceed`, `denied`, or `blocked`.
 
-## Tool IDs
+On `proceed` the agent runs the effect and reports the result
+(`.../complete`) or error (`.../fail`). See the [HTTP API](api.md#agent-api) for
+the shapes.
 
-Tool IDs are underscore-separated strings (e.g., `web_search`, `doc_fetch`, `shell_exec`). The first underscore-delimited segment acts as the namespace; policy rules can use glob patterns to match groups of tools:
+## Step identity
 
-```yaml
-when:
-  tool_ids: ["web_*"]   # matches web_search, web_fetch, etc.
-```
-
-## MCP Tools
-
-MCP servers can be connected to agents and runners, making their tools available through the kernel with full policy enforcement and audit logging.
-
-MCP tools are namespaced with the server name as prefix (e.g., `filesystem_read_file`, `github_list_repos`). Policy rules can match them with globs:
-
-```yaml
-when:
-  tool_ids: ["filesystem_*"]
-then: allow
-```
-
-MCP tools can be registered on either agents (as local tools) or runners (as remote capabilities). See [Python SDK > MCP Tools](sdk/python.md#mcp-tools) or [TypeScript SDK > MCP Tools](sdk/typescript.md#mcp-tools) for setup.
-
-### Partial failure and retry
-
-`McpManager` tolerates partial connection failures. If some MCP servers fail to connect, the runner/agent starts with whichever servers succeeded. Failed servers are retried in the background, and when they reconnect, the runner automatically updates its capabilities with the kernel.
-
-### Config-based setup
-
-MCP servers can also be loaded from a config dict matching the standard `mcpServers` format:
-
-```python
-config = {
-    "mcpServers": {
-        "filesystem": {
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-        },
-        "api": {
-            "url": "http://localhost:3000/mcp",
-        },
-    }
-}
-agent.mcp_servers_from_config(config)
-```
-
-## Execution Flow
+A step's ID is derived from the effect's **content**, not its position in the run:
 
 ```
-Agent calls ctx.invoke_tool("web_search", {"query": "..."})
-  -> SDK submits invoke_tool intent to kernel
-  -> Kernel evaluates policy
-  -> If denied: PolicyError raised, tool never executes
-  -> If allowed: step created
-     -> Local: SDK executes function, reports result to kernel
-     -> Remote: kernel pushes job to runner via SSE, runner executes, reports result
-  -> Result delivered back to agent
+step_id = hash(execution_id, kind, target, args_hash, occurrence)
 ```
 
-See the [Python SDK](sdk/python.md) or [TypeScript SDK](sdk/typescript.md) for the full agent and runner API. See [Policy](policy.md) for controlling tool access.
+- `target` — the tool name or model id.
+- `args_hash` — a stable hash of the canonicalized arguments (canonical JSON for
+  tools; the canonical request body for LLM calls).
+- `occurrence` — the count of prior identical calls in this execution, so the same
+  call with the same arguments twice yields two distinct steps.
+
+Because IDs are content-derived, parallel effects and reordering across replays are
+safe — the same set of calls always produces the same set of IDs. See
+[architecture.md](architecture.md#step-identity).
+
+## Idempotency modes
+
+If an agent crashes after a step started but before its result was recorded, the
+step is *orphaned* — the kernel can't tell whether the side effect happened. Each
+effect declares how to recover:
+
+| Mode | On an orphaned step |
+|------|--------------------|
+| `safe_to_retry` (default) | Re-run the effect, passing a step-ID-derived idempotency key. Right for reads, naturally-idempotent operations, or providers that honor idempotency keys. |
+| `at_most_once` | Do **not** re-run. The kernel marks the step failed with reason `indeterminate` and the agent decides how to reconcile. Use for non-idempotent destructive operations where even a deduplicated retry is unacceptable. |
+
+A step that fails with `indeterminate` **may still have had a side effect** — treat
+it as a failure that might have run, and re-check external state before retrying.
+
+LLM calls are always `safe_to_retry`: the step ID doubles as the provider's
+idempotency key.
+
+## LLM calls
+
+An LLM call is an `llm_call` step submitted the same way, with the model as
+`target` and the request body as the arguments. Its identity is computed over a
+canonical form of the request (messages, tools, model, sampling params) and
+excludes operational noise (request IDs, trace headers, streaming flag). A recorded
+LLM call replays from the log — **no provider call ever happens on replay** — and
+its `step.succeeded` event carries the response, token counts, and cost. See
+[events.md](events.md#step) and [policy.md](policy.md).

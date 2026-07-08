@@ -1,0 +1,25 @@
+default_action: deny
+rules:
+  - id: allow-llm
+    priority: 5
+    when:
+      step_kind: llm_call
+    then:
+      decision: allow
+  - id: allow-safe-shell
+    priority: 10
+    when:
+      target: shell_exec
+      arguments:
+        command:
+          regex: '^\s*(ls|cat|pwd|echo|whoami|date|uname|df|free|uptime|head|tail|wc)(\s|$)'
+    then:
+      decision: allow
+      reason: safe read-only command
+  - id: approve-other-shell
+    priority: 20
+    when:
+      target: shell_exec
+    then:
+      decision: require_approval
+      reason: non-safe shell command needs approval

@@ -7,52 +7,51 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?&style=for-the-badge" alt="License"></a>
 </p>
 
-A kernel-authoritative execution runtime for AI agents.
+An open-source runtime for autonomous agents.
 
-Rebuno sits between your agents and the tools they use, giving you policy control, a complete audit trail, and operational visibility over autonomous agent behavior. Agents propose actions. The kernel decides whether they're allowed. Every decision is recorded.
+Rebuno gives your agents durable execution (crash and resume without re-running side effects), an event-sourced record of everything they did, and optional governance over what they're allowed to do.
 
 ## Quick Start
 
 **Prerequisites:** Go 1.25+, Python 3.10+
 
-Start the kernel:
+Start the dev kernel (in-memory, no dependencies). With a terminal attached it drops you into a REPL:
 
 ```bash
-go install ./cmd/rebuno
-rebuno dev
+go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
 ```
 
-Start an agent:
+Start an agent in another terminal:
 
 ```bash
 pip install rebuno
-python examples/python/agent/hello.py
+python examples/python/hello.py
 ```
 
-Create an execution:
+Create an execution from the REPL and follow its event log:
 
-```bash
-rebuno create --agent hello --input '{"query": "hello world"}'
 ```
-
-See the full audit trail with `rebuno events {id}`.
-
-See [Getting Started](docs/getting-started.md) for the full walkthrough.
+rebuno> exec create hello {"query": "hello world"}
+rebuno> exec events <id>
+```
 
 ## Documentation
 
-| Doc | Description |
-|---|---|
-| [Getting Started](docs/getting-started.md) | Quick start walkthrough |
-| [Architecture](docs/architecture.md) | Core concepts and state transitions |
-| [Deployment](docs/deployment.md) | Production setup, auth, and configuration |
-| [Python SDK](docs/sdk/python.md) | Building agents and runners in Python |
-| [TypeScript SDK](docs/sdk/typescript.md) | Building agents and runners in TypeScript |
-| [Tools](docs/tools.md) | Local, remote, and MCP tools |
-| [Policy](docs/policy.md) | Declarative policy rules |
-| [API Reference](docs/api.md) | HTTP endpoints and schemas |
-| [Events](docs/events.md) | Event types and payloads |
-| [CLI](docs/cli.md) | CLI reference |
+Start here:
+
+- [Getting Started](docs/getting-started.md) — run the kernel and your first agent.
+- [Architecture](docs/architecture.md) — the domain model, state machines, and how durability works.
+
+Reference:
+
+- [Agents](docs/agents.md) — how an agent process receives work and drives its effects.
+- [Tools](docs/tools.md) — the `@tool` decorator, step identity, and idempotency.
+- [Policy](docs/policy.md) — the YAML rule language for allow / deny / require-approval.
+- [Events](docs/events.md) — the event taxonomy and payloads.
+- [HTTP API](docs/api.md) — the `/v0` client, agent, and admin endpoints.
+- [CLI](docs/cli.md) — the built-in `rebuno` REPL.
+- [Deployment](docs/deployment.md) — running the production kernel, config, and Docker.
+- [Python SDK](docs/sdk/python.md) — the `rebuno` package surface.
 
 ## License
 
