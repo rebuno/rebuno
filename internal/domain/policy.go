@@ -1,72 +1,56 @@
 package domain
 
-import "encoding/json"
-
-type PolicyInput struct {
-	Action      string            `json:"action"` // "tool.invoke", "execution.complete", "execution.fail", "execution.wait"
-	ToolID      string            `json:"tool_id,omitempty"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	ExecutionID string            `json:"execution_id"`
-	AgentID     string            `json:"agent_id,omitempty"`
-	Arguments   json.RawMessage   `json:"arguments,omitempty"`
-	StepCount   int               `json:"step_count"`
-	DurationMs  int64             `json:"duration_ms"`
-}
-
-type PolicyDecision string
-
-const (
-	PolicyAllow           PolicyDecision = "allow"
-	PolicyDeny            PolicyDecision = "deny"
-	PolicyRequireApproval PolicyDecision = "require_approval"
+import (
+	"encoding/json"
+	"time"
 )
 
-type RateLimitConfig struct {
-	Max    int    `json:"max" yaml:"max"`
-	Window string `json:"window" yaml:"window"` // e.g., "1m", "1h" (Go duration)
+type APIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
 }
+
+func (e APIError) Error() string { return e.Code + ": " + e.Message }
+
+const (
+	DecisionAllow           = "allow"
+	DecisionDeny            = "deny"
+	DecisionRequireApproval = "require_approval"
+)
 
 type PolicyResult struct {
-	Decision  PolicyDecision   `json:"decision"`
-	Reason    string           `json:"reason"`
-	RuleID    string           `json:"rule_id"`
-	TimeoutMs int64            `json:"timeout_ms,omitempty"`
-	RateLimit *RateLimitConfig `json:"rate_limit,omitempty"`
+	Decision       string               `json:"decision"`
+	Reason         string               `json:"reason,omitempty"`
+	RuleID         string               `json:"rule_id,omitempty"`
+	ApprovalConfig PolicyApprovalConfig `json:"approval_config,omitempty"`
+	RateLimit      RateLimitConfig      `json:"rate_limit,omitempty"`
 }
 
-type ArgumentPredicate struct {
-	Field     string   `json:"field" yaml:"field"`
-	Pattern   string   `json:"pattern,omitempty" yaml:"pattern,omitempty"`
-	OneOf     []string `json:"one_of,omitempty" yaml:"one_of,omitempty"`
-	Min       *float64 `json:"min,omitempty" yaml:"min,omitempty"`
-	Max       *float64 `json:"max,omitempty" yaml:"max,omitempty"`
-	MaxLength *int     `json:"max_length,omitempty" yaml:"max_length,omitempty"`
-	Required  bool     `json:"required,omitempty" yaml:"required,omitempty"`
+type RateLimitConfig struct {
+	MaxCalls int           `json:"max_calls,omitempty" yaml:"max_calls,omitempty"`
+	Window   time.Duration `json:"window,omitempty" yaml:"window,omitempty"`
+	PerWhat  string        `json:"per_what,omitempty" yaml:"per_what,omitempty"` // "execution" (default), "agent", "global"
+	// OnLimiterError selects behavior when the limiter backend errors:
+	// LimiterErrorAllow (default, fail-open) or LimiterErrorDeny (fail-closed).
+	// Hard ceilings should generally be expressed as policy deny/require_approval.
+	OnLimiterError string `json:"on_limiter_error,omitempty" yaml:"on_limiter_error,omitempty"`
 }
 
-type PolicyCondition struct {
-	Action        string              `json:"action,omitempty" yaml:"action,omitempty"`
-	ToolID        string              `json:"tool_id,omitempty" yaml:"tool_id,omitempty"`
-	ToolIDs       []string            `json:"tool_ids,omitempty" yaml:"tool_ids,omitempty"`
-	AgentID       string              `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
-	AgentIDs      []string            `json:"agent_ids,omitempty" yaml:"agent_ids,omitempty"`
-	Labels        map[string]string   `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Arguments     []ArgumentPredicate `json:"arguments,omitempty" yaml:"arguments,omitempty"`
-	MinStepCount  *int                `json:"min_step_count,omitempty" yaml:"min_step_count,omitempty"`
-	MinDurationMs *int64              `json:"min_duration_ms,omitempty" yaml:"min_duration_ms,omitempty"`
-	Schedule      string              `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+const (
+	LimiterErrorAllow = "allow"
+	LimiterErrorDeny  = "deny"
+)
+
+type PolicyApprovalConfig struct {
+	Approvers []string      `json:"approvers,omitempty"`
+	Timeout   time.Duration `json:"timeout,omitempty"`
+	Message   string        `json:"message,omitempty"`
 }
 
-type PolicyAction struct {
-	Decision  PolicyDecision `json:"decision" yaml:"decision"`
-	Reason    string         `json:"reason,omitempty" yaml:"reason,omitempty"`
-	TimeoutMs int64          `json:"timeout_ms,omitempty" yaml:"timeout_ms,omitempty"`
-}
-
-type PolicyRule struct {
-	ID        string           `json:"id" yaml:"id"`
-	Priority  int              `json:"priority" yaml:"priority"`
-	When      PolicyCondition  `json:"when" yaml:"when"`
-	Then      PolicyAction     `json:"then" yaml:"then"`
-	RateLimit *RateLimitConfig `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
+type PolicyInput struct {
+	AgentID  string
+	Target   string
+	Args     json.RawMessage
+	StepKind StepKind
 }

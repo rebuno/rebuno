@@ -2,9 +2,6 @@ bin/
 .venv/
 __pycache__/
 .pytest_cache/
-node_modules/
 dist/
-.next/
-next-env.d.ts
 .claude/
 .env

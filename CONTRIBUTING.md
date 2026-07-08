@@ -4,27 +4,23 @@ Thanks for your interest in contributing. This guide covers how to set up the pr
 
 ## Prerequisites
 
-- **Go** 1.25+ — kernel
-- **Docker** and **Docker Compose** — running the full stack
-- **PostgreSQL** 16 — required for integration testing (or use the Docker setup)
+- **Go** 1.25+
 
 ## Getting Started
 
 ### Kernel (Go)
 
 ```bash
-# Build
-make build
-
-# Dev kernel
-make dev
-
-# Run tests
-make test
-
-# Lint (requires golangci-lint)
-make lint
+make build              # build bin/rebuno
+make dev                # build + run the in-memory dev kernel
+make test               # unit tests (go test -race ./...)
+make test-integration   # integration tests (requires Docker)
+make lint               # golangci-lint run ./...
+make fmt                # gofmt -s -w .
 ```
+
+Documentation lives in [docs/](docs/). If you change kernel behavior, API
+surface, events, or the policy format, update the corresponding doc.
 
 ## Submitting Changes
 

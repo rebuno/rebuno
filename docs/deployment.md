@@ -1,31 +1,29 @@
 # Deployment
 
-## Production Mode
+## Dev vs. server
 
-For persistent storage and authentication:
+`rebuno dev` runs entirely in memory with auth disabled — for local development
+only; nothing persists across restarts.
+
+`rebuno server` is the production kernel. It requires Postgres and a bearer token
+and will refuse to start without them:
 
 ```bash
 rebuno server \
-  --production \
-  --db-url "postgres://user:pass@localhost/rebuno" \
-  --policy /path/to/your/policies \
-  --bearer-token "your-secret-token"
+  --db-url "postgres://user:pass@localhost:5432/rebuno" \
+  --bearer-token "your-secret-token" \
+  --config /etc/rebuno/agents.yaml
 ```
 
-Production mode requires `--policy`, `--db-url`, and `--bearer-token`. The kernel will refuse to start without them.
+The schema is applied from embedded migrations on boot. The HTTP API is stateless,
+so you scale by running more replicas behind a load balancer — Postgres is the
+only coordination point, and singleton background work (approval expiry, execution
+deadlines, cleanup, stale-dispatch reaping) is leader-elected via a Postgres
+advisory lock.
 
 ## Authentication
-Required in production mode
 
-```bash
-# Set the token
-rebuno server --bearer-token "your-secret-token" ...
-
-# Or via environment variable
-export REBUNO_BEARER_TOKEN="your-secret-token"
-```
-
-All API requests must include the token:
+All client and admin routes require the bearer token:
 
 ```bash
 curl -X POST http://localhost:8080/v0/executions \
@@ -34,40 +32,76 @@ curl -X POST http://localhost:8080/v0/executions \
   -d '{"agent_id": "researcher", "input": {"query": "hello"}}'
 ```
 
-The Python SDK accepts it as `api_key`:
+The Python client accepts it as `api_key`. Agent routes authenticate with HMAC
+instead (see [api.md](api.md#authentication)).
 
-```python
-agent = MyAgent(
-    agent_id="researcher",
-    kernel_url="http://localhost:8080",
-    api_key="your-secret-token",
-)
+## Provisioning agents
+
+Register agents and their policies declaratively with `--config`, a manifest both
+`dev` and `server` load on boot (upsert). See
+[`examples/rebuno.dev.yaml`](../examples/rebuno.dev.yaml):
+
+```yaml
+agents:
+  - id: researcher
+    webhook_url: https://researcher.internal/webhook
+    secret: ${RESEARCHER_SECRET}
+    policy_file: policies/research.yaml   # or an inline `policy: |` block
 ```
 
-## Configuration Reference (`rebuno server`)
+`policy_file` paths resolve relative to the manifest. A malformed bundle fails the
+boot rather than silently falling back to permissive. You can also register agents
+and load policy at runtime over the [admin API](api.md#admin-api).
+
+## Configuration
+
+Server flags and their environment-variable equivalents:
 
 | Flag | Env | Default | Description |
 |------|-----|---------|-------------|
-| `--port` | `REBUNO_PORT` | `8080` | Kernel HTTP server port |
-| `--bind` | `REBUNO_BIND` | `0.0.0.0` | Bind address |
-| `--db-url` | `REBUNO_DB_URL` | | PostgreSQL connection string (required) |
-| `--db-max-conns` | `REBUNO_DB_MAX_CONNS` | `0` | Database connection pool max size (0 = pgxpool default) |
-| `--db-min-conns` | `REBUNO_DB_MIN_CONNS` | `0` | Database connection pool min size (0 = pgxpool default) |
-| `--policy` | `REBUNO_POLICY` | | Path to policy YAML file or directory |
-| `--production` | `REBUNO_PRODUCTION` | `false` | Enable production checks (requires policy + db + bearer token) |
-| `--tls-cert` | `REBUNO_TLS_CERT` | | TLS certificate file path (optional) |
-| `--tls-key` | `REBUNO_TLS_KEY` | | TLS key file path (optional) |
-| `--execution-timeout` | `REBUNO_EXECUTION_TIMEOUT` | `1h` | Maximum wall-clock time for an execution |
-| `--step-timeout` | `REBUNO_STEP_TIMEOUT` | `5m` | Default deadline for a single tool step |
-| `--agent-timeout` | `REBUNO_AGENT_TIMEOUT` | `30s` | Agent connectivity timeout |
-| `--log-level` | `REBUNO_LOG_LEVEL` | `info` | Log level (debug/info/warn/error) |
-| `--log-format` | `REBUNO_LOG_FORMAT` | `json` | Log format (json/text) |
-| `--otel-endpoint` | `REBUNO_OTEL_ENDPOINT` | | OTLP gRPC endpoint for tracing |
-| `--otel-sample-rate` | `REBUNO_OTEL_SAMPLE_RATE` | `0.1` | Trace sampling rate |
-| `--retention-period` | `REBUNO_RETENTION_PERIOD` | `168h` | Retention period for terminal executions |
-| `--cleanup-interval` | `REBUNO_CLEANUP_INTERVAL` | `1h` | Interval between cleanup sweeps |
-| `--retry-base-delay` | `REBUNO_RETRY_BASE_DELAY` | `1s` | Base delay for step retries |
-| `--retry-max-delay` | `REBUNO_RETRY_MAX_DELAY` | `30s` | Maximum delay for step retries |
-| `--bearer-token` | `REBUNO_BEARER_TOKEN` | | Bearer token for API auth (optional in dev; required in production) |
-| `--cors-origins` | `REBUNO_CORS_ORIGINS` | | Comma-separated CORS origins |
-| `--redis-url` | `REBUNO_REDIS_URL` | | Redis URL for persistent job queue (optional) |
+| `--listen-addr` | `REBUNO_LISTEN_ADDR` | `:8080` | HTTP listen address. |
+| `--db-url` | `REBUNO_DB_URL` | — | Postgres URL. **Required** in server mode. |
+| `--bearer-token` | `REBUNO_BEARER_TOKEN` | — | Client/admin API token. **Required** in server mode. |
+| `--config` | — | — | Provisioning manifest path. |
+| `--db-max-conns` | `REBUNO_DB_MAX_CONNS` | auto | Max DB pool connections. |
+| `--db-min-conns` | `REBUNO_DB_MIN_CONNS` | auto | Min DB pool connections. |
+| `--log-level` | `REBUNO_LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`. |
+| `--log-format` | `REBUNO_LOG_FORMAT` | `text` | `text` or `json`. |
+| `--otel-endpoint` | `REBUNO_OTEL_ENDPOINT` | — | OTLP gRPC endpoint (empty = tracing off). |
+| `--otel-insecure` | `REBUNO_OTEL_INSECURE` | `false` | Plaintext OTLP connection. |
+
+Additional environment-only settings:
+
+| Env | Default | Description |
+|-----|---------|-------------|
+| `REBUNO_DISPATCH_MAX_ATTEMPTS` | `5` | Webhook delivery attempts before exhaustion. |
+| `REBUNO_DISPATCH_TIMEOUT` | `30s` | Per-attempt webhook timeout. |
+| `REBUNO_DISPATCH_CONCURRENCY` | `8` | Concurrent dispatch workers per replica. |
+| `REBUNO_DISPATCH_LEASE_TIMEOUT` | — | How long a claimed dispatch stays owned before the reaper reclaims it. |
+| `REBUNO_DEADLINE_TIMEOUT` | — | Max execution lifetime before auto-cancel. |
+| `REBUNO_CLEANUP_INTERVAL` | `10m` | Interval between retention sweeps. |
+| `REBUNO_RETENTION` | `24h` | How long terminal executions are kept. |
+| `REBUNO_LEADER_LOCK_KEY` | `rebuno_scheduler_leader` | Advisory-lock key for leader election. |
+| `REBUNO_OTEL_SAMPLE_RATE` | `1.0` | Trace sampling rate. |
+
+## Docker
+
+The image is built from [`deploy/Dockerfile`](../deploy/Dockerfile) and published
+to `ghcr.io/rebuno/rebuno` on tagged releases. Its entrypoint is `rebuno server`,
+so pass configuration as flags or `REBUNO_*` environment variables:
+
+```bash
+docker run -p 8080:8080 \
+  -e REBUNO_DB_URL="postgres://…" \
+  -e REBUNO_BEARER_TOKEN="…" \
+  ghcr.io/rebuno/rebuno:latest
+```
+
+## Observability
+
+- **Tracing** (OpenTelemetry): every API request and dispatch attempt, correlated
+  by `execution_id` / `step_id`. Enable with `--otel-endpoint`.
+- **Metrics** (Prometheus): scrape `/metrics` — execution counts by status,
+  dispatch attempts, queue depth, approval wait times, replay-hit rate, policy
+  latency.
+- **Logging**: structured, with `execution_id` / `step_id` correlation.

@@ -1,497 +1,167 @@
-# API Reference
+# HTTP API
 
-All endpoints are under the `/v0/` prefix. When a bearer token is configured on the kernel, all endpoints except `/v0/health` and `/v0/ready` require an `Authorization: Bearer <token>` header.
+All endpoints live under `/v0`. Bodies are JSON. Errors use a `{code, message,
+details}` envelope.
 
-## Executions
+## Authentication
 
-### POST /v0/executions
+- **Client & admin routes** use a bearer token: `Authorization: Bearer <token>`.
+  Set it with `--bearer-token` / `REBUNO_BEARER_TOKEN` (required in server mode).
+  The dev kernel disables auth.
+- **Agent routes** use HMAC. The agent sends `Rebuno-Agent-Id` and
+  `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`, computed over the raw
+  request body with the agent's registered secret.
+- A few routes (fetching execution input/steps) accept **either** — bearer for
+  clients, HMAC for the agent.
+- `/v0/health`, `/v0/ready`, and `/metrics` are unauthenticated.
 
-Create a new execution.
+---
 
-**Request:**
+## Client API
+
+### Create an execution
+
+`POST /v0/executions` · bearer
+
+```json
+{ "agent_id": "researcher", "input": { "query": "hello" }, "agent_version": "abc123" }
+```
+
+Returns `201` with the created execution (records `execution.created` and enqueues
+a dispatch). `agent_version` is optional and opaque to the kernel.
+
+### Get an execution
+
+`GET /v0/executions/{id}` · bearer or HMAC
 
 ```json
 {
-  "agent_id": "researcher",
-  "input": {"task": "find recent papers on transformers"},
-  "labels": {"env": "dev", "team": "research"}
+  "id": "0192...", "agent_id": "researcher", "status": "completed",
+  "input": {...}, "output": {...}, "failure_reason": "",
+  "created_at": "...", "updated_at": "...", "deadline_at": null
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agent_id` | string | Yes | Target agent ID |
-| `input` | object | No | Input data for the execution |
-| `labels` | object | No | Key-value metadata attached to the execution (usable in policy rules) |
+### List executions
 
-**Response** (201 Created):
+`GET /v0/executions?agent_id=&status=&cursor=&limit=` · bearer
+
+Newest first. Keyset paging: pass the returned `next_cursor` back as `cursor`.
 
 ```json
-{
-  "id": "exec-abc123",
-  "status": "pending",
-  "agent_id": "researcher",
-  "labels": {"env": "dev", "team": "research"},
-  "input": {"task": "find recent papers on transformers"},
-  "created_at": "2025-01-15T10:00:00Z",
-  "updated_at": "2025-01-15T10:00:00Z"
-}
+{ "executions": [ ... ], "next_cursor": "0192..." }
 ```
 
-### GET /v0/executions
+### Get the event log
 
-List executions with optional filters and cursor-based pagination.
+`GET /v0/executions/{id}/events?after_seq=&limit=` · bearer
 
-**Query parameters:**
+Returns an ordered array of [events](events.md). `limit` defaults to 100, max
+1000. Poll with `after_seq` set to the last `event_seq` you saw.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `status` | string | | Filter by execution status (`pending`, `running`, `blocked`, `completed`, `failed`, `cancelled`) |
-| `agent_id` | string | | Filter by agent ID |
-| `cursor` | string | | Pagination cursor from a previous response |
-| `limit` | int | `50` | Maximum number of results (max 200) |
+### Cancel an execution
 
-**Response** (200 OK):
+`POST /v0/executions/{id}/cancel` · bearer → `204`
+
+Records `execution.cancelled`, transitions to terminal, stops further dispatch.
+
+---
+
+## Agent API
+
+The kernel dispatches a webhook carrying `{execution_id, dispatch_id}`; the agent
+acks `200 OK`, then pulls what it needs and drives its effects. These routes are
+HMAC-verified (except the reads, which also accept bearer).
+
+### Fetch input / steps
+
+`GET /v0/executions/{id}` — original `input` and current `status`.
+
+`GET /v0/executions/{id}/steps?status=terminal` — the execution's steps in one
+read, so the agent builds its `{step_id → result}` map at dispatch start.
+`status=terminal` trims to `succeeded`/`failed`/`denied`.
+
+`GET /v0/executions/{id}/steps/{step_id}` — point lookup of one step; `404` if
+absent.
+
+### Submit a step
+
+`POST /v0/executions/{id}/steps` · HMAC · header `Rebuno-Step-Id: <id>`
 
 ```json
-{
-  "executions": [
-    {
-      "id": "exec-abc123",
-      "status": "running",
-      "agent_id": "researcher",
-      "created_at": "2025-01-15T10:00:00Z",
-      "updated_at": "2025-01-15T10:00:05Z"
-    }
-  ],
-  "next_cursor": "eyJpZCI6ImV4ZWMtYWJjMTIzIn0="
-}
+{ "kind": "tool_call", "target": "web_search", "args": {...}, "idempotency": "safe_to_retry" }
 ```
 
-### GET /v0/executions/{id}
-
-Get the full state of a single execution.
-
-**Response** (200 OK):
+`kind` is `tool_call` or `llm_call`. The kernel recomputes the step ID and
+compares it to the header, runs the [replay short-circuit and policy](architecture.md),
+and returns a **decision**:
 
 ```json
-{
-  "id": "exec-abc123",
-  "status": "running",
-  "agent_id": "researcher",
-  "labels": {"env": "dev"},
-  "input": {"task": "find recent papers on transformers"},
-  "output": null,
-  "created_at": "2025-01-15T10:00:00Z",
-  "updated_at": "2025-01-15T10:00:05Z"
-}
+{ "decision": "proceed" }
 ```
 
-### POST /v0/executions/{id}/cancel
+| `decision` | Meaning |
+|------------|---------|
+| `proceed` | New step allowed — perform the effect, then call `complete`/`fail`. |
+| `replay` | Already recorded — `result` or `error` is returned; do **not** re-run. |
+| `denied` | Policy denied it; `reason` explains. |
+| `blocked` | Awaiting human approval; `approval_id` is returned. |
+| `execution_terminal` | The execution is cancelled/done; exit cleanly. |
 
-Cancel an execution. Returns the updated execution state.
+### Report a step outcome
 
-**Response** (200 OK):
+`POST /v0/executions/{id}/steps/{step_id}/complete` — body `{ "result": {...} }`.
+Records `step.succeeded`.
 
-```json
-{
-  "id": "exec-abc123",
-  "status": "cancelled",
-  "agent_id": "researcher",
-  "labels": {"env": "dev"},
-  "input": {"task": "find recent papers on transformers"},
-  "output": null,
-  "created_at": "2025-01-15T10:00:00Z",
-  "updated_at": "2025-01-15T10:01:00Z"
-}
-```
+`POST /v0/executions/{id}/steps/{step_id}/fail` — body `{ "error": {...} }`.
+Records `step.failed`.
 
-### POST /v0/executions/{id}/signal
+### Report execution outcome
 
-Send a signal to a blocked execution (e.g., human approval).
+`POST /v0/executions/{id}/complete` — body `{ "output": {...} }` → `204`. Records
+`execution.completed`.
 
-**Request:**
+`POST /v0/executions/{id}/fail` — body `{ "error": "..." }` → `204`. Records
+`execution.failed`.
 
-```json
-{
-  "signal_type": "approval",
-  "payload": {"approved": true}
-}
-```
+---
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `signal_type` | string | Yes | Type of signal |
-| `payload` | object | No | Signal payload data |
+## Admin API
 
-**Response** (200 OK):
+### Agents
 
-```json
-{
-  "status": "ok"
-}
-```
+`POST /v0/agents` · bearer — register/upsert. Body `{ "id", "webhook_url",
+"secret" }`. Returns `201`.
 
-### GET /v0/executions/{id}/stream
+`GET /v0/agents` · bearer — list (secrets redacted).
 
-SSE stream of execution events for real-time monitoring. This is a Server-Sent Events (SSE) endpoint, not a regular JSON endpoint. The connection remains open and events are pushed as they occur. The stream replays historical events first (after the specified sequence), then pushes new events in real time. The stream automatically closes when a terminal event (`execution.completed`, `execution.failed`, or `execution.cancelled`) is sent.
+`GET /v0/agents/{id}` · bearer — fetch one (secret redacted).
 
-**Query parameters:**
+`DELETE /v0/agents/{id}` · bearer → `204`.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `after_sequence` | int | `0` | Only stream events with sequence greater than this value (useful for resuming) |
+### Policy
 
-**Response:** SSE stream with `Content-Type: text/event-stream`.
+`POST /v0/policies/{agent_id}` · bearer — load/replace the agent's bundle. Body
+`{ "bundle": "<raw YAML>" }` → `204`. See [policy.md](policy.md).
 
-Each event is formatted as a standard SSE message:
+### Approvals
 
-```
-event: <event_type>
-id: <sequence_number>
-data: <JSON event object>
-```
+`GET /v0/approvals` · bearer — list pending approvals.
 
-The JSON event object has the same structure as events returned by `GET /v0/executions/{id}/events`.
+`GET /v0/approvals/{id}` · bearer — fetch one.
 
-Periodic `:heartbeat` comments are sent to detect dead connections.
+`POST /v0/approvals/{id}/grant` · bearer — body `{ "decided_by", "rationale?" }`
+→ `204`. Resumes the execution; the gated step proceeds.
 
-**Example:**
+`POST /v0/approvals/{id}/deny` · bearer — body `{ "decided_by", "rationale?" }`
+→ `204`. The resumed loop sees a policy error at that step.
 
-```
-event: execution.created
-id: 1
-data: {"id":"550e8400-...","execution_id":"exec-abc123","type":"execution.created","sequence":1,...}
-
-event: step.dispatched
-id: 2
-data: {"id":"661f9500-...","execution_id":"exec-abc123","type":"step.dispatched","sequence":2,...}
+---
 
-:heartbeat
-
-event: execution.completed
-id: 5
-data: {"id":"772a0600-...","execution_id":"exec-abc123","type":"execution.completed","sequence":5,...}
-```
-
-### GET /v0/executions/{id}/events
+## Operational
 
-List events for an execution with pagination.
-
-**Query parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `after_sequence` | int | `0` | Return events with sequence greater than this value |
-| `limit` | int | `100` | Maximum number of events (max 1000) |
-
-**Response** (200 OK):
+`GET /v0/health` — liveness (`{"status":"ok"}`).
 
-```json
-{
-  "events": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "execution_id": "exec-abc123",
-      "step_id": "",
-      "type": "execution.created",
-      "schema_version": 1,
-      "timestamp": "2025-01-15T10:00:00Z",
-      "payload": {"agent_id": "researcher", "input": {}, "labels": {}},
-      "causation_id": "550e8400-e29b-41d4-a716-446655440001",
-      "correlation_id": "550e8400-e29b-41d4-a716-446655440002",
-      "idempotency_key": "",
-      "sequence": 1
-    }
-  ],
-  "latest_sequence": 1
-}
-```
-
-## Agents
-
-### GET /v0/agents/stream
-
-Open an SSE connection for execution assignment and event push.
-
-**Query parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `agent_id` | string | Yes | Agent identifier |
-| `consumer_id` | string | Yes | Unique identifier for this SSE connection instance |
-
-**SSE events pushed:**
-
-| Event Type | When | Payload |
-|------------|------|---------|
-| `execution.assigned` | Work assigned to this agent | Execution state, session, input, history |
-| `tool.result` | Remote tool step completed/failed | step_id, status, result/error |
-| `signal.received` | Signal delivered | signal_type, payload |
-
-Periodic `:heartbeat` comments are sent to detect dead connections.
-
-### POST /v0/agents/intent
-
-Submit an intent for an execution.
-
-**Request:**
-
-```json
-{
-  "execution_id": "exec-123",
-  "session_id": "sess-456",
-  "intent": {
-    "type": "invoke_tool",
-    "tool_id": "web_search",
-    "arguments": {"query": "latest news"},
-    "idempotency_key": "exec-123:web_search:a1b2c3d4",
-    "remote": false
-  }
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `execution_id` | string | Yes | Execution ID |
-| `session_id` | string | Yes | Session ID |
-| `intent.type` | string | Yes | `invoke_tool`, `complete`, `fail`, or `wait` |
-| `intent.tool_id` | string | For `invoke_tool` | Tool to invoke |
-| `intent.arguments` | object | No | Tool arguments |
-| `intent.idempotency_key` | string | No | Deduplication key |
-| `intent.remote` | bool | No | Whether to dispatch to a runner |
-| `intent.output` | object | For `complete` | Execution output |
-| `intent.error` | string | For `fail` | Error message |
-| `intent.signal_type` | string | For `wait` | Signal type to wait for |
-
-**Response** (200 OK):
-
-```json
-{
-  "accepted": true,
-  "step_id": "step-789"
-}
-```
-
-On policy denial:
-
-```json
-{
-  "accepted": false,
-  "error": "Shell commands denied by default"
-}
-```
-
-### POST /v0/agents/step-result
-
-Report the result of a locally executed tool step.
-
-**Request:**
-
-```json
-{
-  "execution_id": "exec-123",
-  "session_id": "sess-456",
-  "step_id": "step-789",
-  "success": true,
-  "data": {"result": "search results here"}
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `execution_id` | string | Yes | Execution ID |
-| `session_id` | string | Yes | Session ID |
-| `step_id` | string | Yes | Step ID |
-| `success` | bool | Yes | Whether the tool succeeded |
-| `data` | object | On success | Tool result data |
-| `error` | string | On failure | Error message |
-
-**Response** (200 OK):
-
-```json
-{
-  "status": "ok"
-}
-```
-
-## Runners
-
-### GET /v0/runners/stream
-
-Open an SSE connection for job assignment.
-
-**Query parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `runner_id` | string | Yes | Runner identifier |
-| `consumer_id` | string | Yes | Unique identifier for this SSE connection instance |
-| `capabilities` | string | No | Comma-separated list of tool IDs this runner can execute |
-
-**SSE events pushed:**
-
-| Event Type | When | Payload |
-|------------|------|---------|
-| `job.assigned` | Job dispatched to this runner | Job (id, execution_id, step_id, tool_id, arguments, deadline) |
-
-Periodic `:heartbeat` comments are sent to detect dead connections. On disconnect, the runner is automatically unregistered. Each runner processes one job at a time -- the kernel tracks busy/idle state and dispatches accordingly.
-
-### POST /v0/runners/{id}/results
-
-Submit the result of a job execution.
-
-**Request:**
-
-```json
-{
-  "job_id": "job-xyz",
-  "execution_id": "exec-123",
-  "step_id": "step-789",
-  "success": true,
-  "data": {"results": [{"title": "..."}]},
-  "started_at": "2025-01-15T10:00:01Z",
-  "completed_at": "2025-01-15T10:00:03Z"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `job_id` | string | Yes | Job ID |
-| `execution_id` | string | Yes | Execution ID |
-| `step_id` | string | Yes | Step ID |
-| `success` | bool | Yes | Whether the tool succeeded |
-| `data` | object | On success | Tool result data |
-| `error` | string | On failure | Error message |
-| `retryable` | bool | No | Whether the kernel should retry on failure |
-| `started_at` | datetime | No | When execution started |
-| `completed_at` | datetime | No | When execution completed |
-
-**Response** (200 OK):
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### POST /v0/runners/steps/{stepId}/started
-
-Mark a step as started by the runner.
-
-**Request:**
-
-```json
-{
-  "execution_id": "exec-123",
-  "runner_id": "my-runner"
-}
-```
-
-**Response** (200 OK):
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### POST /v0/runners/{id}/capabilities
-
-Dynamically update the tool capabilities for a connected runner. Used by runners that discover tools at runtime (e.g., MCP-backed runners).
-
-**Request:**
-
-```json
-{
-  "tools": ["fs.read_file", "fs.write_file", "git.status"]
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `tools` | string[] | Yes | New list of tool IDs this runner supports (replaces the previous list) |
-
-**Response** (200 OK):
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### DELETE /v0/runners/{id}
-
-Unregister a runner.
-
-**Response** (204 No Content): Empty body.
-
-## Observability
-
-### GET /v0/health
-
-Liveness check. Always returns 200 if the kernel process is running.
-
-**Response** (200 OK):
-
-```json
-{
-  "status": "ok"
-}
-```
-
-### GET /v0/ready
-
-Readiness check. Returns 200 if the database is reachable.
-
-**Response** (200 OK):
-
-```json
-{
-  "status": "ready"
-}
-```
-
-**Response** (503 Service Unavailable):
-
-```json
-{
-  "error": "service unavailable: database not reachable",
-  "code": "SERVICE_UNAVAILABLE"
-}
-```
-
-### GET /metrics
-
-Prometheus metrics endpoint. Returns metrics in Prometheus exposition format.
-
-## Error Responses
-
-All errors return a JSON body:
-
-```json
-{
-  "error": "human-readable message",
-  "code": "VALIDATION_ERROR",
-  "details": null
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `error` | string | Human-readable error message |
-| `code` | string | Machine-readable error code |
-| `details` | any | Additional error details (typically null) |
-
-### Error Codes
-
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `NOT_FOUND` | 404 | Resource not found |
-| `CONFLICT` | 409 | State conflict (e.g., invalid state transition, step already resolved, execution tainted) |
-| `VALIDATION_ERROR` | 400 | Invalid request (missing fields, bad JSON, etc.) |
-| `FORBIDDEN` | 403 | Policy denied the request |
-| `UNAUTHORIZED` | 401 | Missing or invalid bearer token, or expired session |
-| `RATE_LIMITED` | 429 | Rate limit exceeded |
-| `INTERNAL_ERROR` | 500 | Unexpected kernel error |
-| `SERVICE_UNAVAILABLE` | 503 | Kernel dependency unavailable (e.g., database down) |
+`GET /v0/ready` — readiness; `503` if a dependency check fails.
+
+`GET /metrics` — Prometheus metrics.

@@ -1,104 +1,78 @@
 # Agents
 
-Agents are processes that receive executions via SSE, call tools, and produce results. They maintain a persistent SSE connection to the kernel and submit intents via HTTP.
+An agent is a **stateless HTTP service** registered with the kernel by name. It
+exposes a webhook the kernel POSTs to, and it drives its effects (tool and LLM
+calls) back through the kernel's API.
 
-## Lifecycle
+## Registering an agent
 
-1. **Connect** -- Agent opens an SSE connection to the kernel. The kernel assigns pending executions by pushing `execution.assigned` events.
-2. **Intent** -- Agent submits intents (invoke tool, complete, fail, wait). Each intent is policy-checked and produces events.
-3. **Step Result** -- After executing a tool locally, the agent reports the result via HTTP.
-4. **Disconnect** -- If the SSE connection drops, the kernel cleans up the session and returns the execution to pending state for reassignment.
+An agent needs a `webhook_url` and an HMAC `secret`. Register it via a
+provisioning manifest at kernel boot (`--config`), the REPL (`agent add`), or the
+admin API (`POST /v0/agents`). See [deployment.md](deployment.md#provisioning-agents).
 
-## API
-
-### Connect (SSE)
-
-```
-GET /v0/agents/stream?agent_id=researcher&consumer_id=instance-1
-Accept: text/event-stream
-```
-
-Opens a persistent SSE connection. The kernel pushes events:
-
-| Event Type | When | Payload |
-|------------|------|---------|
-| `execution.assigned` | Work assigned to this agent | Execution state, session, input, history |
-| `tool.result` | Remote tool step completed/failed | step_id, status, result/error |
-| `signal.received` | Signal delivered | signal_type, payload |
-
-Periodic `:heartbeat` comments are sent to detect dead connections.
-
-### Submit Intent
-
-```
-POST /v0/agents/intent
-{
-  "execution_id": "exec-123",
-  "session_id": "sess-456",
-  "intent": {
-    "type": "invoke_tool",
-    "tool_id": "web_search",
-    "arguments": {"query": "latest news"}
-  }
-}
+```yaml
+agents:
+  - id: researcher
+    webhook_url: http://localhost:5001/webhook
+    secret: researcher-secret
+    policy_file: policies/research.yaml
 ```
 
-Intent types:
+## The dispatch lifecycle
 
-| Type | Purpose | Required Fields |
-|------|---------|-----------------|
-| `invoke_tool` | Call a tool | `tool_id`, optionally `arguments`, `idempotency_key`, `remote` |
-| `complete` | Finish execution | `output` (JSON) |
-| `fail` | Fail execution | `error` (string) |
-| `wait` | Wait for signal | `signal_type` |
+Each time the kernel has work for an execution it POSTs the agent's webhook. The
+agent performs the same sequence on the first dispatch and on every resume — this
+is what makes crashes and approvals transparent:
 
-### Report Step Result
+1. **Dispatch.** The webhook arrives with `{execution_id, dispatch_id}`, signed
+   `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`. The agent verifies the
+   signature and acks with `200 OK` immediately. (Delivery is at-least-once, so the
+   handler must be safe under duplicate dispatch — key on `(execution_id, dispatch_id)`.)
+2. **Hydrate.** The agent fetches the execution's input
+   (`GET /v0/executions/{id}`) and its recorded steps
+   (`GET /v0/executions/{id}/steps?status=terminal`) so it can replay prior effects.
+3. **Run.** The agent runs its own logic from the top with the original input.
+4. **Submit each effect.** For every tool or LLM call, the agent submits a step
+   (`POST /v0/executions/{id}/steps`) and acts on the decision:
+   - `replay` → the recorded result is returned; **the effect does not run**.
+   - `proceed` → the agent performs the effect, then reports the outcome
+     (`.../complete` or `.../fail`).
+   - `denied` → policy rejected it; surface it as an error.
+   - `blocked` → a human approval is required (see below).
+   - `execution_terminal` → the execution is cancelled/done; exit cleanly.
+5. **Block.** On a `blocked` decision the agent stops and exits the dispatch
+   cleanly. The execution is `blocked` waiting on an approval. **The process may
+   die here** — no state is held in memory.
+6. **Resume.** When the approval resolves, the kernel re-dispatches. The agent runs
+   from the top again; every prior effect returns `replay`, and the
+   previously-blocked step now proceeds.
+7. **Complete.** When the agent's logic finishes, it reports the result
+   (`POST /v0/executions/{id}/complete`), and the kernel records
+   `execution.completed`.
 
-After executing a tool locally:
+See the [HTTP API](api.md) for the exact request and response shapes, and
+[architecture.md](architecture.md) for how step identity makes replay work.
 
-```
-POST /v0/agents/step-result
-{
-  "execution_id": "exec-123",
-  "session_id": "sess-456",
-  "step_id": "step-789",
-  "success": true,
-  "data": {"result": "search results here"}
-}
-```
+## What an agent must guarantee
 
-## Consumer ID
+Replay only short-circuits correctly if the agent reaches the **same sequence of
+effects** given the same input and the same prior results:
 
-The `consumer_id` query parameter on the SSE connection identifies a specific SSE connection instance for a given agent or runner.
+- The order of tool and LLM calls must be a function of the input and prior effect
+  results — not of wall-clock time, random numbers, or other local non-determinism.
+- Non-deterministic work that changes *which* effects fire must itself be expressed
+  as a recorded effect (a tool call), so it replays to the same value.
 
-- **Multiple consumers**: Multiple processes can connect with the same `agent_id` but different `consumer_id` values. This provides redundancy and horizontal scaling for a single agent type.
-- **Round-robin assignment**: The kernel round-robins execution assignments across all connected consumers for the same `agent_id`. If two consumers are connected as `agent_id=researcher`, each gets roughly half the executions.
-- **Uniqueness**: Each `consumer_id` must be unique per active connection. Connecting with a `consumer_id` that is already in use will replace the previous connection.
-- **Auto-generation**: The Python SDK auto-generates `consumer_id` as `{agent_id}-{random}` if not explicitly provided.
+Rebuno records **effects, not conversations**. It does not reconstruct framework or
+conversation state — the agent reloads whatever context it needs from its own store
+at the start of each dispatch.
 
-```
-# Two instances of the same agent for load distribution
-GET /v0/agents/stream?agent_id=researcher&consumer_id=researcher-instance-1
-GET /v0/agents/stream?agent_id=researcher&consumer_id=researcher-instance-2
-```
+## Idempotency and at-least-once delivery
 
-## Sessions
+Webhook delivery is at-least-once, and two kernel replicas can race the same
+execution. This is safe: every effect the agent re-issues short-circuits on its
+step ID, so duplicate or concurrent dispatches converge rather than double-run.
 
-A session is created when the kernel assigns an execution to an agent via SSE. It ties the agent's SSE connection to the execution. If the SSE connection drops, the session is deleted and the execution is returned to pending state for reassignment.
-
-## Remote Tool Execution
-
-Set `"remote": true` on an `invoke_tool` intent to dispatch the tool call to a runner instead of executing locally. The kernel pushes a `job.assigned` event to an idle runner with the matching capability via SSE. Runners maintain a persistent SSE connection (`GET /v0/runners/stream`) and process one job at a time.
-
-## Timeouts
-
-The kernel supports two timeout layers:
-
-| Timeout | Default | Description |
-|---------|---------|-------------|
-| `StepTimeout` | 5 min | Default deadline for a single tool step. Can be overridden per policy rule via `timeout_ms`. |
-| `ExecutionTimeout` | 1 hour | Maximum wall-clock time for an entire execution. |
-
-Agent connectivity is monitored via the SSE connection. If the connection drops, the kernel handles disconnect and returns the execution to pending state. The `--agent-timeout` configuration controls the session expiry grace period.
-
-Policy rules can set `timeout_ms` in their `then` block to override the global step timeout for matching tool invocations. See [Policy](policy.md) for details.
+When a crash orphans an effect (a step started but never recorded a result), how
+the kernel recovers depends on the step's declared idempotency mode. See
+[tools.md](tools.md#idempotency-modes).

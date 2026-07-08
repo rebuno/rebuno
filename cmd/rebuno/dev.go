@@ -2,201 +2,91 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
-	"github.com/rebuno/rebuno/internal/api"
-	"github.com/rebuno/rebuno/internal/hub"
+	"github.com/rebuno/rebuno/internal/config"
 	"github.com/rebuno/rebuno/internal/kernel"
-	"github.com/rebuno/rebuno/internal/lifecycle"
-	"github.com/rebuno/rebuno/internal/memstore"
 	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/store/memstore"
 )
 
-func devCmd() *cobra.Command {
-	var (
-		port         int
-		bind         string
-		policyFile   string
-		corsOrigins  string
-		logLevel     string
-		logFormat    string
-		agentTimeout time.Duration
-	)
+func bindDevFlags(f *pflag.FlagSet, cfg *config.Config, configPath *string) {
+	f.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "HTTP listen address")
+	f.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "Log level (debug, info, warn, error)")
+	f.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log format (json, text)")
+	f.StringVar(configPath, "config", *configPath, "Path to a provisioning manifest registering agents and policies")
+}
 
+func devCmd() *cobra.Command {
+	cfg := config.FromEnv()
+	var configPath string
 	cmd := &cobra.Command{
 		Use:   "dev",
-		Short: "Start a development kernel (in-memory, no dependencies)",
+		Short: "Start a development kernel (in-memory, no auth, no dependencies)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDev(port, bind, policyFile, corsOrigins, logLevel, logFormat, agentTimeout)
+			cfg.DevMode = true
+			cfg.AgentBearerToken = "" // auth disabled in dev
+			return runDev(cfg, configPath)
 		},
 	}
-
-	cmd.Flags().IntVar(&port, "port", 8080, "Kernel listen port")
-	cmd.Flags().StringVar(&bind, "bind", "127.0.0.1", "Bind address")
-	cmd.Flags().StringVar(&policyFile, "policy", "", "Policy file or directory path")
-	cmd.Flags().StringVar(&corsOrigins, "cors-origins", "*", "CORS origins")
-	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level")
-	cmd.Flags().StringVar(&logFormat, "log-format", "text", "Log format (json, text)")
-	cmd.Flags().DurationVar(&agentTimeout, "agent-timeout", 30*time.Second, "Agent session timeout")
-
+	bindDevFlags(cmd.Flags(), &cfg, &configPath)
 	return cmd
 }
 
-func runDev(port int, bind, policyFile, corsOrigins, logLevel, logFormat string, agentTimeout time.Duration) error {
-	logger := observe.NewLogger(logLevel, logFormat)
+func runDev(cfg config.Config, configPath string) error {
+	logger := observe.NewLogger(cfg.LogLevel, cfg.LogFormat)
 	slog.SetDefault(logger)
-
-	addr := fmt.Sprintf("%s:%d", bind, port)
-	policyStatus := "permissive (all tools allowed)"
-
-	eventStore := memstore.NewEventStore()
-	checkpointStore := memstore.NewCheckpointStore()
-	signalStore := memstore.NewSignalStore()
-	sessionStore := memstore.NewSessionStore()
-	runnerStore := memstore.NewRunnerStore()
-	locker := memstore.NewLocker()
-
-	agentHub := hub.New(logger)
-	defer agentHub.Close()
-	runnerHub := hub.NewRunnerHub(logger)
-	defer runnerHub.Close()
-
-	var policyEngine policy.Engine
-	if policyFile != "" {
-		info, err := os.Stat(policyFile)
-		if err != nil {
-			return fmt.Errorf("reading policy path: %w", err)
-		}
-		if info.IsDir() {
-			result, err := policy.LoadDir(policyFile)
-			if err != nil {
-				return fmt.Errorf("loading policy directory: %w", err)
-			}
-			agentEngine, err := policy.NewAgentEngine(result)
-			if err != nil {
-				return fmt.Errorf("creating agent engine: %w", err)
-			}
-			policyEngine = policy.NewSecureDefaultEngine(agentEngine)
-			policyStatus = fmt.Sprintf("%s (%d agents loaded)", policyFile, len(agentEngine.Agents()))
-		} else {
-			policyCfg, err := policy.Load(policyFile)
-			if err != nil {
-				return fmt.Errorf("loading policy: %w", err)
-			}
-			ruleEngine, err := policy.NewRuleEngine(*policyCfg)
-			if err != nil {
-				return fmt.Errorf("creating rule engine: %w", err)
-			}
-			policyEngine = policy.NewSecureDefaultEngine(ruleEngine)
-			policyStatus = fmt.Sprintf("%s (%d rules loaded)", policyFile, len(policyCfg.Rules))
-		}
-	} else {
-		policyEngine = policy.NewPermissiveEngine(logger)
-	}
-
-	fmt.Printf("\nrebuno dev — development mode\n\n")
-	fmt.Printf("  kernel    http://%s\n", addr)
-	fmt.Printf("  policy    %s\n", policyStatus)
-	fmt.Printf("  storage   in-memory (data lost on restart)\n\n")
-	fmt.Printf("  Waiting for agents...\n\n")
-
-	metrics := observe.NewMetrics()
-	kcfg := kernel.DefaultKernelConfig()
-	if agentTimeout > 0 {
-		kcfg.AgentTimeout = agentTimeout
-	}
-
-	k := kernel.NewKernel(kernel.Deps{
-		Events:      eventStore,
-		Checkpoints: checkpointStore,
-		AgentHub:    agentHub,
-		RunnerHub:   runnerHub,
-		Signals:     signalStore,
-		Sessions:    sessionStore,
-		Runners:     runnerStore,
-		Locker:      locker,
-		Policy:      policyEngine,
-		Logger:      logger,
-		Metrics:     metrics,
-		Config:      kcfg,
-		RateLimiter: ratelimit.NewMemoryLimiter(),
-	})
-	defer k.Shutdown()
-
-	agentHub.SetOnEvict(func(sessionIDs []string) {
-		for _, sid := range sessionIDs {
-			dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Second)
-			k.HandleAgentDisconnect(dctx, sid)
-			dcancel()
-		}
-	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	k.StartRetryDispatcher(ctx)
 
-	lm := lifecycle.NewManager(lifecycle.Deps{
-		Events:           eventStore,
-		Sessions:         sessionStore,
-		Checkpoints:      checkpointStore,
-		Signals:          signalStore,
-		AgentHub:         agentHub,
-		Locker:           locker,
-		Projector:        k.Projector(),
-		Emitter:          k,
-		Assigner:         k,
-		Logger:           logger,
-		Metrics:          metrics,
-		ExecutionTimeout: kcfg.ExecutionTimeout,
-		AgentTimeout:     kcfg.AgentTimeout,
-	})
-	lm.StartSessionReaper(ctx)
-	lm.StartTimeoutWatcher(ctx)
-	lm.RecoverActiveExecutions(ctx)
-	if err := k.RecoverPendingRetries(ctx); err != nil {
-		logger.Error("failed to recover pending retries", "error", err)
-	}
-
-	srv := api.NewServer(api.ServerDeps{
-		Kernel:      k,
-		Pool:        nil, // no database in dev mode
-		Hub:         agentHub,
-		RunnerHub:   runnerHub,
+	s := memstore.NewStore()
+	deps := kernel.Deps{
+		Events:      s,
+		Steps:       s,
+		Executions:  s,
+		Agents:      s,
+		Approvals:   s,
+		Queue:       s,
+		Locker:      s,
+		UnitOfWork:  s,
+		Policy:      policy.NewBundleResolver(s, policy.PermissiveEngine{}),
+		RateLimiter: ratelimit.NewMemoryLimiter(),
 		Logger:      logger,
-		BearerToken: "",
-		CORSOrigins: corsOrigins,
-	})
+	}
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.ListenAndServe(addr)
-	}()
+	replicaID := "dev-" + time.Now().Format("20060102-150405")
+	k := kernel.New(kernel.Config{ReplicaID: replicaID}, deps)
 
-	select {
-	case <-ctx.Done():
-		logger.Info("shutdown signal received")
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("server error: %w", err)
+	agentsDesc := "none (use --config <file> or the REPL to register agents)"
+	if configPath != "" {
+		agents, err := loadAgentConfig(configPath)
+		if err != nil {
+			return err
 		}
+		if err := registerAgents(ctx, k, agents); err != nil {
+			return err
+		}
+		agentsDesc = fmt.Sprintf("%d provisioned from %s", len(agents), configPath)
 	}
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("server shutdown error", "error", err)
+	fmt.Printf("\nrebuno dev — development mode\n\n")
+	fmt.Printf("  kernel    http://%s\n", cfg.ListenAddr)
+	fmt.Printf("  agents    %s\n", agentsDesc)
+	fmt.Printf("  storage   in-memory (data lost on restart)\n\n")
+
+	if isInteractive() {
+		go runREPL(ctx, k, cancel)
 	}
 
-	return nil
+	return serve(ctx, cfg, deps, logger, replicaID, nil)
 }

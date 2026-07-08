@@ -1,4 +1,4 @@
-.PHONY: build dev test test-integration lint clean docker-build docker-up docker-down demo demo-client tidy fmt
+.PHONY: build dev test lint clean tidy fmt
 
 VERSION ?= dev
 
@@ -11,9 +11,6 @@ dev:
 
 test:
 	go test -race ./...
-
-test-integration:
-	go test -tags integration -count=1 -v ./tests/integration/...
 
 lint:
 	golangci-lint run ./...
