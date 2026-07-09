@@ -57,6 +57,10 @@ func (k *KernelAPI) FailStep(ctx context.Context, stepID string, req kernel.Fail
 	return k.Inner.FailStep(ctx, stepID, req)
 }
 
+func (k *KernelAPI) Heartbeat(ctx context.Context, execID uuid.UUID) error {
+	return k.Inner.Heartbeat(ctx, execID)
+}
+
 func (k *KernelAPI) CompleteExecution(ctx context.Context, execID uuid.UUID, output json.RawMessage) error {
 	return k.Inner.CompleteExecution(ctx, execID, output)
 }

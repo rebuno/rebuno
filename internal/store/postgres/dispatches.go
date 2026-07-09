@@ -137,6 +137,28 @@ func listDispatchesByExecution(ctx context.Context, q Querier, execID uuid.UUID)
 	return scanDispatches(rows)
 }
 
+func (s *Store) TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error {
+	return touchDispatch(ctx, s.pool, execID, now)
+}
+
+func (q querier) TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error {
+	return touchDispatch(ctx, q.q, execID, now)
+}
+
+func touchDispatch(ctx context.Context, q Querier, execID uuid.UUID, now time.Time) error {
+	// No RowsAffected check: zero rows just means no live dispatch to renew
+	// (raced an ack/reclaim), which is a harmless no-op.
+	_, err := q.Exec(ctx, `
+		UPDATE dispatches
+		SET locked_at = $2, updated_at = $2
+		WHERE execution_id = $1 AND status = 'in_flight'
+	`, execID.String(), now)
+	if err != nil {
+		return fmt.Errorf("touch dispatch: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
 	return reclaimStalled(ctx, s.pool, now, leaseTimeout, batch)
 }

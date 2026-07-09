@@ -52,6 +52,7 @@ type JobQueue interface {
 	Claim(ctx context.Context, replica string, batch int, now time.Time) ([]domain.Dispatch, error)
 	Ack(ctx context.Context, id uuid.UUID, status domain.DispatchStatus, nextAttemptAt *time.Time) error
 	ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error)
+	TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error
 	// ReclaimStalled resets in_flight dispatches whose lease has expired back to
 	// pending so another replica can claim them.
 	ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error)

@@ -18,6 +18,7 @@ type AgentKernel interface {
 	SubmitStep(ctx context.Context, execID uuid.UUID, req kernel.SubmitStepRequest) (domain.StepDecision, error)
 	CompleteStep(ctx context.Context, stepID string, req kernel.CompleteStepRequest) (domain.StepDecision, error)
 	FailStep(ctx context.Context, stepID string, req kernel.FailStepRequest) (domain.StepDecision, error)
+	Heartbeat(ctx context.Context, execID uuid.UUID) error
 	CompleteExecution(ctx context.Context, execID uuid.UUID, output json.RawMessage) error
 	FailExecution(ctx context.Context, execID uuid.UUID, reason string) error
 }
@@ -112,6 +113,19 @@ func (rt *Router) failStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, dec, http.StatusOK)
+}
+
+func (rt *Router) heartbeat(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
+	if err := rt.agent.Heartbeat(r.Context(), id); err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteNoContent(w)
 }
 
 func (rt *Router) agentCompleteExecution(w http.ResponseWriter, r *http.Request) {

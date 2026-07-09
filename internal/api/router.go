@@ -64,6 +64,7 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(hmac).Post("/v0/executions/{id}/steps", r.submitStep)
 	mux.With(hmac).Post("/v0/executions/{id}/steps/{step_id}/complete", r.completeStep)
 	mux.With(hmac).Post("/v0/executions/{id}/steps/{step_id}/fail", r.failStep)
+	mux.With(hmac).Post("/v0/executions/{id}/heartbeat", r.heartbeat)
 	mux.With(hmac).Post("/v0/executions/{id}/complete", r.agentCompleteExecution)
 	mux.With(hmac).Post("/v0/executions/{id}/fail", r.agentFailExecution)
 

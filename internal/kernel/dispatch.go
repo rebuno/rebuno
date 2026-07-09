@@ -72,6 +72,10 @@ func (k *Kernel) EnqueueReDrive(ctx context.Context, execID uuid.UUID) error {
 	return k.enqueueDispatch(ctx, execID)
 }
 
+func (k *Kernel) Heartbeat(ctx context.Context, execID uuid.UUID) error {
+	return k.d.Queue.TouchDispatch(ctx, execID, time.Now().UTC())
+}
+
 func (k *Kernel) RunDispatches(ctx context.Context, batch int) error {
 	now := time.Now().UTC()
 	// Reclaim dispatches left in_flight by a crashed replica before claiming new work.

@@ -96,6 +96,23 @@ func (s *Store) listDispatchesByExecutionLocked(ctx context.Context, execID uuid
 	return out, nil
 }
 
+func (s *Store) TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.touchDispatchLocked(ctx, execID, now)
+}
+
+func (s *Store) touchDispatchLocked(ctx context.Context, execID uuid.UUID, now time.Time) error {
+	for id, d := range s.dispatches {
+		if d.ExecutionID == execID && d.Status == domain.DispatchInFlight {
+			d.LockedAt = timePtr(now)
+			d.UpdatedAt = now
+			s.dispatches[id] = d
+		}
+	}
+	return nil
+}
+
 func (s *Store) ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -143,6 +160,10 @@ func (tx *txStore) Ack(ctx context.Context, id uuid.UUID, status domain.Dispatch
 
 func (tx *txStore) ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error) {
 	return tx.listDispatchesByExecutionLocked(ctx, execID)
+}
+
+func (tx *txStore) TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error {
+	return tx.touchDispatchLocked(ctx, execID, now)
 }
 
 func (tx *txStore) ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
