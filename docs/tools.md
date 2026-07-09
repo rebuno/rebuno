@@ -63,9 +63,7 @@ idempotency key.
 ## LLM calls
 
 An LLM call is an `llm_call` step submitted the same way, with the model as
-`target` and the request body as the arguments. Its identity is computed over a
-canonical form of the request (messages, tools, model, sampling params) and
-excludes operational noise (request IDs, trace headers, streaming flag). A recorded
-LLM call replays from the log — **no provider call ever happens on replay** — and
-its `step.succeeded` event carries the response, token counts, and cost. See
-[events.md](events.md#step) and [policy.md](policy.md).
+`target` and the request body as the arguments — but because the request is buried
+inside a provider SDK it must be **intercepted** before it can be recorded. That
+mechanism, and how to implement it against your own LLM gateway, has its own page:
+[LLM calls](llm-calls.md).
