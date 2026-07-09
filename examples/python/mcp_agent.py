@@ -6,7 +6,7 @@ from langchain_openai import ChatOpenAI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from rebuno import Agent
+from rebuno import Agent, http_client
 from rebuno.mcp import wrap_mcp_tools
 
 logging.basicConfig(
@@ -40,7 +40,7 @@ async def process(query: str) -> dict:
             )
             logger.info("MCP tools: %s", [t.__name__ for t in tools])
 
-            llm = ChatOpenAI(model=MODEL, temperature=0)
+            llm = ChatOpenAI(model=MODEL, temperature=0, http_async_client=http_client())
             graph = create_agent(model=llm, tools=tools, system_prompt=SYSTEM_PROMPT)
             result = await graph.ainvoke({"messages": [{"role": "user", "content": query}]})
             answer = result["messages"][-1].content
