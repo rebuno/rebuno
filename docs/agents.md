@@ -53,6 +53,32 @@ is what makes crashes and approvals transparent:
 See the [HTTP API](api.md) for the exact request and response shapes, and
 [architecture.md](architecture.md) for how step identity makes replay work.
 
+## Intercepting LLM calls
+
+Tool calls are explicit in agent code, so wrapping them is straightforward. LLM
+calls are different: they are HTTP requests buried inside a model provider's SDK
+or an agent framework, and the agent never issues them by hand. For an LLM call
+to be durable it must be **intercepted at the HTTP layer** and put through the
+same step contract as any other effect (step 4 above):
+
+- Treat each outbound LLM request as an `llm_call` step: `target` is the model
+  id, and the arguments are the request body.
+- On `replay`, return the recorded provider response and **skip the network
+  call**. On `proceed`, forward the request to the provider, then record the
+  response as the step outcome.
+
+Without this interception an LLM call is invisible to the kernel and re-runs on
+every resume — burning tokens and, because model output varies, breaking the
+determinism replay depends on.
+
+The Rebuno SDKs ship an interceptor you drop into your model client, so this is
+transparent. **You don't need the SDK for it, though** — the contract is just
+HTTP. If you already run your own LLM gateway or proxy in front of your
+providers, implement the same steps there: for each request compute the step ID,
+submit the step to `POST /v0/executions/{id}/steps`, and either replay the
+recorded response or forward-and-record based on the decision. Any interception
+point that speaks the step contract makes LLM calls durable.
+
 ## What an agent must guarantee
 
 Replay only short-circuits correctly if the agent reaches the **same sequence of
