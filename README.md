@@ -45,7 +45,8 @@ Start here:
 Reference:
 
 - [Agents](docs/agents.md) — how an agent process receives work and drives its effects.
-- [Tools](docs/tools.md) — the `@tool` decorator, step identity, and idempotency.
+- [Tools](docs/tools.md) — tools, step identity, and idempotency.
+- [LLM calls](docs/llm-calls.md) — intercepting LLM requests so they replay durably.
 - [Policy](docs/policy.md) — the YAML rule language for allow / deny / require-approval.
 - [Events](docs/events.md) — the event taxonomy and payloads.
 - [HTTP API](docs/api.md) — the `/v0` client, agent, and admin endpoints.
