@@ -5,3 +5,4 @@ __pycache__/
 dist/
 .claude/
 .env
+.codegraph/
