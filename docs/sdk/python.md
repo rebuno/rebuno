@@ -33,9 +33,10 @@ signed webhooks, verifies the HMAC, binds an execution context, and runs your
 `process` function — identically on first dispatch and on every resume.
 
 `agent.run(process, port=...)` starts serving. `process` receives the execution's
-input and returns its output. Effects inside it — `@tool` calls and intercepted
-LLM calls — short-circuit automatically on replay; your code can't tell whether a
-call ran for real or returned a recorded result. See [agents.md](../agents.md).
+input and returns its output. Effects inside it — `@tool` calls and LLM calls
+routed through [`http_client()`](#http_client--durable-llm-calls) — short-circuit
+on replay; your code can't tell whether a call ran for real or returned a recorded
+result. See [agents.md](../agents.md).
 
 ### `@tool` decorator
 
@@ -53,6 +54,32 @@ async def shell_exec(command: str) -> dict: ...
 Each call becomes a recorded `tool_call` step. `idempotency` is `safe_to_retry`
 (default) or `at_most_once` — it controls recovery when a crash orphans the step.
 See [tools.md](../tools.md).
+
+### `http_client()` — durable LLM calls
+
+Unlike `@tool` calls, LLM calls are only durable if you route them through
+Rebuno. `http_client()` returns an `httpx.AsyncClient` that records each LLM
+request as an `llm_call` step; on resume the recorded response replays instead
+of hitting the provider again. **Without it, LLM calls are not intercepted and
+re-run on every resume** — burning tokens and breaking determinism.
+
+Pass it to your LLM client's async HTTP client argument:
+
+```python
+from rebuno import http_client
+from langchain_openai import ChatOpenAI
+
+# LangChain
+llm = ChatOpenAI(model="gpt-4o-mini", http_async_client=http_client())
+
+# OpenAI SDK directly
+from openai import AsyncOpenAI
+llm = AsyncOpenAI(http_client=http_client())
+```
+
+`model_field` names the request-body field holding the model id (used as the
+step `target`); it defaults to `"model"`. Streaming responses (`stream=True`)
+are not recorded yet — they pass through and are **not** durable.
 
 ## Driving executions (client)
 

@@ -7,7 +7,7 @@ import os
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
-from rebuno import Agent, tool
+from rebuno import Agent, http_client, tool
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
@@ -58,7 +58,7 @@ async def calculator(expression: str) -> dict:
 
 
 async def process(query: str) -> dict:
-    llm = ChatOpenAI(model=MODEL, temperature=0)
+    llm = ChatOpenAI(model=MODEL, temperature=0, http_async_client=http_client())
     graph = create_agent(
         model=llm,
         tools=[web_search, doc_fetch, calculator],
