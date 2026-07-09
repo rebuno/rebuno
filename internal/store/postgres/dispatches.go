@@ -101,7 +101,7 @@ func ackDispatch(ctx context.Context, q Querier, id uuid.UUID, status domain.Dis
 		SET status = $2,
 		    locked_by = NULL,
 		    locked_at = NULL,
-		    next_attempt_at = $3,
+		    next_attempt_at = COALESCE($3, next_attempt_at),
 		    updated_at = $4
 		WHERE id = $1
 	`, id.String(), string(status), timeArg(nextAttemptAt), now)
