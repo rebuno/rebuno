@@ -44,6 +44,7 @@ type ApprovalStore interface {
 	GetApproval(ctx context.Context, id uuid.UUID) (domain.Approval, error)
 	UpdateApproval(ctx context.Context, approval domain.Approval) error
 	ListPendingApprovals(ctx context.Context) ([]domain.Approval, error)
+	ListPendingApprovalsByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Approval, error)
 	ListExpiredApprovals(ctx context.Context, now time.Time) ([]domain.Approval, error)
 }
 
