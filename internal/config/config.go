@@ -89,6 +89,11 @@ func FromEnv() Config {
 			cfg.DeadlineTimeout = d
 		}
 	}
+	if v := os.Getenv("REBUNO_APPROVAL_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.DefaultApprovalTimeout = d
+		}
+	}
 	if v := os.Getenv("REBUNO_CLEANUP_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.CleanupInterval = d
