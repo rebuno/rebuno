@@ -42,7 +42,7 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 	approval.DecidedAt = &now
 	approval.Rationale = req.Rationale
 
-	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 		step, err := tx.GetStep(ctx, approval.StepID)
 		if err != nil {
 			return err
@@ -68,7 +68,11 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 		}
 		// Resume the execution by enqueueing a dispatch atomically.
 		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID)
-	})
+	}); err != nil {
+		return err
+	}
+	k.d.Observer.RecordApprovalOutcome("granted")
+	return nil
 }
 
 func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprovalRequest) error {
@@ -93,7 +97,7 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 	approval.Rationale = req.Rationale
 
 	errPayload, _ := json.Marshal(map[string]string{"reason": "approval_denied"})
-	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 		step, err := tx.GetStep(ctx, approval.StepID)
 		if err != nil {
 			return err
@@ -121,7 +125,11 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		}
 		// Resume the execution by enqueueing a dispatch atomically.
 		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID)
-	})
+	}); err != nil {
+		return err
+	}
+	k.d.Observer.RecordApprovalOutcome("denied")
+	return nil
 }
 
 func (k *Kernel) ListPendingApprovals(ctx context.Context) ([]domain.Approval, error) {

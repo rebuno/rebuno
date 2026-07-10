@@ -29,6 +29,8 @@ const (
 	dispatchesReclaimedTotal  = "dispatches_reclaimed_total"
 	queueDepthName            = "queue_depth"
 	policyLatencyName         = "policy_latency_seconds"
+	policyDecisionsTotalName  = "policy_decisions_total"
+	approvalOutcomesTotalName = "approval_outcomes_total"
 	stepsSubmittedTotalName   = "steps_submitted_total"
 	executionsCreatedTotal    = "executions_created_total"
 	executionsCompletedTotal  = "executions_completed_total"
@@ -51,6 +53,8 @@ type Observer struct {
 	dispatchesReclaimed   prometheus.Counter
 	queueDepth            prometheus.Gauge
 	policyLatency         prometheus.Histogram
+	policyDecisions       *prometheus.CounterVec
+	approvalOutcomes      *prometheus.CounterVec
 	stepsSubmittedTotal   *prometheus.CounterVec
 	executionsCreated     prometheus.Counter
 	executionsCompleted   *prometheus.CounterVec
@@ -119,6 +123,18 @@ func New() *Observer {
 			Buckets:   prometheus.DefBuckets,
 		}),
 
+		policyDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      policyDecisionsTotalName,
+			Help:      "Policy evaluation outcomes labelled by decision (allow, deny, require_approval).",
+		}, []string{"decision"}),
+
+		approvalOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      approvalOutcomesTotalName,
+			Help:      "HITL approval outcomes labelled by outcome (granted, denied, expired).",
+		}, []string{"outcome"}),
+
 		stepsSubmittedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: Namespace,
 			Name:      stepsSubmittedTotalName,
@@ -170,6 +186,8 @@ func New() *Observer {
 		obs.dispatchesReclaimed,
 		obs.queueDepth,
 		obs.policyLatency,
+		obs.policyDecisions,
+		obs.approvalOutcomes,
 		obs.stepsSubmittedTotal,
 		obs.executionsCreated,
 		obs.executionsCompleted,
@@ -254,6 +272,20 @@ func (o *Observer) RecordPolicyLatency(d time.Duration) {
 		return
 	}
 	o.policyLatency.Observe(d.Seconds())
+}
+
+func (o *Observer) RecordPolicyDecision(decision string) {
+	if o == nil {
+		return
+	}
+	o.policyDecisions.WithLabelValues(decision).Inc()
+}
+
+func (o *Observer) RecordApprovalOutcome(outcome string) {
+	if o == nil {
+		return
+	}
+	o.approvalOutcomes.WithLabelValues(outcome).Inc()
 }
 
 func (o *Observer) RecordStepSubmitted(kind string) {
