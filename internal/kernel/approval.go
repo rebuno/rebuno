@@ -102,7 +102,7 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 			{Type: domain.EventApprovalDenied, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
 			{Type: domain.EventStepDenied, Payload: projector.StepPayload(approval.StepID, step.Kind, "", "")},
 			{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(approval.StepID, step.Kind, errPayload)},
-			{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
+			{Type: domain.EventExecutionFailed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionFailed, nil, "approval_denied")},
 		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 			return err
@@ -116,11 +116,7 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		if err := tx.Upsert(ctx, step); err != nil {
 			return err
 		}
-		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
-			return err
-		}
-		// Resume the execution by enqueueing a dispatch atomically.
-		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID)
+		return tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionFailed, nil, "approval_denied")
 	})
 }
 
