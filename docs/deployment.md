@@ -79,6 +79,7 @@ Additional environment-only settings:
 | `REBUNO_DISPATCH_CONCURRENCY` | `8` | Concurrent dispatch workers per replica. |
 | `REBUNO_DISPATCH_LEASE_TIMEOUT` | — | How long a claimed dispatch stays owned before the reaper reclaims it. |
 | `REBUNO_DEADLINE_TIMEOUT` | — | Max execution lifetime before auto-cancel. |
+| `REBUNO_APPROVAL_TIMEOUT` | `15m` | Default time an approval can stay pending before it expires (execution fails). |
 | `REBUNO_CLEANUP_INTERVAL` | `10m` | Interval between retention sweeps. |
 | `REBUNO_RETENTION` | `24h` | How long terminal executions are kept. |
 | `REBUNO_LEADER_LOCK_KEY` | `rebuno_scheduler_leader` | Advisory-lock key for leader election. |
