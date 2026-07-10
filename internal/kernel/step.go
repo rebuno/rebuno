@@ -98,6 +98,7 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
+	k.d.Observer.RecordPolicyDecision(polResult.Decision)
 	return k.recordStepDecision(ctx, execID, exec.AgentID, req.StepID, req, argsHash, occurrence, polResult)
 }
 
