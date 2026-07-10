@@ -42,20 +42,23 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 	approval.DecidedAt = &now
 	approval.Rationale = req.Rationale
 
-	evts := []store.EventRecord{
-		{Type: domain.EventApprovalGranted, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalGranted, req.DecidedBy, req.Rationale)},
-		{Type: domain.EventStepAllowed, Payload: projector.StepPayload(approval.StepID, domain.StepKindTool, "", "")},
-		{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
-	}
 	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		step, err := tx.GetStep(ctx, approval.StepID)
+		if err != nil {
+			return err
+		}
+		evts := []store.EventRecord{
+			{Type: domain.EventApprovalGranted, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalGranted, req.DecidedBy, req.Rationale)},
+			{Type: domain.EventStepAllowed, Payload: projector.StepPayload(approval.StepID, step.Kind, "", "")},
+			{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
+		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 			return err
 		}
 		// Update the projected step so replay sees it as allowed/ready.
-		step, err := tx.GetStep(ctx, approval.StepID)
-		if err == nil {
-			step.Status = domain.StepAllowed
-			_ = tx.Upsert(ctx, step)
+		step.Status = domain.StepAllowed
+		if err := tx.Upsert(ctx, step); err != nil {
+			return err
 		}
 		if err := tx.UpdateApproval(ctx, approval); err != nil {
 			return err
@@ -90,25 +93,28 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 	approval.Rationale = req.Rationale
 
 	errPayload, _ := json.Marshal(map[string]string{"reason": "approval_denied"})
-	evts := []store.EventRecord{
-		{Type: domain.EventApprovalDenied, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
-		{Type: domain.EventStepDenied, Payload: projector.StepPayload(approval.StepID, domain.StepKindTool, "", "")},
-		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(approval.StepID, domain.StepKindTool, errPayload)},
-		{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
-	}
 	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		step, err := tx.GetStep(ctx, approval.StepID)
+		if err != nil {
+			return err
+		}
+		evts := []store.EventRecord{
+			{Type: domain.EventApprovalDenied, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
+			{Type: domain.EventStepDenied, Payload: projector.StepPayload(approval.StepID, step.Kind, "", "")},
+			{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(approval.StepID, step.Kind, errPayload)},
+			{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
+		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 			return err
 		}
 		if err := tx.UpdateApproval(ctx, approval); err != nil {
 			return err
 		}
-		step, err := tx.GetStep(ctx, approval.StepID)
-		if err == nil {
-			step.Status = domain.StepFailed
-			step.Error = errPayload
-			step.CompletedAt = &now
-			_ = tx.Upsert(ctx, step)
+		step.Status = domain.StepFailed
+		step.Error = errPayload
+		step.CompletedAt = &now
+		if err := tx.Upsert(ctx, step); err != nil {
+			return err
 		}
 		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
 			return err

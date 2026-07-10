@@ -70,22 +70,25 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 	approval.Rationale = "timeout"
 
 	errPayload, _ := json.Marshal(map[string]string{"reason": "approval_timeout"})
-	evts := []store.EventRecord{
-		{Type: domain.EventApprovalExpired, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
-		{Type: domain.EventStepDenied, Payload: projector.StepPayload(approval.StepID, domain.StepKindTool, "", "")},
-		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(approval.StepID, domain.StepKindTool, errPayload)},
-		{Type: domain.EventExecutionFailed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionFailed, nil, "approval_timeout")},
-	}
 	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		step, err := tx.GetStep(ctx, approval.StepID)
+		if err != nil {
+			return err
+		}
+		evts := []store.EventRecord{
+			{Type: domain.EventApprovalExpired, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
+			{Type: domain.EventStepDenied, Payload: projector.StepPayload(approval.StepID, step.Kind, "", "")},
+			{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(approval.StepID, step.Kind, errPayload)},
+			{Type: domain.EventExecutionFailed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionFailed, nil, "approval_timeout")},
+		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 			return err
 		}
-		step, err := tx.GetStep(ctx, approval.StepID)
-		if err == nil {
-			step.Status = domain.StepFailed
-			step.Error = errPayload
-			step.CompletedAt = &now
-			_ = tx.Upsert(ctx, step)
+		step.Status = domain.StepFailed
+		step.Error = errPayload
+		step.CompletedAt = &now
+		if err := tx.Upsert(ctx, step); err != nil {
+			return err
 		}
 		if err := tx.UpdateApproval(ctx, approval); err != nil {
 			return err

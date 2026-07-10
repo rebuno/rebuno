@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/identity"
@@ -585,4 +586,162 @@ func TestDispatchConcurrency(t *testing.T) {
 func mustHash(args []byte) string {
 	h, _ := identity.ComputeArgsHash(args)
 	return h
+}
+
+// approvalLLMEngine builds a policy engine that requires approval for any
+// llm_call step, so we can verify the step_type recorded in approval events
+// reflects the actual step kind rather than a hardcoded tool_call.
+func approvalLLMEngine(t *testing.T, timeout time.Duration) *policy.RuleEngine {
+	t.Helper()
+	pe, err := policy.NewRuleEngine(policy.Config{
+		Rules: []policy.Rule{{
+			ID:       "approve-llm",
+			Priority: 1,
+			When:     policy.Condition{StepKind: string(domain.StepKindLLM)},
+			Then: domain.PolicyResult{
+				Decision:       domain.DecisionRequireApproval,
+				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: timeout, Message: "approve llm"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pe
+}
+
+func submitLLMStep(t *testing.T, k *kernel.Kernel, ctx context.Context, exec domain.Execution) (string, uuid.UUID) {
+	t.Helper()
+	req := json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+	argsHash, _ := identity.ComputeArgsHash(req)
+	stepID := identity.ComputeStepID(exec.ID, domain.StepKindLLM, "gpt-4", argsHash, 0)
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, StepID: stepID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Decision != "blocked" || dec.ApprovalID == nil {
+		t.Fatalf("expected blocked with approval id, got %+v", dec)
+	}
+	return stepID, *dec.ApprovalID
+}
+
+// findStepType scans the execution events for one of the given event types and
+// returns the recorded step_type payload field.
+func findStepType(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UUID, wantTypes ...string) string {
+	t.Helper()
+	events, err := k.GetEvents(ctx, execID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := make(map[string]bool, len(wantTypes))
+	for _, w := range wantTypes {
+		want[w] = true
+	}
+	for _, ev := range events {
+		if !want[ev.Type] {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal event %s payload: %v", ev.Type, err)
+		}
+		raw, ok := payload["step_type"]
+		if !ok {
+			t.Fatalf("event %s missing step_type: %v", ev.Type, payload)
+		}
+		s, _ := raw.(string)
+		return s
+	}
+	t.Fatalf("no event of types %v found", wantTypes)
+	return ""
+}
+
+func TestApprovalGrantRecordsActualStepKind(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalLLMEngine(t, time.Hour),
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	_, approvalID := submitLLMStep(t, k, ctx, exec)
+
+	if err := k.GrantApproval(ctx, approvalID, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepAllowed); got != string(domain.StepKindLLM) {
+		t.Fatalf("EventStepAllowed step_type = %q, want %q", got, domain.StepKindLLM)
+	}
+}
+
+func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalLLMEngine(t, time.Hour),
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	_, approvalID := submitLLMStep(t, k, ctx, exec)
+
+	if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
+		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
+	}
+	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepFailed); got != string(domain.StepKindLLM) {
+		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
+	}
+}
+
+func TestApprovalExpireRecordsActualStepKind(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: 1 * time.Millisecond}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalLLMEngine(t, 1*time.Millisecond),
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	submitLLMStep(t, k, ctx, exec)
+
+	time.Sleep(10 * time.Millisecond)
+	if err := k.ExpireApprovals(ctx, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
+		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
+	}
+	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepFailed); got != string(domain.StepKindLLM) {
+		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
+	}
+}
+
+func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalLLMEngine(t, time.Hour),
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	submitLLMStep(t, k, ctx, exec)
+
+	if err := k.CancelExecution(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
+		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
+	}
+	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepFailed); got != string(domain.StepKindLLM) {
+		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
+	}
 }

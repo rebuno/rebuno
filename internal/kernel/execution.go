@@ -227,18 +227,22 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 		}
 		for _, a := range allPendingApprovalsLocked(tx, id) {
 			errPayload, _ := json.Marshal(map[string]string{"reason": "execution_cancelled"})
+			step, err := tx.GetStep(ctx, a.StepID)
+			if err != nil {
+				return err
+			}
 			if _, err := tx.AppendBatch(ctx, id, []store.EventRecord{
 				{Type: domain.EventApprovalExpired, Payload: projector.ApprovalPayload(a.ID, a.StepID, id, domain.ApprovalExpired, "", "execution_cancelled")},
-				{Type: domain.EventStepDenied, Payload: projector.StepPayload(a.StepID, domain.StepKindTool, "", "")},
-				{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(a.StepID, domain.StepKindTool, errPayload)},
+				{Type: domain.EventStepDenied, Payload: projector.StepPayload(a.StepID, step.Kind, "", "")},
+				{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(a.StepID, step.Kind, errPayload)},
 			}); err != nil {
 				return err
 			}
-			if step, err := tx.GetStep(ctx, a.StepID); err == nil {
-				step.Status = domain.StepFailed
-				step.Error = errPayload
-				step.CompletedAt = &now
-				_ = tx.Upsert(ctx, step)
+			step.Status = domain.StepFailed
+			step.Error = errPayload
+			step.CompletedAt = &now
+			if err := tx.Upsert(ctx, step); err != nil {
+				return err
 			}
 			a.Status = domain.ApprovalExpired
 			a.DecidedAt = &now
