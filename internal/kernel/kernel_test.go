@@ -745,3 +745,29 @@ func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
 		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
 	}
 }
+
+// TestCancelExecutionCancelsPendingApprovals verifies that cancelling an
+// execution expires its pending approvals and does not leave them orphaned.
+func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalLLMEngine(t, time.Hour),
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	_, approvalID := submitLLMStep(t, k, ctx, exec)
+
+	if err := k.CancelExecution(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	approval, err := k.GetApproval(ctx, approvalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approval.Status != domain.ApprovalExpired {
+		t.Fatalf("expected pending approval to be expired after cancel, got %s", approval.Status)
+	}
+}
