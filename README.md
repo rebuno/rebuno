@@ -52,7 +52,8 @@ Reference:
 - [HTTP API](docs/api.md) — the `/v0` client, agent, and admin endpoints.
 - [CLI](docs/cli.md) — the built-in `rebuno` REPL.
 - [Deployment](docs/deployment.md) — running the production kernel, config, and Docker.
-- [Python SDK](docs/sdk/python.md) — the `rebuno` package surface.
+- [Python SDK](docs/sdk/python) — building with Python
+- [TypeScript SDK](docs/sdk/typescript) — building with TypeScript
 
 ## License
 
