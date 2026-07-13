@@ -6,3 +6,4 @@ dist/
 .claude/
 .env
 .codegraph/
+node_modules/
