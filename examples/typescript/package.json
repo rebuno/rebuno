@@ -1,0 +1,25 @@
+{
+  "name": "rebuno-examples-typescript",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript examples for Rebuno",
+  "scripts": {
+    "hello": "tsx hello.ts",
+    "researcher": "tsx researcher.ts",
+    "shell": "tsx shell.ts",
+    "mcp": "tsx mcp_agent.ts",
+    "client": "tsx client.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ai": "^7.0.0",
+    "rebuno": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^7.0.0"
+  }
+}
