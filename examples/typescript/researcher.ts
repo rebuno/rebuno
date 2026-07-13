@@ -81,7 +81,6 @@ function sleep(ms: number): Promise<void> {
 
 function safeEval(expr: string): number {
   if (!/^[\d+\-*/().\s]+$/.test(expr)) throw new Error(`Unsupported expression: ${expr}`);
-  // ponytail: charset-guarded Function eval — fine for a local demo tool; swap for a real parser if untrusted.
   return Function(`"use strict"; return (${expr});`)() as number;
 }
 
