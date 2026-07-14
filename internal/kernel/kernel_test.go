@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -696,6 +697,48 @@ func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
 	}
 	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepFailed); got != string(domain.StepKindLLM) {
 		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
+	}
+}
+
+// TestApprovalDenyFailsExecution verifies that denying an approval fails the
+// execution directly (consistent with expiry) rather than resuming it.
+func TestApprovalDenyFailsExecution(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalLLMEngine(t, time.Hour),
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	_, approvalID := submitLLMStep(t, k, ctx, exec)
+
+	if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := k.GetExecution(ctx, exec.ID)
+	if got.Status != domain.ExecutionFailed {
+		t.Fatalf("expected execution failed after deny, got %s", got.Status)
+	}
+	if got.FailureReason != "approval_denied" {
+		t.Fatalf("expected failure reason approval_denied, got %q", got.FailureReason)
+	}
+	// Deny must not enqueue a new dispatch: count dispatches before and after.
+	before, err := ms.ListDispatchesByExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeCount := len(before)
+	if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob"}); err != nil && !errors.Is(err, domain.ErrConflict) {
+		t.Fatal(err)
+	}
+	after, err := ms.ListDispatchesByExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != beforeCount {
+		t.Fatalf("deny must not enqueue a dispatch, had %d before and %d after", beforeCount, len(after))
 	}
 }
 
