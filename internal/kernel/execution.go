@@ -215,7 +215,11 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 		if err := tx.UpdateExecutionStatus(ctx, id, domain.ExecutionCancelled, nil, "client_cancelled"); err != nil {
 			return err
 		}
-		for _, d := range allDispatchesLocked(ctx, tx, id) {
+		dispatches, err := allDispatchesLocked(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		for _, d := range dispatches {
 			if d.Status != domain.DispatchAcked && d.Status != domain.DispatchExhausted {
 				if _, err := tx.Append(ctx, id, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, id, domain.DispatchExhausted, d.Attempt)); err != nil {
 					return err
@@ -296,12 +300,8 @@ func (k *Kernel) enqueueDispatchTx(ctx context.Context, tx store.TxStore, execID
 	return err
 }
 
-func allDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID) []domain.Dispatch {
-	out, err := tx.ListDispatchesByExecution(ctx, execID)
-	if err != nil {
-		return nil
-	}
-	return out
+func allDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID) ([]domain.Dispatch, error) {
+	return tx.ListDispatchesByExecution(ctx, execID)
 }
 
 func allPendingApprovalsLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID) ([]domain.Approval, error) {

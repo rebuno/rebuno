@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     created_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS approvals_pending_timeout_idx ON approvals (status, timeout_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS approvals_pending_execution_idx ON approvals (execution_id) WHERE status = 'pending';
 
 CREATE TABLE IF NOT EXISTS dispatches (
     id UUID PRIMARY KEY,
