@@ -18,6 +18,7 @@ import (
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/store"
 	"github.com/rebuno/rebuno/internal/store/memstore"
 )
 
@@ -786,5 +787,87 @@ func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
 	}
 	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepFailed); got != string(domain.StepKindLLM) {
 		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
+	}
+}
+
+// TestCancelExecutionCancelsPendingApprovals verifies that cancelling an
+// execution expires its pending approvals and does not leave them orphaned.
+func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalLLMEngine(t, time.Hour),
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	_, approvalID := submitLLMStep(t, k, ctx, exec)
+
+	if err := k.CancelExecution(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	approval, err := k.GetApproval(ctx, approvalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approval.Status != domain.ApprovalExpired {
+		t.Fatalf("expected pending approval to be expired after cancel, got %s", approval.Status)
+	}
+}
+
+// failingQueue wraps a memstore and fails ListDispatchesByExecution so we can
+// verify CancelExecution propagates the dispatches query error instead of
+// swallowing it and leaving active dispatches orphaned.
+type failingQueue struct {
+	*memstore.Store
+	dispatchErr error
+}
+
+func (f *failingQueue) ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error) {
+	return nil, f.dispatchErr
+}
+
+// failingUnitOfWork delegates RunInTx to the underlying store but hands fn a
+// TxStore whose dispatch listing fails.
+type failingUnitOfWork struct {
+	*memstore.Store
+	dispatchErr error
+}
+
+func (f *failingUnitOfWork) RunInTx(ctx context.Context, fn func(store.TxStore) error) error {
+	return f.Store.RunInTx(ctx, func(tx store.TxStore) error {
+		return fn(&failingTxStore{TxStore: tx, dispatchErr: f.dispatchErr})
+	})
+}
+
+type failingTxStore struct {
+	store.TxStore
+	dispatchErr error
+}
+
+func (f *failingTxStore) ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error) {
+	return nil, f.dispatchErr
+}
+
+// TestCancelExecutionPropagatesDispatchError verifies that a failure while
+// listing dispatches aborts the cancel instead of proceeding with an empty
+// list and leaving active dispatches orphaned.
+func TestCancelExecutionPropagatesDispatchError(t *testing.T) {
+	ms := memstore.NewStore()
+	dispatchErr := errors.New("dispatch query failed")
+	uow := &failingUnitOfWork{Store: ms, dispatchErr: dispatchErr}
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: &failingQueue{Store: ms, dispatchErr: dispatchErr}, Locker: ms, UnitOfWork: uow,
+		Policy: approvalLLMEngine(t, time.Hour),
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	err := k.CancelExecution(ctx, exec.ID)
+	if !errors.Is(err, dispatchErr) {
+		t.Fatalf("expected cancel to propagate dispatch query error, got %v", err)
 	}
 }
