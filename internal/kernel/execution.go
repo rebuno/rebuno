@@ -215,7 +215,11 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 		if err := tx.UpdateExecutionStatus(ctx, id, domain.ExecutionCancelled, nil, "client_cancelled"); err != nil {
 			return err
 		}
-		for _, d := range allDispatchesLocked(tx, id) {
+		dispatches, err := allDispatchesLocked(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		for _, d := range dispatches {
 			if d.Status != domain.DispatchAcked && d.Status != domain.DispatchExhausted {
 				if _, err := tx.Append(ctx, id, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, id, domain.DispatchExhausted, d.Attempt)); err != nil {
 					return err
@@ -225,7 +229,11 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 				}
 			}
 		}
-		for _, a := range allPendingApprovalsLocked(tx, id) {
+		pending, err := allPendingApprovalsLocked(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		for _, a := range pending {
 			errPayload, _ := json.Marshal(map[string]string{"reason": "execution_cancelled"})
 			step, err := tx.GetStep(ctx, a.StepID)
 			if err != nil {
@@ -292,18 +300,10 @@ func (k *Kernel) enqueueDispatchTx(ctx context.Context, tx store.TxStore, execID
 	return err
 }
 
-func allDispatchesLocked(tx store.TxStore, execID uuid.UUID) []domain.Dispatch {
-	out, _ := tx.ListDispatchesByExecution(context.Background(), execID)
-	return out
+func allDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID) ([]domain.Dispatch, error) {
+	return tx.ListDispatchesByExecution(ctx, execID)
 }
 
-func allPendingApprovalsLocked(tx store.TxStore, execID uuid.UUID) []domain.Approval {
-	var out []domain.Approval
-	all, _ := tx.ListPendingApprovals(context.Background())
-	for _, a := range all {
-		if a.ExecutionID == execID {
-			out = append(out, a)
-		}
-	}
-	return out
+func allPendingApprovalsLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID) ([]domain.Approval, error) {
+	return tx.ListPendingApprovalsByExecution(ctx, execID)
 }

@@ -135,6 +135,28 @@ func listPendingApprovals(ctx context.Context, q Querier) ([]domain.Approval, er
 	return scanApprovals(rows)
 }
 
+func (s *Store) ListPendingApprovalsByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Approval, error) {
+	return listPendingApprovalsByExecution(ctx, s.pool, execID)
+}
+
+func (q querier) ListPendingApprovalsByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Approval, error) {
+	return listPendingApprovalsByExecution(ctx, q.q, execID)
+}
+
+func listPendingApprovalsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]domain.Approval, error) {
+	rows, err := q.Query(ctx, `
+		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, decided_at, rationale, created_at
+		FROM approvals
+		WHERE status = 'pending' AND execution_id = $1
+		ORDER BY created_at
+	`, execID.String())
+	if err != nil {
+		return nil, fmt.Errorf("list pending approvals by execution: %w", err)
+	}
+	defer rows.Close()
+	return scanApprovals(rows)
+}
+
 func (s *Store) ListExpiredApprovals(ctx context.Context, now time.Time) ([]domain.Approval, error) {
 	return listExpiredApprovals(ctx, s.pool, now)
 }

@@ -60,6 +60,19 @@ func (s *Store) ListPendingApprovals(ctx context.Context) ([]domain.Approval, er
 	return out, nil
 }
 
+func (s *Store) ListPendingApprovalsByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Approval, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []domain.Approval
+	for _, a := range s.approvals {
+		if a.Status == domain.ApprovalPending && a.ExecutionID == execID {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
 func (s *Store) ListExpiredApprovals(ctx context.Context, now time.Time) ([]domain.Approval, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -93,6 +106,17 @@ func (tx *txStore) ListPendingApprovals(ctx context.Context) ([]domain.Approval,
 	var out []domain.Approval
 	for _, a := range tx.approvals {
 		if a.Status == domain.ApprovalPending {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (tx *txStore) ListPendingApprovalsByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Approval, error) {
+	var out []domain.Approval
+	for _, a := range tx.approvals {
+		if a.Status == domain.ApprovalPending && a.ExecutionID == execID {
 			out = append(out, a)
 		}
 	}
