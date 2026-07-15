@@ -27,6 +27,15 @@ type agentConfigEntry struct {
 	PolicyFile string `yaml:"policy_file"` // path, relative to the config file
 }
 
+func expandEnv(s string) string {
+	return os.Expand(s, func(k string) string {
+		if v, ok := os.LookupEnv(k); ok {
+			return v
+		}
+		return "$" + k
+	})
+}
+
 // loadAgentConfig parses a provisioning manifest into agents ready to register.
 // policy_file paths are resolved relative to the manifest, and every bundle is
 // validated up front so a malformed policy fails the boot instead of silently
@@ -36,6 +45,7 @@ func loadAgentConfig(path string) ([]domain.Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
+	raw = []byte(expandEnv(string(raw)))
 	var f agentConfigFile
 	if err := yaml.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse config file: %w", err)
