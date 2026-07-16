@@ -23,7 +23,7 @@ async function process(input: { query: string }): Promise<Record<string, unknown
 
 const agent = new Agent("hello", {
   secret: env.REBUNO_AGENT_SECRET ?? "hello-secret",
-  kernelUrl: env.REBUNO_URL ?? "http://localhost:8080",
+  baseUrl: env.REBUNO_URL ?? "http://localhost:8080",
 });
 console.log("hello agent listening on :5000");
 await agent.serve({ port: Number(env.AGENT_PORT ?? 5000) }, process);

@@ -25,7 +25,7 @@ edits:
 
 ```ts
 // explicit
-const agent = new Agent("dev-agent", { secret: "dev-secret", kernelUrl: "http://localhost:8080" });
+const agent = new Agent("dev-agent", { secret: "dev-secret", baseUrl: "http://localhost:8080" });
 
 // from the environment (REBUNO_URL + REBUNO_AGENT_SECRET)
 const agent = new Agent("dev-agent");
@@ -77,7 +77,7 @@ async function process(input: { prompt: string }) {
   return { answer: hits };
 }
 
-const agent = new Agent("dev-agent", { secret: "dev-secret", kernelUrl: "http://localhost:8080" });
+const agent = new Agent("dev-agent", { secret: "dev-secret", baseUrl: "http://localhost:8080" });
 await agent.serve({ port: 5000 }, process); // blocks, serving the webhook
 ```
 
@@ -102,5 +102,5 @@ tsx agent.ts      # terminal 1
 tsx client.ts     # terminal 2
 ```
 
-The kernel itself is a separate service — point `REBUNO_URL` / `kernelUrl` at
+The kernel itself is a separate service — point `REBUNO_URL` / `baseUrl` at
 wherever it runs. Next: [Agents](agents.md).

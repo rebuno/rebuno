@@ -63,7 +63,7 @@ if __name__ == "__main__":
     agent = Agent(
         "shell",
         secret=os.environ.get("REBUNO_AGENT_SECRET", "shell-secret"),
-        kernel_url=os.environ.get("REBUNO_URL", "http://localhost:8080"),
+        base_url=os.environ.get("REBUNO_URL", "http://localhost:8080"),
     )
     logger.info("shell agent listening on :5002")
     agent.run(process, port=int(os.environ.get("AGENT_PORT", "5002")))
