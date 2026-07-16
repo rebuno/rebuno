@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +36,9 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 	approval, _ = k.d.Approvals.GetApproval(ctx, id)
 	if approval.Status != domain.ApprovalPending {
 		return domain.ErrConflict
+	}
+	if !approval.AllowsApprover(req.DecidedBy) {
+		return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, req.DecidedBy)
 	}
 	now := time.Now().UTC()
 	approval.Status = domain.ApprovalGranted
@@ -89,6 +93,9 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 	approval, _ = k.d.Approvals.GetApproval(ctx, id)
 	if approval.Status != domain.ApprovalPending {
 		return domain.ErrConflict
+	}
+	if !approval.AllowsApprover(req.DecidedBy) {
+		return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, req.DecidedBy)
 	}
 	now := time.Now().UTC()
 	approval.Status = domain.ApprovalDenied

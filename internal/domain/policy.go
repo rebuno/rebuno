@@ -20,11 +20,11 @@ const (
 )
 
 type PolicyResult struct {
-	Decision       string               `json:"decision"`
-	Reason         string               `json:"reason,omitempty"`
-	RuleID         string               `json:"rule_id,omitempty"`
-	ApprovalConfig PolicyApprovalConfig `json:"approval_config,omitempty"`
-	RateLimit      RateLimitConfig      `json:"rate_limit,omitempty"`
+	Decision       string               `json:"decision" yaml:"decision"`
+	Reason         string               `json:"reason,omitempty" yaml:"reason,omitempty"`
+	RuleID         string               `json:"rule_id,omitempty" yaml:"-"`
+	ApprovalConfig PolicyApprovalConfig `json:"approval_config,omitempty" yaml:"approval_config,omitempty"`
+	RateLimit      RateLimitConfig      `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
 }
 
 type RateLimitConfig struct {
@@ -43,9 +43,9 @@ const (
 )
 
 type PolicyApprovalConfig struct {
-	Approvers []string      `json:"approvers,omitempty"`
-	Timeout   time.Duration `json:"timeout,omitempty"`
-	Message   string        `json:"message,omitempty"`
+	Approvers []string      `json:"approvers,omitempty" yaml:"approvers,omitempty"`
+	Timeout   time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Message   string        `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
 type PolicyInput struct {

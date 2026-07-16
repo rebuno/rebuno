@@ -78,10 +78,13 @@ when:
 |-------|---------|
 | `decision` | `allow`, `deny`, or `require_approval`. **Required.** |
 | `reason` | Human-readable explanation. Recorded in the decision event and returned on deny. |
+| `approval_config` | Who approves, and for how long. Only meaningful with `require_approval` (see below). |
+| `rate_limit` | Caps how often the rule may fire (see below). |
 
 Every policy decision event (`step.allowed`, `step.denied`,
 `step.awaiting_approval`) carries the matched `rule_id` in its payload — that is
-the audit trail.
+the audit trail. `rule_id` is always the matched rule's own `id`; it is not
+settable from the bundle.
 
 ### require_approval
 
@@ -99,7 +102,46 @@ execution resumes. See [events.md](events.md) and
     then:
       decision: require_approval
       reason: filesystem writes need approval
+      approval_config:
+        approvers: ["alice", "bob"]   # omit to let anyone decide
+        timeout: 5m                   # default: the kernel's DefaultApprovalTimeout
+        message: check the target path before granting
 ```
+
+| Field | Meaning |
+|-------|---------|
+| `approvers` | Who may grant or deny. A decision whose `decided_by` is not in the list is rejected with `403 forbidden`. Omit the field (or leave it empty) to let anyone decide — that is the default. **Not access control:** see below. |
+| `timeout` | A Go duration (`30s`, `5m`, `1h30m`). The approval expires after it. Defaults to the kernel's configured timeout. |
+| `message` | Shown to whoever resolves the approval. |
+
+`approvers` is a guardrail, not access control. `decided_by` is a string in the
+request body and the bearer token is shared and carries no identity, so the
+check stops the wrong person deciding — not someone who types another person's
+name. Enforcing it properly requires `decided_by` to come from an authenticated
+principal. Do not rely on `approvers` to keep a decision away from a caller who
+already holds the API token.
+
+### rate_limit
+
+A rule may cap how often it fires. The limit is keyed on the rule's `rule_id`
+and the scope in `per_what`, so two rules never share a bucket.
+
+```yaml
+  - id: limit-search
+    priority: 10
+    when:
+      target: web_search
+    then:
+      decision: allow
+      rate_limit:
+        max_calls: 5
+        window: 1m
+        per_what: execution      # execution (default) | agent | global
+        on_limiter_error: allow  # allow (default, fail-open) | deny (fail-closed)
+```
+
+A step over the limit is rejected with `rate_limited` rather than denied by
+policy. A hard ceiling belongs in a `deny` or `require_approval` rule instead.
 
 ## Examples
 

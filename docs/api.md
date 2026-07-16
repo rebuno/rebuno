@@ -156,6 +156,11 @@ Records `step.failed`.
 `POST /v0/approvals/{id}/deny` · bearer — body `{ "decided_by", "rationale?" }`
 → `204`. The resumed loop sees a policy error at that step.
 
+Both return `403 forbidden` when the approval lists `approvers` and `decided_by`
+is not one of them. `decided_by` is taken at face value — the bearer token
+carries no identity, so this catches the wrong person deciding, not someone
+claiming to be the right one. See [policy.md](policy.md#require_approval).
+
 ---
 
 ## Operational
