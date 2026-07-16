@@ -98,7 +98,7 @@ if __name__ == "__main__":
     agent = Agent(
         "researcher",
         secret=os.environ.get("REBUNO_AGENT_SECRET", "researcher-secret"),
-        kernel_url=os.environ.get("REBUNO_URL", "http://localhost:8080"),
+        base_url=os.environ.get("REBUNO_URL", "http://localhost:8080"),
     )
     logger.info("researcher agent listening on :5001")
     agent.run(process, port=int(os.environ.get("AGENT_PORT", "5001")))

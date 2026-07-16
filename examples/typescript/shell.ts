@@ -67,7 +67,7 @@ function asAiTool(t: RebunoTool<any, any>) {
 
 const agent = new Agent("shell", {
   secret: env.REBUNO_AGENT_SECRET ?? "shell-secret",
-  kernelUrl: env.REBUNO_URL ?? "http://localhost:8080",
+  baseUrl: env.REBUNO_URL ?? "http://localhost:8080",
 });
 console.log("shell agent listening on :5002");
 await agent.serve({ port: Number(env.AGENT_PORT ?? 5002) }, process);

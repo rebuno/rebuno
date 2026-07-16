@@ -12,7 +12,7 @@ const agent = new Agent(
   "dev-agent",                    // agentId (required, non-empty)
   {
     secret: "dev-secret",         // or REBUNO_AGENT_SECRET
-    kernelUrl: "http://localhost:8080",  // or REBUNO_URL
+    baseUrl: "http://localhost:8080",  // or REBUNO_URL
     webhookPath: "/webhook",      // default
     kernelTimeout: 35000,         // ms; default; timeout for agent→kernel calls
     inputSchema: mySchema,        // optional Standard Schema validator (see below)
@@ -45,7 +45,7 @@ import { z } from "zod";
 
 const agent = new Agent("dev-agent", {
   secret: "dev-secret",
-  kernelUrl: "http://localhost:8080",
+  baseUrl: "http://localhost:8080",
   inputSchema: z.object({ prompt: z.string(), limit: z.number().default(10) }),
 });
 ```

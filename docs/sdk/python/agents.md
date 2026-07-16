@@ -11,7 +11,7 @@ from rebuno import Agent
 agent = Agent(
     "dev-agent",                      # agent_id (required, non-empty)
     secret="dev-secret",              # or REBUNO_AGENT_SECRET
-    kernel_url="http://localhost:8080",  # or REBUNO_URL
+    base_url="http://localhost:8080",  # or REBUNO_URL
     webhook_path="/webhook",          # default
     kernel_timeout=35.0,              # default; timeout for agent→kernel calls
 )

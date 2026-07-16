@@ -59,7 +59,7 @@ function asAiTools(tools: RebunoTool[]): ToolSet {
 
 const agent = new Agent("mcp", {
   secret: env.REBUNO_AGENT_SECRET ?? "mcp-secret",
-  kernelUrl: env.REBUNO_URL ?? "http://localhost:8080",
+  baseUrl: env.REBUNO_URL ?? "http://localhost:8080",
 });
 console.log("mcp agent listening on :5003");
 await agent.serve({ port: Number(env.AGENT_PORT ?? 5003) }, process);

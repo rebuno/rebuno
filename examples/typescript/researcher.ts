@@ -86,7 +86,7 @@ function safeEval(expr: string): number {
 
 const agent = new Agent("researcher", {
   secret: env.REBUNO_AGENT_SECRET ?? "researcher-secret",
-  kernelUrl: env.REBUNO_URL ?? "http://localhost:8080",
+  baseUrl: env.REBUNO_URL ?? "http://localhost:8080",
 });
 console.log("researcher agent listening on :5001");
 await agent.serve({ port: Number(env.AGENT_PORT ?? 5001) }, process);

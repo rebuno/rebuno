@@ -23,7 +23,7 @@ edits:
 
 ```python
 # explicit
-agent = Agent("dev-agent", secret="dev-secret", kernel_url="http://localhost:8080")
+agent = Agent("dev-agent", secret="dev-secret", base_url="http://localhost:8080")
 
 # from the environment (REBUNO_URL + REBUNO_AGENT_SECRET)
 agent = Agent("dev-agent")
@@ -74,7 +74,7 @@ async def process(prompt: str) -> dict:
     return {"answer": hits}
 
 
-agent = Agent("dev-agent", secret="dev-secret", kernel_url="http://localhost:8080")
+agent = Agent("dev-agent", secret="dev-secret", base_url="http://localhost:8080")
 agent.run(process, port=5000)  # blocks, serving the webhook
 ```
 
@@ -105,5 +105,5 @@ python agent.py     # terminal 1
 python client.py    # terminal 2
 ```
 
-The kernel itself is a separate service — point `REBUNO_URL` / `kernel_url` at
+The kernel itself is a separate service — point `REBUNO_URL` / `base_url` at
 wherever it runs. Next: [Agents](agents.md).
