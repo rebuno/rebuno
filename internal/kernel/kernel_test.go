@@ -871,3 +871,176 @@ func TestCancelExecutionPropagatesDispatchError(t *testing.T) {
 		t.Fatalf("expected cancel to propagate dispatch query error, got %v", err)
 	}
 }
+
+func TestApprovalConfigFromYAMLBundleReachesApproval(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	pe, err := policy.NewRuleEngineFromBundle(`
+default_action: deny
+rules:
+  - id: approve-fs-writes
+    priority: 10
+    when:
+      target: fs_write
+    then:
+      decision: require_approval
+      reason: filesystem writes need approval
+      approval_config:
+        approvers: ["alice", "bob"]
+        timeout: 5m
+        message: check the target path before granting
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := kernel.New(cfg, kernel.Deps{
+		Events:     ms,
+		Steps:      ms,
+		Executions: ms,
+		Agents:     ms,
+		Approvals:  ms,
+		Queue:      ms,
+		Locker:     ms,
+		UnitOfWork: ms,
+		Policy:     pe,
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	args := json.RawMessage(`{"path":"/etc/passwd"}`)
+	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "fs_write", mustHash(args), 0)
+	before := time.Now().UTC()
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+		Kind: domain.StepKindTool, Target: "fs_write", Args: args, StepID: stepID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Decision != "blocked" || dec.ApprovalID == nil {
+		t.Fatalf("expected blocked with approval id, got %+v", dec)
+	}
+
+	approval, err := k.GetApproval(ctx, *dec.ApprovalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approvers []string
+	if err := json.Unmarshal(approval.Approvers, &approvers); err != nil {
+		t.Fatalf("approvers not stored as a list: %v", err)
+	}
+	if len(approvers) != 2 || approvers[0] != "alice" || approvers[1] != "bob" {
+		t.Errorf("approvers: got %v, want [alice bob]", approvers)
+	}
+	if approval.Message != "check the target path before granting" {
+		t.Errorf("message: got %q", approval.Message)
+	}
+	// The rule asked for 5m; the kernel default is 1h, so a dropped timeout is visible.
+	if gap := approval.TimeoutAt.Sub(before); gap > 6*time.Minute {
+		t.Errorf("timeout_at is %v out — the rule's 5m was dropped in favour of the default", gap)
+	}
+}
+
+// blockedApproval submits a step that the given approval_config gates, and
+// returns the kernel and the pending approval's id.
+func blockedApproval(t *testing.T, approvalConfig string) (*kernel.Kernel, uuid.UUID) {
+	t.Helper()
+	ms := memstore.NewStore()
+	pe, err := policy.NewRuleEngineFromBundle(`
+default_action: deny
+rules:
+  - id: approve-fs-writes
+    priority: 10
+    when:
+      target: fs_write
+    then:
+      decision: require_approval
+` + approvalConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := kernel.New(kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}, kernel.Deps{
+		Events:     ms,
+		Steps:      ms,
+		Executions: ms,
+		Agents:     ms,
+		Approvals:  ms,
+		Queue:      ms,
+		Locker:     ms,
+		UnitOfWork: ms,
+		Policy:     pe,
+	})
+	ctx := context.Background()
+	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	args := json.RawMessage(`{"path":"/etc/passwd"}`)
+	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "fs_write", mustHash(args), 0)
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+		Kind: domain.StepKindTool, Target: "fs_write", Args: args, StepID: stepID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.ApprovalID == nil {
+		t.Fatalf("expected an approval, got %+v", dec)
+	}
+	return k, *dec.ApprovalID
+}
+
+func TestApproversGateWhoMayDecide(t *testing.T) {
+	const listed = `
+      approval_config:
+        approvers: ["alice", "bob"]
+`
+	ctx := context.Background()
+
+	t.Run("a non-approver cannot grant", func(t *testing.T) {
+		k, id := blockedApproval(t, listed)
+		err := k.GrantApproval(ctx, id, kernel.GrantApprovalRequest{DecidedBy: "carol"})
+		if !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("grant by carol: got %v, want ErrForbidden", err)
+		}
+		// The rejected decision must leave no trace on the approval.
+		a, _ := k.GetApproval(ctx, id)
+		if a.Status != domain.ApprovalPending {
+			t.Errorf("status: got %q, want pending", a.Status)
+		}
+		if a.DecidedBy != "" || a.DecidedAt != nil {
+			t.Errorf("rejected grant still recorded decided_by=%q decided_at=%v", a.DecidedBy, a.DecidedAt)
+		}
+	})
+
+	// Denying is a decision too: a non-approver must not be able to kill a step.
+	t.Run("a non-approver cannot deny", func(t *testing.T) {
+		k, id := blockedApproval(t, listed)
+		err := k.DenyApproval(ctx, id, kernel.DenyApprovalRequest{DecidedBy: "carol"})
+		if !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("deny by carol: got %v, want ErrForbidden", err)
+		}
+		if a, _ := k.GetApproval(ctx, id); a.Status != domain.ApprovalPending {
+			t.Errorf("status: got %q, want pending", a.Status)
+		}
+	})
+
+	t.Run("a listed approver can grant", func(t *testing.T) {
+		k, id := blockedApproval(t, listed)
+		if err := k.GrantApproval(ctx, id, kernel.GrantApprovalRequest{DecidedBy: "bob"}); err != nil {
+			t.Fatalf("grant by bob: %v", err)
+		}
+		a, _ := k.GetApproval(ctx, id)
+		if a.Status != domain.ApprovalGranted || a.DecidedBy != "bob" {
+			t.Fatalf("got status %q decided_by %q, want granted/bob", a.Status, a.DecidedBy)
+		}
+	})
+
+	// The common case: no approvers listed means the rule routes to nobody in
+	// particular, so anyone may decide. Enforcing here would break every
+	// existing bundle that omits the field.
+	t.Run("no approvers means anyone may grant", func(t *testing.T) {
+		k, id := blockedApproval(t, "")
+		if err := k.GrantApproval(ctx, id, kernel.GrantApprovalRequest{DecidedBy: "carol"}); err != nil {
+			t.Fatalf("grant by carol on an unrestricted approval: %v", err)
+		}
+	})
+}

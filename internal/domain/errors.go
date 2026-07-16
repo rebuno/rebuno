@@ -9,5 +9,6 @@ var (
 	ErrExecutionTerminal = fmt.Errorf("execution terminal")
 	ErrStepIDMismatch    = fmt.Errorf("step id mismatch")
 	ErrUnauthorized      = fmt.Errorf("unauthorized")
+	ErrForbidden         = fmt.Errorf("forbidden")
 	ErrRateLimited       = fmt.Errorf("rate limit exceeded")
 )

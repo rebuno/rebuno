@@ -46,6 +46,8 @@ func MapError(err error) (string, int) {
 		return "validation_error", http.StatusBadRequest
 	case errors.Is(err, domain.ErrUnauthorized):
 		return "unauthorized", http.StatusUnauthorized
+	case errors.Is(err, domain.ErrForbidden):
+		return "forbidden", http.StatusForbidden
 	case errors.Is(err, domain.ErrStepIDMismatch):
 		return "step_id_divergence", http.StatusConflict
 	case errors.Is(err, domain.ErrExecutionTerminal):

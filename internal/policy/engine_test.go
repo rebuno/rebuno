@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
 )
@@ -47,5 +48,100 @@ default_action: deny
 				t.Fatalf("expected %s, got %s", tc.want, res.Decision)
 			}
 		})
+	}
+}
+
+func TestThenApprovalConfigAndRateLimitFromBundle(t *testing.T) {
+	bundle := `
+default_action: deny
+rules:
+  - id: approve-writes
+    priority: 10
+    when:
+      target: fs_write
+    then:
+      decision: require_approval
+      reason: writes need a human
+      approval_config:
+        approvers: [alice, bob]
+        timeout: 5m
+        message: please review
+  - id: limit-search
+    priority: 20
+    when:
+      target: web_search
+    then:
+      decision: allow
+      rate_limit:
+        max_calls: 5
+        window: 1m
+        per_what: agent
+        on_limiter_error: deny
+`
+	engine, err := NewRuleEngineFromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("approval_config", func(t *testing.T) {
+		res, err := engine.Evaluate(context.Background(), domain.PolicyInput{Target: "fs_write"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Decision != domain.DecisionRequireApproval {
+			t.Fatalf("expected %s, got %s", domain.DecisionRequireApproval, res.Decision)
+		}
+		got := res.ApprovalConfig
+		if len(got.Approvers) != 2 || got.Approvers[0] != "alice" || got.Approvers[1] != "bob" {
+			t.Errorf("approvers: got %v, want [alice bob]", got.Approvers)
+		}
+		if got.Timeout != 5*time.Minute {
+			t.Errorf("timeout: got %v, want 5m", got.Timeout)
+		}
+		if got.Message != "please review" {
+			t.Errorf("message: got %q, want %q", got.Message, "please review")
+		}
+	})
+
+	t.Run("rate_limit", func(t *testing.T) {
+		res, err := engine.Evaluate(context.Background(), domain.PolicyInput{Target: "web_search"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := res.RateLimit
+		if got.MaxCalls != 5 {
+			t.Errorf("max_calls: got %d, want 5", got.MaxCalls)
+		}
+		if got.Window != time.Minute {
+			t.Errorf("window: got %v, want 1m", got.Window)
+		}
+		if got.PerWhat != "agent" {
+			t.Errorf("per_what: got %q, want agent", got.PerWhat)
+		}
+		if got.OnLimiterError != domain.LimiterErrorDeny {
+			t.Errorf("on_limiter_error: got %q, want %q", got.OnLimiterError, domain.LimiterErrorDeny)
+		}
+	})
+}
+
+func TestRuleIDIsNotSettableFromBundle(t *testing.T) {
+	engine, err := NewRuleEngineFromBundle(`
+rules:
+  - id: real-id
+    priority: 1
+    then:
+      decision: allow
+      ruleid: forged
+      rule_id: forged
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := engine.Evaluate(context.Background(), domain.PolicyInput{Target: "anything"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RuleID != "real-id" {
+		t.Fatalf("rule_id: got %q, want real-id", res.RuleID)
 	}
 }
