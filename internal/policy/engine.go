@@ -72,6 +72,9 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 
 	for i := range rules {
 		for key, pred := range rules[i].When.Arguments {
+			if pred.Equals == "" && pred.Contains == "" && pred.Regex == "" && len(pred.OneOf) == 0 {
+				return nil, fmt.Errorf("rule %q argument %q has no constraint (equals/contains/one_of/regex); an empty predicate matches any value", rules[i].ID, key)
+			}
 			if pred.Regex == "" {
 				continue
 			}

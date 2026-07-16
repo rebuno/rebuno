@@ -57,6 +57,10 @@ checked.
 call's arguments, and every listed constraint must pass. Values are compared as
 strings.
 
+A predicate must carry at least one constraint. A bundle with an empty predicate
+(`command: {}`, or `command: {equals: ""}`) is rejected at load — an empty
+constraint would match any value and silently widen the rule.
+
 ```yaml
 when:
   target: shell_exec
