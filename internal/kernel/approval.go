@@ -111,8 +111,7 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		}
 		evts := []store.EventRecord{
 			{Type: domain.EventApprovalDenied, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
-			{Type: domain.EventStepDenied, Payload: projector.StepPayload(approval.StepID, step.Kind, "", "")},
-			{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(approval.StepID, step.Kind, errPayload)},
+			{Type: domain.EventStepDenied, Payload: projector.StepErrorPayload(approval.StepID, step.Kind, errPayload)},
 			{Type: domain.EventExecutionFailed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionFailed, nil, "approval_denied")},
 		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
@@ -121,7 +120,7 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		if err := tx.UpdateApproval(ctx, approval); err != nil {
 			return err
 		}
-		step.Status = domain.StepFailed
+		step.Status = domain.StepDenied
 		step.Error = errPayload
 		step.CompletedAt = &now
 		if err := tx.Upsert(ctx, step); err != nil {

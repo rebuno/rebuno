@@ -139,6 +139,19 @@ func TestPolicyDeny(t *testing.T) {
 	if dec.Decision != "denied" {
 		t.Fatalf("expected denied, got %s", dec.Decision)
 	}
+	// A policy-denied step must emit exactly one terminal step event
+	// (step.denied), never both step.denied and step.failed.
+	if got := findStepType(t, k2, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindTool) {
+		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindTool)
+	}
+	assertNoEvent(t, k2, ctx, exec.ID, domain.EventStepFailed)
+	step, err := k2.GetStep(ctx, stepID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.Status != domain.StepDenied {
+		t.Fatalf("expected step status %q, got %q", domain.StepDenied, step.Status)
+	}
 }
 
 func TestApprovalFlow(t *testing.T) {
@@ -658,6 +671,21 @@ func findStepType(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uu
 	return ""
 }
 
+// assertNoEvent fatals when an event of the given type is present in the
+// execution's event log. Used to enforce the single-terminal-event invariant.
+func assertNoEvent(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UUID, wantType string) {
+	t.Helper()
+	events, err := k.GetEvents(ctx, execID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Type == wantType {
+			t.Fatalf("unexpected event %s present (double_terminal)", wantType)
+		}
+	}
+}
+
 func TestApprovalGrantRecordsActualStepKind(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
@@ -696,9 +724,7 @@ func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
 	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
 		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
 	}
-	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepFailed); got != string(domain.StepKindLLM) {
-		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
-	}
+	assertNoEvent(t, k, ctx, exec.ID, domain.EventStepFailed)
 }
 
 // TestApprovalDenyFailsExecution verifies that denying an approval fails the
@@ -762,9 +788,7 @@ func TestApprovalExpireRecordsActualStepKind(t *testing.T) {
 	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
 		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
 	}
-	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepFailed); got != string(domain.StepKindLLM) {
-		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
-	}
+	assertNoEvent(t, k, ctx, exec.ID, domain.EventStepFailed)
 }
 
 func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
@@ -785,9 +809,7 @@ func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
 	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
 		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
 	}
-	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepFailed); got != string(domain.StepKindLLM) {
-		t.Fatalf("EventStepFailed step_type = %q, want %q", got, domain.StepKindLLM)
-	}
+	assertNoEvent(t, k, ctx, exec.ID, domain.EventStepFailed)
 }
 
 // TestCancelExecutionCancelsPendingApprovals verifies that cancelling an
