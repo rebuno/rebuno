@@ -204,7 +204,25 @@ func New() *Observer {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 
+	obs.initLabels()
+
 	return obs
+}
+
+func (o *Observer) initLabels() {
+	for vec, values := range map[*prometheus.CounterVec][]string{
+		o.replayTotal:           {"true", "false"},
+		o.dispatchOutcomesTotal: {"success", "rejected", "exhausted"},
+		o.policyDecisions:       {"allow", "deny", "require_approval"},
+		o.approvalOutcomes:      {"granted", "denied", "expired"},
+		o.stepsSubmittedTotal:   {"tool_call", "llm_call"},
+		o.executionsCompleted:   {"completed", "failed", "cancelled"},
+		o.rateLimitTotal:        {"limited", "error_allowed", "error_denied"},
+	} {
+		for _, v := range values {
+			vec.WithLabelValues(v)
+		}
+	}
 }
 
 func (o *Observer) Registry() *prometheus.Registry {
