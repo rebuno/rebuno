@@ -191,13 +191,12 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		return domain.StepDecision{Decision: "proceed"}, nil
 
 	case domain.DecisionDeny:
-		step.Status = domain.StepFailed
+		step.Status = domain.StepDenied
 		step.CompletedAt = &now
 		errPayload, _ := json.Marshal(map[string]string{"reason": "policy_denied", "rule_id": pol.RuleID})
 		step.Error = errPayload
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepDenied, Payload: projector.StepPayload(stepID, req.Kind, req.Target, pol.RuleID)},
-			store.EventRecord{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(stepID, req.Kind, errPayload)},
+			store.EventRecord{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(stepID, req.Kind, req.Target, pol.RuleID, errPayload)},
 		)
 		if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
 			return domain.StepDecision{}, err
