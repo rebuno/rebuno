@@ -241,12 +241,11 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 			}
 			if _, err := tx.AppendBatch(ctx, id, []store.EventRecord{
 				{Type: domain.EventApprovalExpired, Payload: projector.ApprovalPayload(a.ID, a.StepID, id, domain.ApprovalExpired, "", "execution_cancelled")},
-				{Type: domain.EventStepDenied, Payload: projector.StepPayload(a.StepID, step.Kind, "", "")},
-				{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(a.StepID, step.Kind, errPayload)},
+				{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(a.StepID, step.Kind, step.Target, "", errPayload)},
 			}); err != nil {
 				return err
 			}
-			step.Status = domain.StepFailed
+			step.Status = domain.StepDenied
 			step.Error = errPayload
 			step.CompletedAt = &now
 			if err := tx.Upsert(ctx, step); err != nil {

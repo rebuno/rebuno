@@ -61,6 +61,28 @@ func StepErrorPayload(stepID string, kind domain.StepKind, err []byte) map[strin
 	return m
 }
 
+// StepDeniedPayload builds the payload for a step.denied event. It is the
+// single contract for all deny paths: step_id and step_type are always present,
+// while target, rule_id, and error are included only when non-empty so that
+// consumers reading step.denied events see a consistent shape regardless of
+// whether the denial came from policy, approval, timeout, or cancellation.
+func StepDeniedPayload(stepID string, kind domain.StepKind, target, ruleID string, err []byte) map[string]any {
+	m := map[string]any{
+		"step_id":   stepID,
+		"step_type": string(kind),
+	}
+	if target != "" {
+		m["target"] = target
+	}
+	if ruleID != "" {
+		m["rule_id"] = ruleID
+	}
+	if len(err) > 0 {
+		m["error"] = json.RawMessage(err)
+	}
+	return m
+}
+
 func ExecutionPayload(execID uuid.UUID, status domain.ExecutionStatus, output []byte, reason string) map[string]any {
 	m := map[string]any{
 		"execution_id": execID.String(),
