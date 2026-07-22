@@ -70,6 +70,7 @@ python examples/python/client.py --agent hello
 - [Agents](agents.md) — the webhook protocol and dispatch/replay lifecycle.
 - [Tools & effects](tools.md) — step identity and idempotency modes.
 - [Policy](policy.md) — gate tool and LLM calls; require human approval.
-- [Python SDK](sdk/python.md) — build an agent in Python.
+- [Python SDK](sdk/python) — build agents and clients in Python.
+- [TypeScript SDK](sdk/typescript) — build agents and clients in TypeScript.
 - [Deployment](deployment.md) — run the production (Postgres-backed) kernel.
 - [Dashboard](https://github.com/rebuno/dashboard) — web UI to view executions, steps, events, and agent activity.
