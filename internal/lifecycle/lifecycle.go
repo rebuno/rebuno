@@ -111,25 +111,22 @@ func (m *Manager) dispatchTick(ctx context.Context) error {
 // the same leader lock as the singleton workers so only the leader cancels
 // expired executions.
 func (m *Manager) deadlineTick(ctx context.Context) error {
-	if m.leaderLocker == nil || m.LeaderLockKey == "" {
+	return m.withLeaderLock(ctx, func(ctx context.Context) error {
 		return m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC())
-	}
-	release, err := m.leaderLocker.TryAcquire(ctx, m.LeaderLockKey)
-	if err != nil {
-		return err
-	}
-	if release == nil {
-		return nil
-	}
-	defer release()
-	return m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC())
+	})
 }
 
 func (m *Manager) singletonsTick(ctx context.Context) error {
-	if m.leaderLocker == nil || m.LeaderLockKey == "" {
-		return m.runSingletons(ctx)
-	}
+	return m.withLeaderLock(ctx, m.runSingletons)
+}
 
+// withLeaderLock runs fn when this replica holds the leader lock. With no
+// locker configured, fn runs unconditionally on every replica. When the lock
+// is held by another replica, the tick is skipped.
+func (m *Manager) withLeaderLock(ctx context.Context, fn func(context.Context) error) error {
+	if m.leaderLocker == nil || m.LeaderLockKey == "" {
+		return fn(ctx)
+	}
 	release, err := m.leaderLocker.TryAcquire(ctx, m.LeaderLockKey)
 	if err != nil {
 		return err
@@ -139,7 +136,7 @@ func (m *Manager) singletonsTick(ctx context.Context) error {
 		return nil
 	}
 	defer release()
-	return m.runSingletons(ctx)
+	return fn(ctx)
 }
 
 func (m *Manager) runSingletons(ctx context.Context) error {

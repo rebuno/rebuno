@@ -95,9 +95,19 @@ func TestDeadlineLoopDisabledByDefault(t *testing.T) {
 	mgr.Stop()
 
 	// With the dedicated loop disabled, CancelExpiredExecutions is only
-	// reached via the singleton tick (runSingletons).
+	// reached via the singleton tick (runSingletons). Tie the assertion to
+	// that path: cleanups also only fire from runSingletons, so a nonzero
+	// cleanup count confirms the deadline calls came from the singleton tick
+	// rather than an accidentally-enabled dedicated loop.
 	if got := atomic.LoadInt32(&k.cancelExpiredExecutions); got == 0 {
 		t.Fatalf("expected singleton tick to drive CancelExpiredExecutions, got %d", got)
+	}
+	if got := atomic.LoadInt32(&k.cleanups); got == 0 {
+		t.Fatalf("expected singleton tick to also drive Cleanup, got %d", got)
+	}
+	if got := atomic.LoadInt32(&k.cancelExpiredExecutions); got != atomic.LoadInt32(&k.cleanups) {
+		t.Fatalf("cancelExpiredExecutions (%d) should equal cleanups (%d) when driven by runSingletons",
+			got, atomic.LoadInt32(&k.cleanups))
 	}
 }
 
@@ -119,5 +129,39 @@ func TestDeadlineTickPropagatesError(t *testing.T) {
 
 	if got := atomic.LoadInt32(&k.cancelExpiredExecutions); got == 0 {
 		t.Fatal("expected deadline loop to fire despite errors")
+	}
+}
+
+// heldLocker reports the lock as always held by another replica, so
+// withLeaderLock should skip the tick.
+type heldLocker struct{}
+
+func (heldLocker) Acquire(ctx context.Context, key string) (func(), error) {
+	return nil, nil
+}
+func (heldLocker) TryAcquire(ctx context.Context, key string) (func(), error) {
+	return nil, nil
+}
+
+// TestDeadlineLoopGatedByLeaderLock verifies that when another replica holds
+// the leader lock, the dedicated deadline loop skips its tick (the shared
+// withLeaderLock helper gates both the deadline and singleton loops).
+func TestDeadlineLoopGatedByLeaderLock(t *testing.T) {
+	k := &fakeKernel{}
+	mgr := lifecycle.NewManagerWithLocker(
+		k, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		10*time.Minute,
+		heldLocker{},
+		lifecycle.WithDeadlineInterval(10*time.Millisecond),
+	)
+	mgr.LeaderLockKey = "leader"
+	ctx, cancel := context.WithCancel(context.Background())
+	mgr.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	mgr.Stop()
+
+	if got := atomic.LoadInt32(&k.cancelExpiredExecutions); got != 0 {
+		t.Fatalf("expected deadline loop to be skipped while leader lock held, got %d", got)
 	}
 }
