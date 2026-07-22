@@ -20,6 +20,7 @@ type Config struct {
 	DispatchLeaseTimeout   time.Duration
 	DefaultApprovalTimeout time.Duration
 	DeadlineTimeout        time.Duration
+	DeadlineCheckInterval  time.Duration
 	CleanupInterval        time.Duration
 	Retention              time.Duration
 	LeaderLockKey          string
@@ -41,6 +42,7 @@ func Default() Config {
 		DispatchTimeout:        30 * time.Second,
 		DispatchConcurrency:    8,
 		DefaultApprovalTimeout: 15 * time.Minute,
+		DeadlineCheckInterval:  30 * time.Second,
 		CleanupInterval:        10 * time.Minute,
 		Retention:              24 * time.Hour,
 		LeaderLockKey:          "rebuno_scheduler_leader",
@@ -87,6 +89,11 @@ func FromEnv() Config {
 	if v := os.Getenv("REBUNO_DEADLINE_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.DeadlineTimeout = d
+		}
+	}
+	if v := os.Getenv("REBUNO_DEADLINE_CHECK_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.DeadlineCheckInterval = d
 		}
 	}
 	if v := os.Getenv("REBUNO_APPROVAL_TIMEOUT"); v != "" {

@@ -18,16 +18,17 @@ type Kernel interface {
 }
 
 type Manager struct {
-	kernel        Kernel
-	logger        *slog.Logger
-	stop          chan struct{}
-	wg            sync.WaitGroup
-	interval      time.Duration
-	batch         int
-	LeaderLockKey string
-	Retention     time.Duration
-	leaderLocker  store.Locker
-	observer      *observe.Observer
+	kernel           Kernel
+	logger           *slog.Logger
+	stop             chan struct{}
+	wg               sync.WaitGroup
+	interval         time.Duration
+	deadlineInterval time.Duration
+	batch            int
+	LeaderLockKey    string
+	Retention        time.Duration
+	leaderLocker     store.Locker
+	observer         *observe.Observer
 }
 
 type ManagerOption func(*Manager)
@@ -37,6 +38,16 @@ type ManagerOption func(*Manager)
 func WithObserver(o *observe.Observer) ManagerOption {
 	return func(m *Manager) {
 		m.observer = o
+	}
+}
+
+// WithDeadlineInterval sets the cadence of the deadline enforcement loop,
+// which cancels executions past their deadline_at independently of the
+// cleanup/singleton interval. A value <= 0 disables the dedicated loop, in
+// which case deadline enforcement falls back to the singleton tick.
+func WithDeadlineInterval(d time.Duration) ManagerOption {
+	return func(m *Manager) {
+		m.deadlineInterval = d
 	}
 }
 
@@ -79,6 +90,10 @@ func (m *Manager) Start(ctx context.Context) {
 		m.wg.Add(1)
 		go m.loop(ctx, "singletons", m.interval, m.singletonsTick)
 	}
+	if m.deadlineInterval > 0 {
+		m.wg.Add(1)
+		go m.loop(ctx, "deadline", m.deadlineInterval, m.deadlineTick)
+	}
 }
 
 func (m *Manager) Stop() {
@@ -90,11 +105,28 @@ func (m *Manager) dispatchTick(ctx context.Context) error {
 	return m.kernel.RunDispatches(ctx, m.batch)
 }
 
-func (m *Manager) singletonsTick(ctx context.Context) error {
-	if m.leaderLocker == nil || m.LeaderLockKey == "" {
-		return m.runSingletons(ctx)
-	}
+// deadlineTick enforces execution deadlines on its own cadence so that an
+// execution past its deadline_at is cancelled promptly rather than waiting up
+// to the (potentially much longer) cleanup/singleton interval. It is gated by
+// the same leader lock as the singleton workers so only the leader cancels
+// expired executions.
+func (m *Manager) deadlineTick(ctx context.Context) error {
+	return m.withLeaderLock(ctx, func(ctx context.Context) error {
+		return m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC())
+	})
+}
 
+func (m *Manager) singletonsTick(ctx context.Context) error {
+	return m.withLeaderLock(ctx, m.runSingletons)
+}
+
+// withLeaderLock runs fn when this replica holds the leader lock. With no
+// locker configured, fn runs unconditionally on every replica. When the lock
+// is held by another replica, the tick is skipped.
+func (m *Manager) withLeaderLock(ctx context.Context, fn func(context.Context) error) error {
+	if m.leaderLocker == nil || m.LeaderLockKey == "" {
+		return fn(ctx)
+	}
 	release, err := m.leaderLocker.TryAcquire(ctx, m.LeaderLockKey)
 	if err != nil {
 		return err
@@ -104,7 +136,7 @@ func (m *Manager) singletonsTick(ctx context.Context) error {
 		return nil
 	}
 	defer release()
-	return m.runSingletons(ctx)
+	return fn(ctx)
 }
 
 func (m *Manager) runSingletons(ctx context.Context) error {

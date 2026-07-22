@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDefaultHasLoggingDefaults(t *testing.T) {
 	c := Default()
@@ -53,5 +56,20 @@ func TestValidateDevModeNoRequirements(t *testing.T) {
 	c := Config{DevMode: true}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("dev mode should validate: %v", err)
+	}
+}
+
+func TestDefaultDeadlineCheckInterval(t *testing.T) {
+	c := Default()
+	if c.DeadlineCheckInterval != 30*time.Second {
+		t.Fatalf("DeadlineCheckInterval = %v, want 30s", c.DeadlineCheckInterval)
+	}
+}
+
+func TestFromEnvReadsDeadlineCheckInterval(t *testing.T) {
+	t.Setenv("REBUNO_DEADLINE_CHECK_INTERVAL", "5s")
+	c := FromEnv()
+	if c.DeadlineCheckInterval != 5*time.Second {
+		t.Fatalf("DeadlineCheckInterval = %v, want 5s", c.DeadlineCheckInterval)
 	}
 }
