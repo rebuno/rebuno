@@ -259,18 +259,30 @@ func (k *Kernel) writeStepAndEvents(ctx context.Context, step domain.Step, evts 
 }
 
 func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteStepRequest) (domain.StepDecision, error) {
-	release, err := k.d.Locker.Acquire(ctx, lockKeyFromStepID(stepID))
+	step, err := k.d.Steps.GetStep(ctx, stepID)
+	if err != nil {
+		return domain.StepDecision{}, err
+	}
+	release, err := k.d.Locker.Acquire(ctx, lockKey(step.ExecutionID))
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
 	defer release()
 
-	step, err := k.d.Steps.GetStep(ctx, stepID)
+	// Re-fetch under the lock to avoid a TOCTOU with CancelExecution.
+	step, err = k.d.Steps.GetStep(ctx, stepID)
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
 	if step.Status.IsTerminal() {
 		return domain.StepDecision{Decision: "replay", Result: step.Result}, nil
+	}
+	exec, err := k.d.Executions.GetExecution(ctx, step.ExecutionID)
+	if err != nil {
+		return domain.StepDecision{}, err
+	}
+	if exec.Status.IsTerminal() {
+		return domain.StepDecision{Decision: "execution_terminal"}, nil
 	}
 	now := time.Now().UTC()
 	step.Status = domain.StepSucceeded
@@ -286,18 +298,30 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 }
 
 func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepRequest) (domain.StepDecision, error) {
-	release, err := k.d.Locker.Acquire(ctx, lockKeyFromStepID(stepID))
+	step, err := k.d.Steps.GetStep(ctx, stepID)
+	if err != nil {
+		return domain.StepDecision{}, err
+	}
+	release, err := k.d.Locker.Acquire(ctx, lockKey(step.ExecutionID))
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
 	defer release()
 
-	step, err := k.d.Steps.GetStep(ctx, stepID)
+	// Re-fetch under the lock to avoid a TOCTOU with CancelExecution.
+	step, err = k.d.Steps.GetStep(ctx, stepID)
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
 	if step.Status.IsTerminal() {
 		return domain.StepDecision{Decision: "replay", Error: step.Error}, nil
+	}
+	exec, err := k.d.Executions.GetExecution(ctx, step.ExecutionID)
+	if err != nil {
+		return domain.StepDecision{}, err
+	}
+	if exec.Status.IsTerminal() {
+		return domain.StepDecision{Decision: "execution_terminal"}, nil
 	}
 	now := time.Now().UTC()
 	step.Status = domain.StepFailed
@@ -329,8 +353,4 @@ func (k *Kernel) GetStep(ctx context.Context, stepID string) (domain.Step, error
 
 func (k *Kernel) ListSteps(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {
 	return k.d.Steps.ListByExecution(ctx, execID)
-}
-
-func lockKeyFromStepID(stepID string) string {
-	return "step:" + stepID
 }

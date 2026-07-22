@@ -828,6 +828,96 @@ func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
 	assertSingleTerminalStepEvent(t, k, ctx, exec.ID, domain.EventStepDenied)
 }
 
+// TestCompleteStepAfterExecutionCancelled verifies that completing a step
+// whose execution is already terminal does not append a step.succeeded event.
+// See https://github.com/rebuno/rebuno/issues/122.
+func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
+	k, ctx := setup(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	args := json.RawMessage(`{"path":"/tmp"}`)
+	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
+	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: stepID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := k.CancelExecution(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	dec, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"ok":true}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Decision != "execution_terminal" {
+		t.Fatalf("expected execution_terminal, got %s", dec.Decision)
+	}
+
+	// No step.succeeded event must have been appended.
+	events, err := k.GetEvents(ctx, exec.ID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Type == domain.EventStepSucceeded {
+			t.Fatalf("unexpected step.succeeded event on cancelled execution: %+v", ev)
+		}
+	}
+
+	// The step must not have transitioned to succeeded.
+	step, err := k.GetStep(ctx, stepID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.Status == domain.StepSucceeded {
+		t.Fatalf("step should not have transitioned to succeeded, got %s", step.Status)
+	}
+}
+
+// TestFailStepAfterExecutionCancelled verifies that failing a step whose
+// execution is already terminal does not append a step.failed event.
+func TestFailStepAfterExecutionCancelled(t *testing.T) {
+	k, ctx := setup(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	args := json.RawMessage(`{"path":"/tmp"}`)
+	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
+	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: stepID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := k.CancelExecution(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	errPayload := json.RawMessage(`{"reason":"boom"}`)
+	dec, err := k.FailStep(ctx, stepID, kernel.FailStepRequest{Error: errPayload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Decision != "execution_terminal" {
+		t.Fatalf("expected execution_terminal, got %s", dec.Decision)
+	}
+
+	events, err := k.GetEvents(ctx, exec.ID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Type == domain.EventStepFailed {
+			t.Fatalf("unexpected step.failed event on cancelled execution: %+v", ev)
+		}
+	}
+
+	step, err := k.GetStep(ctx, stepID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.Status == domain.StepFailed {
+		t.Fatalf("step should not have transitioned to failed, got %s", step.Status)
+	}
+}
+
 // TestCancelExecutionCancelsPendingApprovals verifies that cancelling an
 // execution expires its pending approvals and does not leave them orphaned.
 func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
