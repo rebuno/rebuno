@@ -33,7 +33,7 @@ func setupRouter(t *testing.T) (http.Handler, *kernel.Kernel, context.Context) {
 		t.Fatal(err)
 	}
 	adapt := &api.KernelAPI{Inner: k}
-	mux := api.NewRouter(adapt, adapt, adapt, "", nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "", nil, nil)
 	return mux, k, ctx
 }
 
@@ -151,7 +151,7 @@ func TestStepsReachableViaBearerAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapt := &api.KernelAPI{Inner: k}
-	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil)
 
 	exec, _ := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`), "")
 	args := json.RawMessage(`{"path":"/tmp"}`)
@@ -241,7 +241,7 @@ func TestBearerAuth(t *testing.T) {
 	ms := memstore.NewStore()
 	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms})
 	adapt := &api.KernelAPI{Inner: k}
-	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/v0/approvals", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)

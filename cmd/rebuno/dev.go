@@ -17,6 +17,7 @@ import (
 	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store/memstore"
+	"github.com/rebuno/rebuno/internal/stream"
 )
 
 func bindDevFlags(f *pflag.FlagSet, cfg *config.Config, configPath *string) {
@@ -88,5 +89,6 @@ func runDev(cfg config.Config, configPath string) error {
 		go runREPL(ctx, k, cancel)
 	}
 
-	return serve(ctx, cfg, deps, logger, replicaID, nil)
+	hub := stream.NewHub(stream.NewMemoryBus())
+	return serve(ctx, cfg, deps, logger, replicaID, nil, hub)
 }

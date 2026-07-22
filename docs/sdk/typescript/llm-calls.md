@@ -57,9 +57,10 @@ wrapper, or instrumented client underneath the recording layer.
 
 ## Current limits
 
-- **Streaming is not durable yet.** A request with `stream: true` in its body is
-  passed through un-recorded (you get a `console.warn`). The call works, but it
-  won't replay.
+- **Streaming durability** is provided by the kernel's live side channel — the
+  interceptor tees the provider stream, records the assembled whole via
+  `.../complete`, and republishes live deltas to `.../stream`. See
+  [live streaming](../../streaming.md).
 - **Only string JSON request bodies are recognized** as LLM calls. A request
   whose body isn't a JSON string (a `ReadableStream`, `FormData`, a file upload)
   passes through untouched.

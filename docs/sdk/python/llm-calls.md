@@ -61,9 +61,10 @@ llm = AsyncOpenAI(http_client=httpx.AsyncClient(transport=transport))
 
 ## Current limits
 
-- **Streaming is not durable yet.** A request with `stream=True` is passed
-  through un-recorded (you get a log warning). The call works, but it won't
-  replay.
+- **Streaming durability** is provided by the kernel's live side channel — the
+  interceptor tees the provider stream, records the assembled whole via
+  `.../complete`, and republishes live deltas to `.../stream`. See
+  [live streaming](../../streaming.md).
 - **Only JSON request bodies are recognized** as LLM calls. Non-JSON bodies
   (file uploads, form posts) pass through untouched.
 

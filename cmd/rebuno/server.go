@@ -22,6 +22,7 @@ import (
 	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/store/postgres"
+	"github.com/rebuno/rebuno/internal/stream"
 )
 
 // bindServerFlags binds server flags onto cfg. cfg should already be seeded
@@ -113,12 +114,14 @@ func runServer(cfg config.Config, configPath string) error {
 		Logger:      logger,
 	}
 
+	hub := stream.NewHub(stream.NewPostgresBus(pool, logger))
+
 	replicaID, _ := os.Hostname()
 	if replicaID == "" {
 		replicaID = "rebuno"
 	}
 
-	return serve(ctx, cfg, deps, logger, replicaID, pool.Ping)
+	return serve(ctx, cfg, deps, logger, replicaID, pool.Ping, hub)
 }
 
 // buildPool parses the DB URL, raises MaxConns to a safe floor so per-execution
@@ -148,7 +151,7 @@ func buildPool(ctx context.Context, cfg config.Config, logger *slog.Logger) (*pg
 
 // serve builds the kernel, starts the lifecycle manager and HTTP server, and
 // blocks until a shutdown signal, then drains gracefully.
-func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slog.Logger, replicaID string, ready func(context.Context) error) error {
+func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slog.Logger, replicaID string, ready func(context.Context) error, hub *stream.Hub) error {
 	k := kernel.New(kernel.Config{
 		ReplicaID:                replicaID,
 		DispatchMaxAttempts:      cfg.DispatchMaxAttempts,
@@ -164,9 +167,14 @@ func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slo
 		LeaderLockKey:            cfg.LeaderLockKey,
 	}, deps)
 
+	var streamer api.Streamer
+	if hub != nil {
+		go func() { _ = hub.Start(ctx) }()
+		streamer = hub
+	}
 	observer := observe.Default()
 	adapt := &api.KernelAPI{Inner: k}
-	handler := api.NewRouter(adapt, adapt, adapt, cfg.AgentBearerToken, ready, observer)
+	handler := api.NewRouter(adapt, adapt, adapt, cfg.AgentBearerToken, streamer, ready, observer)
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: handler}
 
 	mgr := lifecycle.NewManagerWithLocker(k, logger, cfg.CleanupInterval, deps.Locker,

@@ -71,6 +71,14 @@ func (rw *recordingResponseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
+// Flush forwards to the underlying ResponseWriter when it supports flushing, so
+// streaming handlers (SSE) work through this middleware.
+func (rw *recordingResponseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func routePattern(r *http.Request) string {
 	rctx := chi.RouteContext(r.Context())
 	if rctx == nil {
