@@ -72,3 +72,4 @@ python examples/python/client.py --agent hello
 - [Policy](policy.md) — gate tool and LLM calls; require human approval.
 - [Python SDK](sdk/python.md) — build an agent in Python.
 - [Deployment](deployment.md) — run the production (Postgres-backed) kernel.
+- [Dashboard](https://github.com/rebuno/dashboard) — web UI to view executions, steps, events, and agent activity.
