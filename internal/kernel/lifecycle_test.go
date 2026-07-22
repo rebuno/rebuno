@@ -31,7 +31,7 @@ func TestApprovalExpiry(t *testing.T) {
 		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: pe,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	argsHash, _ := identity.ComputeArgsHash(args)

@@ -180,7 +180,7 @@ func TestApprovalFlow(t *testing.T) {
 		Policy:     pe,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
@@ -239,7 +239,7 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 		Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: pe,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
@@ -285,7 +285,7 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 		Policy: pe,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
@@ -403,7 +403,7 @@ func TestDispatcherDeliveryAndRetry(t *testing.T) {
 		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	if err := k.RunDispatches(ctx, 5); err != nil {
@@ -447,7 +447,7 @@ func TestDispatchRejectionExhaustsAndFails(t *testing.T) {
 		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	// Attempt 1 (fails, schedules retry), then attempt 2 (hits max, exhausts).
@@ -499,7 +499,7 @@ func TestRateLimitDoubleStep(t *testing.T) {
 		RateLimiter: ratelimit.NewMemoryLimiter(),
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
@@ -546,8 +546,8 @@ func TestDispatchTimeoutBoundsHungAgent(t *testing.T) {
 		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: hung.URL, Secret: "secret"})
-	k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: hung.URL, Secret: "secret"})
+	_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	start := time.Now()
 	if err := k.RunDispatches(ctx, 5); err != nil {
@@ -581,9 +581,9 @@ func TestDispatchConcurrency(t *testing.T) {
 		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: slow.URL, Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: slow.URL, Secret: "secret"})
 	for i := 0; i < n; i++ {
-		k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+		_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	}
 
 	start := time.Now()
@@ -710,7 +710,7 @@ func TestApprovalGrantRecordsActualStepKind(t *testing.T) {
 		Policy: approvalLLMEngine(t, time.Hour),
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
@@ -730,7 +730,7 @@ func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
 		Policy: approvalLLMEngine(t, time.Hour),
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
@@ -753,7 +753,7 @@ func TestApprovalDenyFailsExecution(t *testing.T) {
 		Policy: approvalLLMEngine(t, time.Hour),
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
@@ -793,7 +793,7 @@ func TestApprovalExpireRecordsActualStepKind(t *testing.T) {
 		Policy: approvalLLMEngine(t, 1*time.Millisecond),
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	submitLLMStep(t, k, ctx, exec)
 
@@ -815,7 +815,7 @@ func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
 		Policy: approvalLLMEngine(t, time.Hour),
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	submitLLMStep(t, k, ctx, exec)
 
@@ -928,7 +928,7 @@ func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
 		Policy: approvalLLMEngine(t, time.Hour),
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
@@ -991,7 +991,7 @@ func TestCancelExecutionPropagatesDispatchError(t *testing.T) {
 		Policy: approvalLLMEngine(t, time.Hour),
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	err := k.CancelExecution(ctx, exec.ID)
@@ -1033,7 +1033,7 @@ rules:
 		Policy:     pe,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/etc/passwd"}`)
@@ -1099,7 +1099,7 @@ rules:
 		Policy:     pe,
 	})
 	ctx := context.Background()
-	k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/etc/passwd"}`)

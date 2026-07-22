@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +15,6 @@ import (
 
 // fakeKernel records calls to each Kernel method so tests can assert cadence.
 type fakeKernel struct {
-	mu                      sync.Mutex
 	dispatches              int32
 	expireApprovals         int32
 	cancelExpiredExecutions int32

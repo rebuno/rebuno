@@ -61,13 +61,13 @@ func TestBundleCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 
 	// Fill to capacity, then touch agent-1 so agent-2 becomes least-recently-used.
-	c.getOrCompile("agent-1", "b", compile("agent-1"))
-	c.getOrCompile("agent-2", "b", compile("agent-2"))
-	c.getOrCompile("agent-1", "b", compile("agent-1")) // hit, promotes agent-1
-	c.getOrCompile("agent-3", "b", compile("agent-3")) // evicts agent-2
+	_, _ = c.getOrCompile("agent-1", "b", compile("agent-1"))
+	_, _ = c.getOrCompile("agent-2", "b", compile("agent-2"))
+	_, _ = c.getOrCompile("agent-1", "b", compile("agent-1")) // hit, promotes agent-1
+	_, _ = c.getOrCompile("agent-3", "b", compile("agent-3")) // evicts agent-2
 
 	// agent-2 was evicted: re-fetching recompiles.
-	c.getOrCompile("agent-2", "b", compile("agent-2"))
+	_, _ = c.getOrCompile("agent-2", "b", compile("agent-2"))
 	if compiles["agent-2"] != 2 {
 		t.Fatalf("expected agent-2 to be evicted and recompiled, got %d compiles", compiles["agent-2"])
 	}

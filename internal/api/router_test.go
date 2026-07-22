@@ -80,7 +80,7 @@ func TestAgentSubmitAndCompleteViaHTTP(t *testing.T) {
 		t.Fatalf("submit failed: %d %s", rr.Code, rr.Body.String())
 	}
 	var dec domain.StepDecision
-	json.Unmarshal(rr.Body.Bytes(), &dec)
+	_ = json.Unmarshal(rr.Body.Bytes(), &dec)
 	if dec.Decision != "proceed" {
 		t.Fatalf("expected proceed, got %s", dec.Decision)
 	}
@@ -104,7 +104,7 @@ func TestAgentSubmitAndCompleteViaHTTP(t *testing.T) {
 		t.Fatalf("get step failed: %d %s", rr.Code, rr.Body.String())
 	}
 	var step domain.Step
-	json.Unmarshal(rr.Body.Bytes(), &step)
+	_ = json.Unmarshal(rr.Body.Bytes(), &step)
 	if step.Status != domain.StepSucceeded {
 		t.Fatalf("expected succeeded, got %s", step.Status)
 	}
@@ -297,7 +297,7 @@ default_action: deny
 		t.Fatalf("submit denied step failed: %d %s", rr.Code, rr.Body.String())
 	}
 	var dec domain.StepDecision
-	json.Unmarshal(rr.Body.Bytes(), &dec)
+	_ = json.Unmarshal(rr.Body.Bytes(), &dec)
 	if dec.Decision != "denied" {
 		t.Fatalf("expected denied, got %s", dec.Decision)
 	}
@@ -315,7 +315,7 @@ default_action: deny
 	if rr.Code != http.StatusOK {
 		t.Fatalf("submit allowed step failed: %d %s", rr.Code, rr.Body.String())
 	}
-	json.Unmarshal(rr.Body.Bytes(), &dec)
+	_ = json.Unmarshal(rr.Body.Bytes(), &dec)
 	if dec.Decision != "proceed" {
 		t.Fatalf("expected proceed, got %s", dec.Decision)
 	}
