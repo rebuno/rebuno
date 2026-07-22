@@ -29,11 +29,12 @@ type Router struct {
 	client ClientKernel
 	agent  AgentKernel
 	admin  AdminKernel
+	stream Streamer
 	auth   string
 }
 
-func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTok string, ready func(context.Context) error, observer ...*observe.Observer) http.Handler {
-	r := &Router{client: client, agent: agent, admin: admin, auth: authTok}
+func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTok string, stream Streamer, ready func(context.Context) error, observer ...*observe.Observer) http.Handler {
+	r := &Router{client: client, agent: agent, admin: admin, stream: stream, auth: authTok}
 	obs := observe.Default()
 	if len(observer) > 0 && observer[0] != nil {
 		obs = observer[0]
@@ -56,6 +57,7 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(bearer).Get("/v0/executions", r.listExecutions)
 	mux.With(dual).Get("/v0/executions/{id}", r.getExecution)
 	mux.With(bearer).Get("/v0/executions/{id}/events", r.getEvents)
+	mux.With(bearer).Get("/v0/executions/{id}/stream", r.streamExecution)
 	mux.With(bearer).Post("/v0/executions/{id}/cancel", r.cancelExecution)
 
 	// Agent routes
@@ -64,6 +66,7 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(hmac).Post("/v0/executions/{id}/steps", r.submitStep)
 	mux.With(hmac).Post("/v0/executions/{id}/steps/{step_id}/complete", r.completeStep)
 	mux.With(hmac).Post("/v0/executions/{id}/steps/{step_id}/fail", r.failStep)
+	mux.With(hmac).Post("/v0/executions/{id}/steps/{step_id}/stream", r.streamStepDelta)
 	mux.With(hmac).Post("/v0/executions/{id}/heartbeat", r.heartbeat)
 	mux.With(hmac).Post("/v0/executions/{id}/complete", r.agentCompleteExecution)
 	mux.With(hmac).Post("/v0/executions/{id}/fail", r.agentFailExecution)

@@ -32,6 +32,10 @@ submits it (`POST /v0/executions/{id}/steps`) exactly like a tool call:
   response is recorded as the step outcome — its `step.succeeded` event carries the
   response, token counts, and cost.
 
+For **live** token streaming to observers while the call is in flight, see
+[live streaming](streaming.md) — an ephemeral side channel that does not affect
+replay: the recorded response is still the whole assembled output.
+
 LLM calls are always `safe_to_retry`: the step ID doubles as the provider's
 idempotency key, so a retried call after a crash deduplicates at the provider.
 
