@@ -2,7 +2,7 @@
 
 The event ledger (`GET /v0/executions/{id}/events`) is completion-granular: a
 polling client sees an `llm_call` step's whole output only when its
-`step.succeeded` event lands. That is the right behaviour for durability and
+`step.succeeded` event lands. That is the right behavior for durability and
 replay — the ledger records completed facts, and replaying a finished step has
 nothing to stream.
 
