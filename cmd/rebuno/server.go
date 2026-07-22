@@ -169,7 +169,10 @@ func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slo
 	handler := api.NewRouter(adapt, adapt, adapt, cfg.AgentBearerToken, ready, observer)
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: handler}
 
-	mgr := lifecycle.NewManagerWithLocker(k, logger, cfg.CleanupInterval, deps.Locker, lifecycle.WithObserver(observer))
+	mgr := lifecycle.NewManagerWithLocker(k, logger, cfg.CleanupInterval, deps.Locker,
+		lifecycle.WithObserver(observer),
+		lifecycle.WithDeadlineInterval(cfg.DeadlineCheckInterval),
+	)
 	mgr.LeaderLockKey = cfg.LeaderLockKey
 	mgr.Retention = cfg.Retention
 	mgr.Start(ctx)
