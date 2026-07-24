@@ -76,13 +76,21 @@ step_id = hash(execution_id, kind, target, args_hash, occurrence)
 - `kind` — `tool_call` or `llm_call`.
 - `target` — the tool name or model id.
 - `args_hash` — a stable hash of the canonicalized arguments.
-- `occurrence` — the count of prior identical calls in this execution, so calling
-  `read_file("foo")` twice yields two distinct step IDs.
+- `occurrence` — the count of prior identical calls in this delivery attempt, so
+  calling `read_file("foo")` twice yields two distinct step IDs.
 
-Content-derived IDs are stable under reordering and parallel dispatch: two replays
-that issue the same set of effects produce the same step IDs regardless of order.
-The agent computes the ID and sends it in the `Rebuno-Step-Id` header; the kernel
-recomputes it and rejects a mismatch — agreement is the contract, not trust.
+The kernel assigns the ID. The agent submits `{kind, target, args}` along with the
+`dispatch_id` from its webhook and gets the ID back in the decision — it computes
+nothing and holds no step state, so an agent, a sidecar, and an LLM gateway all
+submit identically.
+
+Occurrence is counted per delivery attempt, under the execution lock, and the
+counter is cleared when a dispatch is claimed. Every attempt therefore starts from
+zero and recomputes the same IDs for the same effect sequence, which is what makes
+a resumed run short-circuit on steps the previous attempt already recorded. Because
+IDs are content-derived, they are stable under reordering and parallel dispatch:
+two attempts that issue the same set of effects produce the same set of IDs
+regardless of order.
 
 ## Durability and failure
 

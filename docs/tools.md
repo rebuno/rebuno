@@ -36,11 +36,13 @@ step_id = hash(execution_id, kind, target, args_hash, occurrence)
 - `target` — the tool name or model id.
 - `args_hash` — a stable hash of the canonicalized arguments (canonical JSON for
   tools; the canonical request body for LLM calls).
-- `occurrence` — the count of prior identical calls in this execution, so the same
-  call with the same arguments twice yields two distinct steps.
+- `occurrence` — the count of prior identical calls in this delivery attempt, so
+  the same call with the same arguments twice yields two distinct steps.
 
-Because IDs are content-derived, parallel effects and reordering across replays are
-safe — the same set of calls always produces the same set of IDs. See
+The kernel assigns the ID and returns it in the decision; the agent submits only
+`{kind, target, args}` and its `dispatch_id`. Because IDs are content-derived,
+parallel effects and reordering across replays are safe — the same set of calls
+always produces the same set of IDs. See
 [architecture.md](architecture.md#step-identity).
 
 ## Idempotency modes

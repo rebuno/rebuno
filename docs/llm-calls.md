@@ -51,11 +51,15 @@ transparent — see the [Python SDK](sdk/python.md#http_client--durable-llm-call
 already run your own LLM gateway or proxy in front of your providers, implement the
 same steps there. For each request:
 
-1. Compute the step ID from the canonical request (model + body).
-2. Submit the step to `POST /v0/executions/{id}/steps`.
-3. On `replay`, return the recorded response and skip the provider. On `proceed`,
+1. Submit the step to `POST /v0/executions/{id}/steps` — `{kind: "llm_call",
+   target: <model>, args: <request body>}` with the caller's dispatch id in
+   `Rebuno-Dispatch-Id`. The decision carries the `step_id`.
+2. On `replay`, return the recorded response and skip the provider. On `proceed`,
    forward to the provider and record the response via `.../complete` (or
    `.../fail`).
+
+A gateway needs the dispatch id to reach it, so the agent passes it through on
+each request (a header on the call into the gateway is enough).
 
 Any interception point that speaks the step contract makes LLM calls durable,
 whether that's an SDK-provided HTTP client or your own gateway. See the

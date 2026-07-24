@@ -94,8 +94,8 @@ additions won't break you):
 - **`Execution`** — `id`, `agent_id`, `agent_version`, `input`, `status`,
   `output`, `failure_reason`. `status` is an `ExecutionStatus`
   (`pending`/`running`/`blocked`/`completed`/`failed`/`cancelled`).
-- **`Step`** — `step_id`, `execution_id`, `kind`, `target`, `status`,
-  `idempotency`, `args`, `result`, `error`.
+- **`Step`** — `step_id`, `execution_id`, `kind`, `target`, `args_hash`,
+  `occurrence`, `status`, `idempotency`, `args`, `result`, `error`.
 - **`Event`** — `execution_id`, `event_seq`, `type`, `payload`, `occurred_at`.
 - **`Approval`** — `id`, `step_id`, `execution_id`, `status`, `message`,
   `decided_by`, `rationale`.

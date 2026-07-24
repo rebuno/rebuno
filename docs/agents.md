@@ -28,12 +28,12 @@ is what makes crashes and approvals transparent:
    `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`. The agent verifies the
    signature and acks with `200 OK` immediately. (Delivery is at-least-once, so the
    handler must be safe under duplicate dispatch — key on `(execution_id, dispatch_id)`.)
-2. **Hydrate.** The agent fetches the execution's input
-   (`GET /v0/executions/{id}`) and its recorded steps
-   (`GET /v0/executions/{id}/steps?status=terminal`) so it can replay prior effects.
+2. **Fetch input.** The agent reads the execution's original input
+   (`GET /v0/executions/{id}`).
 3. **Run.** The agent runs its own logic from the top with the original input.
 4. **Submit each effect.** For every tool or LLM call, the agent submits a step
-   (`POST /v0/executions/{id}/steps`) and acts on the decision:
+   (`POST /v0/executions/{id}/steps`, carrying the dispatch id) and acts on the
+   decision:
    - `replay` → the recorded result is returned; **the effect does not run**.
    - `proceed` → the agent performs the effect, then reports the outcome
      (`.../complete` or `.../fail`).
