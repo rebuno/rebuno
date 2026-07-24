@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
-	"github.com/rebuno/rebuno/internal/identity"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/store/memstore"
@@ -34,9 +33,7 @@ func TestApprovalExpiry(t *testing.T) {
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	argsHash, _ := identity.ComputeArgsHash(args)
-	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "write", argsHash, 0)
-	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, StepID: stepID})
+	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if dec.Decision != "blocked" {
 		t.Fatalf("expected blocked, got %s", dec.Decision)
 	}

@@ -76,7 +76,14 @@ func (rt *Router) submitStep(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	req.StepID = r.Header.Get("Rebuno-Step-Id")
+	if raw := r.Header.Get("Rebuno-Dispatch-Id"); raw != "" {
+		dispatchID, perr := uuid.Parse(raw)
+		if perr != nil {
+			WriteError(w, domain.ErrValidation)
+			return
+		}
+		req.DispatchID = dispatchID
+	}
 	dec, err := rt.agent.SubmitStep(r.Context(), id, req)
 	if err != nil {
 		WriteError(w, err)

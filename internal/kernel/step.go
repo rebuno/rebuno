@@ -19,10 +19,7 @@ type SubmitStepRequest struct {
 	Target      string          `json:"target"`
 	Args        json.RawMessage `json:"args"`
 	Idempotency string          `json:"idempotency,omitempty"`
-	// StepID is the agent-supplied deterministic step identity. The kernel
-	// recomputes the ID to validate consistency; if the step already exists,
-	// it is replayed directly without re-counting.
-	StepID string `json:"-"`
+	DispatchID  uuid.UUID       `json:"-"`
 }
 
 type CompleteStepRequest struct {
@@ -37,8 +34,8 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 	if req.Idempotency == "" {
 		req.Idempotency = "safe_to_retry"
 	}
-	if req.StepID == "" {
-		return domain.StepDecision{}, fmt.Errorf("%w: missing step_id", domain.ErrValidation)
+	if req.DispatchID == uuid.Nil {
+		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch_id", domain.ErrValidation)
 	}
 
 	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
@@ -55,37 +52,67 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 		return domain.StepDecision{Decision: "execution_terminal"}, nil
 	}
 
+	// Fail closed on a dispatch that isn't this execution's: it would silently
+	// start a fresh occurrence namespace, and every replayed effect would execute
+	// for real a second time.
+	dispatch, err := k.d.Queue.GetDispatch(ctx, req.DispatchID)
+	if err != nil {
+		if err == domain.ErrNotFound {
+			return domain.StepDecision{}, fmt.Errorf("%w: unknown dispatch_id", domain.ErrValidation)
+		}
+		return domain.StepDecision{}, err
+	}
+	if dispatch.ExecutionID != execID {
+		return domain.StepDecision{}, fmt.Errorf("%w: dispatch_id belongs to another execution", domain.ErrValidation)
+	}
+
 	argsHash, err := identity.ComputeArgsHash(req.Args)
 	if err != nil {
 		return domain.StepDecision{}, fmt.Errorf("%w: invalid args: %v", domain.ErrValidation, err)
 	}
 
-	existing, err := k.d.Steps.GetStep(ctx, req.StepID)
+	occurrence, err := k.d.Steps.DispatchOccurrence(ctx, req.DispatchID, req.Kind, req.Target, argsHash)
+	if err != nil {
+		return domain.StepDecision{}, err
+	}
+	stepID := identity.ComputeStepID(execID, req.Kind, req.Target, argsHash, occurrence)
+
+	dec, recorded, err := k.decideStep(ctx, exec, stepID, req, argsHash, occurrence)
+	if err != nil {
+		return domain.StepDecision{}, err
+	}
+
+	if recorded {
+		if err := k.d.Steps.AdvanceDispatchOccurrence(ctx, req.DispatchID, req.Kind, req.Target, argsHash, occurrence); err != nil {
+			return domain.StepDecision{}, err
+		}
+		dec.StepID = stepID
+	}
+	return dec, nil
+}
+
+func (k *Kernel) decideStep(
+	ctx context.Context, exec domain.Execution, stepID string,
+	req SubmitStepRequest, argsHash string, occurrence int,
+) (domain.StepDecision, bool, error) {
+	existing, err := k.d.Steps.GetStep(ctx, stepID)
 	if err == nil {
 		k.d.Observer.RecordReplay(true)
-		return k.handleExistingStep(ctx, existing, req.Idempotency)
+		dec, err := k.handleExistingStep(ctx, existing, req.Idempotency)
+		return dec, err == nil, err
 	}
 	if err != domain.ErrNotFound {
-		return domain.StepDecision{}, err
+		return domain.StepDecision{}, false, err
 	}
 
 	k.d.Observer.RecordStepSubmitted(string(req.Kind))
 	k.d.Observer.RecordReplay(false)
 
 	if exec.Status == domain.ExecutionBlocked {
-		return domain.StepDecision{Decision: "execution_blocked"}, nil
+		return domain.StepDecision{Decision: "execution_blocked"}, false, nil
 	}
 
-	// Kernel-authoritative occurrence: count matching prior steps under the lock.
-	occurrence, err := k.d.Steps.CountOccurrence(ctx, execID, req.Kind, req.Target, argsHash)
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-	computedID := identity.ComputeStepID(execID, req.Kind, req.Target, argsHash, occurrence)
-	if computedID != req.StepID {
-		return domain.StepDecision{}, fmt.Errorf("%w: sdk=%s kernel=%s", domain.ErrStepIDMismatch, req.StepID, computedID)
-	}
-
+	execID := exec.ID
 	input := domain.PolicyInput{
 		AgentID:  exec.AgentID,
 		Target:   req.Target,
@@ -96,10 +123,10 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 	polResult, err := k.d.Policy.Evaluate(ctx, input)
 	k.d.Observer.RecordPolicyLatency(time.Since(start))
 	if err != nil {
-		return domain.StepDecision{}, err
+		return domain.StepDecision{}, false, err
 	}
 	k.d.Observer.RecordPolicyDecision(polResult.Decision)
-	return k.recordStepDecision(ctx, execID, exec.AgentID, req.StepID, req, argsHash, occurrence, polResult)
+	return k.recordStepDecision(ctx, execID, exec.AgentID, stepID, req, argsHash, occurrence, polResult)
 }
 
 func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idempotency string) (domain.StepDecision, error) {
@@ -139,14 +166,14 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 	}
 }
 
-func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agentID, stepID string, req SubmitStepRequest, argsHash string, occurrence int, pol domain.PolicyResult) (domain.StepDecision, error) {
+func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agentID, stepID string, req SubmitStepRequest, argsHash string, occurrence int, pol domain.PolicyResult) (domain.StepDecision, bool, error) {
 	if pol.RateLimit.MaxCalls > 0 {
 		key := ratelimit.ScopeKey(pol.RuleID, pol.RateLimit.PerWhat, execID.String(), agentID)
 		allowed, _, err := k.d.RateLimiter.Allow(ctx, key, pol.RateLimit)
 		if err != nil {
 			if pol.RateLimit.OnLimiterError == domain.LimiterErrorDeny {
 				k.d.Observer.RecordRateLimit("error_denied")
-				return domain.StepDecision{Decision: "rate_limited", Reason: "rate_limiter_unavailable"}, nil
+				return domain.StepDecision{Decision: "rate_limited", Reason: "rate_limiter_unavailable"}, false, nil
 			}
 			// Fail open
 			k.log.Warn("rate limiter error, failing open",
@@ -156,7 +183,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		}
 		if !allowed {
 			k.d.Observer.RecordRateLimit("limited")
-			return domain.StepDecision{Decision: "rate_limited", Reason: "rate_limit_exceeded"}, nil
+			return domain.StepDecision{Decision: "rate_limited", Reason: "rate_limit_exceeded"}, false, nil
 		}
 	}
 
@@ -186,9 +213,9 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 			store.EventRecord{Type: domain.EventStepExecuting, Payload: projector.StepPayload(stepID, req.Kind, req.Target, "")},
 		)
 		if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
-			return domain.StepDecision{}, err
+			return domain.StepDecision{}, false, err
 		}
-		return domain.StepDecision{Decision: "proceed"}, nil
+		return domain.StepDecision{Decision: "proceed"}, true, nil
 
 	case domain.DecisionDeny:
 		step.Status = domain.StepDenied
@@ -199,9 +226,9 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 			store.EventRecord{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(stepID, req.Kind, req.Target, pol.RuleID, errPayload)},
 		)
 		if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
-			return domain.StepDecision{}, err
+			return domain.StepDecision{}, false, err
 		}
-		return domain.StepDecision{Decision: "denied", Reason: pol.Reason}, nil
+		return domain.StepDecision{Decision: "denied", Reason: pol.Reason}, true, nil
 
 	case domain.DecisionRequireApproval:
 		approvalID := uuid.Must(uuid.NewV7())
@@ -241,12 +268,12 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 			}
 			return tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionBlocked, nil, "")
 		}); err != nil {
-			return domain.StepDecision{}, err
+			return domain.StepDecision{}, false, err
 		}
-		return domain.StepDecision{Decision: "blocked", ApprovalID: &approvalID}, nil
+		return domain.StepDecision{Decision: "blocked", ApprovalID: &approvalID}, true, nil
 	}
 
-	return domain.StepDecision{}, fmt.Errorf("unknown policy decision: %s", pol.Decision)
+	return domain.StepDecision{}, false, fmt.Errorf("unknown policy decision: %s", pol.Decision)
 }
 
 func (k *Kernel) writeStepAndEvents(ctx context.Context, step domain.Step, evts []store.EventRecord) error {

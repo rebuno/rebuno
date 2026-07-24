@@ -46,6 +46,10 @@ func (s *Store) claimLocked(ctx context.Context, replica string, batch int, now 
 		pending = pending[:batch]
 	}
 	for i := range pending {
+		// Each delivery attempt gets a fresh occurrence namespace. A reclaimed
+		// dispatch keeps its id, so without this the resumed agent would resume
+		// counting instead of replaying, and re-run every recorded effect.
+		s.clearCountersLocked(pending[i].ID)
 		pending[i].Attempt++
 		pending[i].Status = domain.DispatchInFlight
 		locked := replica
@@ -77,6 +81,20 @@ func (s *Store) ackLocked(ctx context.Context, id uuid.UUID, status domain.Dispa
 	d.UpdatedAt = time.Now().UTC()
 	s.dispatches[id] = d
 	return nil
+}
+
+func (s *Store) GetDispatch(ctx context.Context, id uuid.UUID) (domain.Dispatch, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.getDispatchLocked(id)
+}
+
+func (s *Store) getDispatchLocked(id uuid.UUID) (domain.Dispatch, error) {
+	d, ok := s.dispatches[id]
+	if !ok {
+		return domain.Dispatch{}, domain.ErrNotFound
+	}
+	return d, nil
 }
 
 func (s *Store) ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error) {
@@ -156,6 +174,10 @@ func (tx *txStore) Claim(ctx context.Context, replica string, batch int, now tim
 
 func (tx *txStore) Ack(ctx context.Context, id uuid.UUID, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
 	return tx.ackLocked(ctx, id, status, nextAttemptAt)
+}
+
+func (tx *txStore) GetDispatch(ctx context.Context, id uuid.UUID) (domain.Dispatch, error) {
+	return tx.getDispatchLocked(id)
 }
 
 func (tx *txStore) ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error) {

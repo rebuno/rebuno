@@ -48,8 +48,6 @@ func MapError(err error) (string, int) {
 		return "unauthorized", http.StatusUnauthorized
 	case errors.Is(err, domain.ErrForbidden):
 		return "forbidden", http.StatusForbidden
-	case errors.Is(err, domain.ErrStepIDMismatch):
-		return "step_id_divergence", http.StatusConflict
 	case errors.Is(err, domain.ErrExecutionTerminal):
 		return "execution_terminal", http.StatusConflict
 	default:

@@ -32,6 +32,7 @@ const (
 
 type StepDecision struct {
 	Decision   string          `json:"decision"`
+	StepID     string          `json:"step_id,omitempty"`
 	Result     json.RawMessage `json:"result,omitempty"`
 	Error      json.RawMessage `json:"error,omitempty"`
 	ApprovalID *uuid.UUID      `json:"approval_id,omitempty"`
