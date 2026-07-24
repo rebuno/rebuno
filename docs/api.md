@@ -78,26 +78,28 @@ HMAC-verified (except the reads, which also accept bearer).
 `GET /v0/executions/{id}` — original `input` and current `status`.
 
 `GET /v0/executions/{id}/steps?status=terminal` — the execution's steps in one
-read, so the agent builds its `{step_id → result}` map at dispatch start.
-`status=terminal` trims to `succeeded`/`failed`/`denied`.
+read, for inspection and auditing. `status=terminal` trims to
+`succeeded`/`failed`/`denied`.
 
 `GET /v0/executions/{id}/steps/{step_id}` — point lookup of one step; `404` if
 absent.
 
 ### Submit a step
 
-`POST /v0/executions/{id}/steps` · HMAC · header `Rebuno-Step-Id: <id>`
+`POST /v0/executions/{id}/steps` · HMAC · header `Rebuno-Dispatch-Id: <id>`
 
 ```json
 { "kind": "tool_call", "target": "web_search", "args": {...}, "idempotency": "safe_to_retry" }
 ```
 
-`kind` is `tool_call` or `llm_call`. The kernel recomputes the step ID and
-compares it to the header, runs the [replay short-circuit and policy](architecture.md),
-and returns a **decision**:
+`kind` is `tool_call` or `llm_call`. `Rebuno-Dispatch-Id` is the `dispatch_id`
+from the webhook that delivered this attempt; it scopes the kernel's occurrence
+counter and is required. The kernel derives the step ID, runs the
+[replay short-circuit and policy](architecture.md), and returns a **decision**
+carrying the ID to address the step's `complete`/`fail` routes:
 
 ```json
-{ "decision": "proceed" }
+{ "decision": "proceed", "step_id": "9a3f…" }
 ```
 
 | `decision` | Meaning |
