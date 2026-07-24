@@ -14,9 +14,10 @@ const now = await step("now", () => Date.now());
 
 Why this matters: on resume the handler re-runs from the top. If it calls
 `Math.random()` or `Date.now()` directly, it gets a *different* value the second
-time, and the sequence of effects that follow can diverge from what was recorded
-— which the kernel rejects (see
-[`StepIDMismatch`](internals.md#determinism-and-step-ids)). Wrapping the
+time, and the effects that follow carry different arguments — so they get
+different step ids and the kernel runs them again for real instead of replaying
+the recorded outcomes (see
+[determinism and step ids](internals.md#determinism-and-step-ids)). Wrapping the
 non-determinism in `step()` records the value the first time and replays that same
 value on every subsequent dispatch, keeping the run deterministic.
 
