@@ -78,24 +78,49 @@ func getStep(ctx context.Context, q Querier, stepID string) (domain.Step, error)
 	return step, nil
 }
 
-func (s *Store) CountOccurrence(ctx context.Context, execID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
-	return countOccurrence(ctx, s.pool, execID, kind, target, argsHash)
+func (s *Store) DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
+	return dispatchOccurrence(ctx, s.pool, dispatchID, kind, target, argsHash)
 }
 
-func (q querier) CountOccurrence(ctx context.Context, execID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
-	return countOccurrence(ctx, q.q, execID, kind, target, argsHash)
+func (q querier) DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
+	return dispatchOccurrence(ctx, q.q, dispatchID, kind, target, argsHash)
 }
 
-func countOccurrence(ctx context.Context, q Querier, execID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
-	var n int
+func dispatchOccurrence(ctx context.Context, q Querier, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
+	var consumed int
 	err := q.QueryRow(ctx, `
-		SELECT COUNT(*) FROM steps
-		WHERE execution_id = $1 AND kind = $2 AND target = $3 AND args_hash = $4
-	`, execID.String(), string(kind), target, argsHash).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count occurrences: %w", err)
+		SELECT consumed + 1 FROM dispatch_step_counters
+		WHERE dispatch_id = $1 AND kind = $2 AND target = $3 AND args_hash = $4
+	`, dispatchID.String(), string(kind), target, argsHash).Scan(&consumed)
+	if err == pgx.ErrNoRows {
+		return 0, nil
 	}
-	return n, nil
+	if err != nil {
+		return 0, fmt.Errorf("dispatch occurrence: %w", err)
+	}
+	return consumed, nil
+}
+
+func (s *Store) AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
+	return advanceDispatchOccurrence(ctx, s.pool, dispatchID, kind, target, argsHash, consumed)
+}
+
+func (q querier) AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
+	return advanceDispatchOccurrence(ctx, q.q, dispatchID, kind, target, argsHash, consumed)
+}
+
+func advanceDispatchOccurrence(ctx context.Context, q Querier, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
+	// GREATEST keeps the counter monotonic if a retry replays an older occurrence.
+	_, err := q.Exec(ctx, `
+		INSERT INTO dispatch_step_counters (dispatch_id, kind, target, args_hash, consumed)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (dispatch_id, kind, target, args_hash)
+		DO UPDATE SET consumed = GREATEST(dispatch_step_counters.consumed, EXCLUDED.consumed)
+	`, dispatchID.String(), string(kind), target, argsHash, consumed)
+	if err != nil {
+		return fmt.Errorf("advance dispatch occurrence: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {

@@ -60,20 +60,48 @@ func (s *Store) getStepLocked(ctx context.Context, stepID string) (domain.Step, 
 	return step, nil
 }
 
-func (s *Store) CountOccurrence(ctx context.Context, execID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.countOccurrenceLocked(ctx, execID, kind, target, argsHash)
+type counterKey struct {
+	dispatchID uuid.UUID
+	kind       domain.StepKind
+	target     string
+	argsHash   string
 }
 
-func (s *Store) countOccurrenceLocked(ctx context.Context, execID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
-	count := 0
-	for _, step := range s.steps {
-		if step.ExecutionID == execID && step.Kind == kind && step.Target == target && step.ArgsHash == argsHash {
-			count++
+func (s *Store) DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.dispatchOccurrenceLocked(dispatchID, kind, target, argsHash)
+}
+
+func (s *Store) dispatchOccurrenceLocked(dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
+	consumed, ok := s.counters[counterKey{dispatchID, kind, target, argsHash}]
+	if !ok {
+		return 0, nil
+	}
+	return consumed + 1, nil
+}
+
+func (s *Store) AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.advanceDispatchOccurrenceLocked(dispatchID, kind, target, argsHash, consumed)
+}
+
+func (s *Store) clearCountersLocked(dispatchID uuid.UUID) {
+	for k := range s.counters {
+		if k.dispatchID == dispatchID {
+			delete(s.counters, k)
 		}
 	}
-	return count, nil
+}
+
+func (s *Store) advanceDispatchOccurrenceLocked(dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
+	key := counterKey{dispatchID, kind, target, argsHash}
+	if prev, ok := s.counters[key]; ok && prev > consumed {
+		return nil // keep monotonic, mirroring the GREATEST upsert in postgres
+	}
+	s.counters[key] = consumed
+	return nil
 }
 
 func (s *Store) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {
@@ -98,8 +126,12 @@ func (tx *txStore) GetStep(ctx context.Context, stepID string) (domain.Step, err
 	return tx.getStepLocked(ctx, stepID)
 }
 
-func (tx *txStore) CountOccurrence(ctx context.Context, execID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
-	return tx.countOccurrenceLocked(ctx, execID, kind, target, argsHash)
+func (tx *txStore) DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
+	return tx.dispatchOccurrenceLocked(dispatchID, kind, target, argsHash)
+}
+
+func (tx *txStore) AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
+	return tx.advanceDispatchOccurrenceLocked(dispatchID, kind, target, argsHash, consumed)
 }
 
 func (tx *txStore) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {

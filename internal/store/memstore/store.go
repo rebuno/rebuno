@@ -16,6 +16,7 @@ func NewStore() *Store {
 		steps:      make(map[string]domain.Step),
 		approvals:  make(map[uuid.UUID]domain.Approval),
 		dispatches: make(map[uuid.UUID]domain.Dispatch),
+		counters:   make(map[counterKey]int),
 		lockers:    make(map[string]chan struct{}),
 	}
 }
@@ -28,6 +29,7 @@ type Store struct {
 	steps      map[string]domain.Step
 	approvals  map[uuid.UUID]domain.Approval
 	dispatches map[uuid.UUID]domain.Dispatch
+	counters   map[counterKey]int
 	lockers    map[string]chan struct{}
 	lockMtx    sync.Mutex
 }

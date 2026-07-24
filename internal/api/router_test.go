@@ -72,7 +72,7 @@ func TestAgentSubmitAndCompleteViaHTTP(t *testing.T) {
 	submit := map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(args)}
 	body, _ := json.Marshal(submit)
 	req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
-	req.Header.Set("Rebuno-Step-Id", stepID)
+	req.Header.Set("Rebuno-Dispatch-Id", dispatchIDOf(t, k, exec.ID).String())
 	signAgentRequest(req, body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -117,13 +117,12 @@ func TestListStepsTerminalFilter(t *testing.T) {
 	// Step 1: submit + complete -> terminal (succeeded).
 	doneArgs := json.RawMessage(`{"path":"/a"}`)
 	doneID := computeStepID(t, exec.ID, domain.StepKindTool, "read", doneArgs, 0)
-	submitStepHTTP(t, mux, exec.ID, "read", doneArgs, doneID)
+	submitStepHTTP(t, mux, k, exec.ID, "read", doneArgs)
 	completeStepHTTP(t, mux, exec.ID, doneID)
 
 	// Step 2: submit only -> non-terminal (executing).
 	openArgs := json.RawMessage(`{"path":"/b"}`)
-	openID := computeStepID(t, exec.ID, domain.StepKindTool, "read", openArgs, 0)
-	submitStepHTTP(t, mux, exec.ID, "read", openArgs, openID)
+	submitStepHTTP(t, mux, k, exec.ID, "read", openArgs)
 
 	// Unfiltered: both steps.
 	if got := listStepsHTTP(t, mux, exec.ID, ""); len(got) != 2 {
@@ -156,7 +155,7 @@ func TestStepsReachableViaBearerAuth(t *testing.T) {
 	exec, _ := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`), "")
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := computeStepID(t, exec.ID, domain.StepKindTool, "read", args, 0)
-	submitStepHTTP(t, mux, exec.ID, "read", args, stepID) // submitted as the agent, over HMAC
+	submitStepHTTP(t, mux, k, exec.ID, "read", args) // submitted as the agent, over HMAC
 
 	// listSteps via bearer token (no HMAC headers) must succeed.
 	req := httptest.NewRequest(http.MethodGet, "/v0/executions/"+exec.ID.String()+"/steps", nil)
@@ -177,11 +176,22 @@ func TestStepsReachableViaBearerAuth(t *testing.T) {
 	}
 }
 
-func submitStepHTTP(t *testing.T, mux http.Handler, execID uuid.UUID, target string, args json.RawMessage, stepID string) {
+// dispatchIDOf returns the execution's live dispatch id, which every submit must
+// carry: it scopes the kernel's occurrence counting.
+func dispatchIDOf(t *testing.T, k *kernel.Kernel, execID uuid.UUID) uuid.UUID {
+	t.Helper()
+	ds, err := k.Deps().Queue.ListDispatchesByExecution(context.Background(), execID)
+	if err != nil || len(ds) == 0 {
+		t.Fatalf("no dispatch for execution: %v", err)
+	}
+	return ds[len(ds)-1].ID
+}
+
+func submitStepHTTP(t *testing.T, mux http.Handler, k *kernel.Kernel, execID uuid.UUID, target string, args json.RawMessage) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"kind": "tool_call", "target": target, "args": args})
 	req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+execID.String()+"/steps", bytes.NewReader(body))
-	req.Header.Set("Rebuno-Step-Id", stepID)
+	req.Header.Set("Rebuno-Dispatch-Id", dispatchIDOf(t, k, execID).String())
 	signAgentRequest(req, body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -285,11 +295,10 @@ default_action: deny
 
 	// Non-matching argument should be denied by the loaded bundle.
 	args := json.RawMessage(`{"env":"staging-123"}`)
-	stepID := computeStepID(t, exec.ID, domain.StepKindTool, "read", args, 0)
 	submit := map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(args)}
 	body, _ = json.Marshal(submit)
 	req = httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
-	req.Header.Set("Rebuno-Step-Id", stepID)
+	req.Header.Set("Rebuno-Dispatch-Id", dispatchIDOf(t, k, exec.ID).String())
 	signAgentRequest(req, body)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -304,11 +313,10 @@ default_action: deny
 
 	// Matching argument should be allowed.
 	args = json.RawMessage(`{"env":"prod-123"}`)
-	stepID = computeStepID(t, exec.ID, domain.StepKindTool, "read", args, 0)
 	submit = map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(args)}
 	body, _ = json.Marshal(submit)
 	req = httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
-	req.Header.Set("Rebuno-Step-Id", stepID)
+	req.Header.Set("Rebuno-Dispatch-Id", dispatchIDOf(t, k, exec.ID).String())
 	signAgentRequest(req, body)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)

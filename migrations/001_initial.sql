@@ -80,6 +80,15 @@ CREATE TABLE IF NOT EXISTS dispatches (
 );
 CREATE INDEX IF NOT EXISTS dispatches_due_idx ON dispatches (status, next_attempt_at) WHERE status IN ('pending','failed');
 
+CREATE TABLE IF NOT EXISTS dispatch_step_counters (
+    dispatch_id UUID NOT NULL REFERENCES dispatches(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    target TEXT NOT NULL,
+    args_hash TEXT NOT NULL,
+    consumed INT NOT NULL,
+    PRIMARY KEY (dispatch_id, kind, target, args_hash)
+);
+
 CREATE TABLE IF NOT EXISTS rate_buckets (
     key            TEXT PRIMARY KEY,
     tokens         DOUBLE PRECISION NOT NULL,

@@ -19,7 +19,8 @@ type EventStore interface {
 type StepStore interface {
 	Upsert(ctx context.Context, step domain.Step) error
 	GetStep(ctx context.Context, stepID string) (domain.Step, error)
-	CountOccurrence(ctx context.Context, execID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error)
+	DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error)
+	AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error
 	ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error)
 }
 
@@ -52,6 +53,7 @@ type JobQueue interface {
 	Enqueue(ctx context.Context, d domain.Dispatch) error
 	Claim(ctx context.Context, replica string, batch int, now time.Time) ([]domain.Dispatch, error)
 	Ack(ctx context.Context, id uuid.UUID, status domain.DispatchStatus, nextAttemptAt *time.Time) error
+	GetDispatch(ctx context.Context, id uuid.UUID) (domain.Dispatch, error)
 	ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error)
 	TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error
 	// ReclaimStalled resets in_flight dispatches whose lease has expired back to

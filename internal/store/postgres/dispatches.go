@@ -67,6 +67,10 @@ func claimDispatches(ctx context.Context, q Querier, replica string, batch int, 
 			ORDER BY next_attempt_at
 			LIMIT $2
 			FOR UPDATE SKIP LOCKED
+		),
+		cleared AS (
+			DELETE FROM dispatch_step_counters
+			WHERE dispatch_id IN (SELECT id FROM claimed)
 		)
 		UPDATE dispatches d
 		SET status = 'in_flight',
@@ -112,6 +116,31 @@ func ackDispatch(ctx context.Context, q Querier, id uuid.UUID, status domain.Dis
 		return domain.ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) GetDispatch(ctx context.Context, id uuid.UUID) (domain.Dispatch, error) {
+	return getDispatch(ctx, s.pool, id)
+}
+
+func (q querier) GetDispatch(ctx context.Context, id uuid.UUID) (domain.Dispatch, error) {
+	return getDispatch(ctx, q.q, id)
+}
+
+func getDispatch(ctx context.Context, q Querier, id uuid.UUID) (domain.Dispatch, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id, execution_id, status, attempt, max_attempts, next_attempt_at,
+		       locked_by, locked_at, created_at, updated_at
+		FROM dispatches
+		WHERE id = $1
+	`, id.String())
+	d, err := scanDispatch(row)
+	if err == pgx.ErrNoRows {
+		return domain.Dispatch{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Dispatch{}, fmt.Errorf("get dispatch: %w", err)
+	}
+	return d, nil
 }
 
 func (s *Store) ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error) {

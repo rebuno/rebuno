@@ -44,6 +44,23 @@ func setup(t *testing.T) (*kernel.Kernel, context.Context) {
 	return k, ctx
 }
 
+// dispatchOf returns the execution's live dispatch. Submits are scoped to it the
+// same way an agent scopes them: the id arrives in the dispatch webhook and is
+// forwarded back untouched. It also scopes occurrence counting, so tests that
+// want a fresh replay generation ask for a new dispatch rather than resetting
+// anything client-side.
+func dispatchOf(t *testing.T, k *kernel.Kernel, execID uuid.UUID) uuid.UUID {
+	t.Helper()
+	ds, err := k.Deps().Queue.ListDispatchesByExecution(context.Background(), execID)
+	if err != nil {
+		t.Fatalf("list dispatches: %v", err)
+	}
+	if len(ds) == 0 {
+		t.Fatal("execution has no dispatch")
+	}
+	return ds[len(ds)-1].ID
+}
+
 func TestCreateExecution(t *testing.T) {
 	k, ctx := setup(t)
 	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{"msg":"hi"}`), "v1")
@@ -78,7 +95,7 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", argsHash, 0)
 
 	// First submit -> proceed
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: stepID})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +108,12 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Replay returns result. The step_id/occurrence must remain stable.
-	dec2, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: stepID})
+	// Re-dispatch, then replay: the occurrence counter restarts with the new
+	// dispatch, so the same call recomputes the same step_id and short-circuits.
+	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	dec2, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,13 +125,82 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 	}
 }
 
-func TestStepIDDivergence(t *testing.T) {
+// A dispatch id from a different execution must be rejected rather than silently
+// opening a fresh occurrence namespace — that would make every already-recorded
+// effect miss its replay and run for real a second time.
+func TestSubmitRejectsForeignDispatch(t *testing.T) {
+	k, ctx := setup(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	other, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	args := json.RawMessage(`{"path":"/tmp"}`)
+
+	_, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+		Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, other.ID),
+	})
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected validation error for foreign dispatch, got %v", err)
+	}
+
+	_, err = k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+		Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected validation error for unknown dispatch, got %v", err)
+	}
+
+	_, err = k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+		Kind: domain.StepKindTool, Target: "read", Args: args,
+	})
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected validation error for missing dispatch, got %v", err)
+	}
+}
+
+// Occurrence is scoped to the dispatch, so a re-dispatch walks the same step IDs
+// and replays, while identical calls *within* one dispatch get distinct steps.
+func TestOccurrenceIsScopedToDispatch(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	_, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: "wrong-id"})
-	if err == nil {
-		t.Fatal("expected divergence error")
+	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)}
+
+	first, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.CompleteStep(ctx, first.StepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"n":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same dispatch, identical args: a genuinely new call, not a replay.
+	second, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Decision != "proceed" {
+		t.Fatalf("second identical call in a dispatch: want proceed, got %s", second.Decision)
+	}
+	if second.StepID == first.StepID {
+		t.Fatal("identical calls in one dispatch must get distinct step ids")
+	}
+
+	// New dispatch: the counter restarts, so the first call replays.
+	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	req.DispatchID = dispatchOf(t, k, exec.ID)
+	resumed, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Decision != "replay" {
+		t.Fatalf("resumed dispatch: want replay, got %s", resumed.Decision)
+	}
+	if resumed.StepID != first.StepID {
+		t.Fatal("resumed dispatch must recompute the original step id")
+	}
+	if string(resumed.Result) != `{"n":1}` {
+		t.Fatalf("replayed the wrong result: %s", resumed.Result)
 	}
 }
 
@@ -132,7 +222,7 @@ func TestPolicyDeny(t *testing.T) {
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
-	dec, err := k2.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: stepID})
+	dec, err := k2.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,8 +274,7 @@ func TestApprovalFlow(t *testing.T) {
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "write", mustHash(args), 0)
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, StepID: stepID})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,8 +285,11 @@ func TestApprovalFlow(t *testing.T) {
 		t.Fatalf("expected blocked, got %s", got.Status)
 	}
 
-	// Replay while blocked returns blocked.
-	dec2, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, StepID: stepID})
+	// A re-dispatch that reaches the still-pending step gets blocked again.
+	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	dec2, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if dec2.Decision != "blocked" {
 		t.Fatalf("expected still blocked, got %s", dec2.Decision)
 	}
@@ -210,7 +302,7 @@ func TestApprovalFlow(t *testing.T) {
 	}
 
 	// Now submit returns proceed.
-	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, StepID: stepID})
+	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,8 +335,7 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "write", mustHash(args), 0)
-	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, StepID: stepID, Idempotency: "at_most_once"}
+	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID), Idempotency: "at_most_once"}
 
 	dec, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
@@ -257,6 +348,9 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The grant enqueues a fresh dispatch; the resumed run reaches the approved
+	// step at occurrence 0 again and is told to proceed.
+	req.DispatchID = dispatchOf(t, k, exec.ID)
 	dec2, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -289,8 +383,7 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "write", mustHash(args), 0)
-	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, StepID: stepID})
+	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if dec.Decision != "blocked" || dec.ApprovalID == nil {
 		t.Fatal("expected blocked")
 	}
@@ -324,7 +417,7 @@ func TestLLMCallFlow(t *testing.T) {
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindLLM, "gpt-4", argsHash, 0)
 
 	// An llm_call goes through the same submit_step write path as a tool call.
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, StepID: stepID})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +425,7 @@ func TestLLMCallFlow(t *testing.T) {
 		t.Fatalf("expected proceed, got %s", dec.Decision)
 	}
 	// Re-submitting the same step_id while still executing must be accepted (no divergence).
-	dec2, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, StepID: stepID})
+	dec2, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,8 +437,11 @@ func TestLLMCallFlow(t *testing.T) {
 	if _, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: resp}); err != nil {
 		t.Fatal(err)
 	}
-	// After completion, replay returns the cached result.
-	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, StepID: stepID})
+	// After completion, a re-dispatch replays the cached result.
+	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,8 +463,7 @@ func TestTerminalRejectsFurtherSteps(t *testing.T) {
 	if err := k.CancelExecution(ctx, exec.ID); err != nil {
 		t.Fatal(err)
 	}
-	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(json.RawMessage(`{}`)), 0)
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`), StepID: stepID})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`), DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,11 +598,8 @@ func TestRateLimitDoubleStep(t *testing.T) {
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	hash := mustHash(args)
-	step0 := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", hash, 0)
-	step1 := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", hash, 1)
 
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: step0})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +607,7 @@ func TestRateLimitDoubleStep(t *testing.T) {
 		t.Fatalf("first step expected proceed, got %s", dec.Decision)
 	}
 
-	dec, err = k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: step1})
+	dec, err = k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +722,7 @@ func submitLLMStep(t *testing.T, k *kernel.Kernel, ctx context.Context, exec dom
 	req := json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
 	argsHash, _ := identity.ComputeArgsHash(req)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindLLM, "gpt-4", argsHash, 0)
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, StepID: stepID})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,7 +929,7 @@ func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
-	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: stepID}); err != nil {
+	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -882,7 +974,7 @@ func TestFailStepAfterExecutionCancelled(t *testing.T) {
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
-	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, StepID: stepID}); err != nil {
+	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1037,10 +1129,9 @@ rules:
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/etc/passwd"}`)
-	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "fs_write", mustHash(args), 0)
 	before := time.Now().UTC()
 	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
-		Kind: domain.StepKindTool, Target: "fs_write", Args: args, StepID: stepID,
+		Kind: domain.StepKindTool, Target: "fs_write", Args: args, DispatchID: dispatchOf(t, k, exec.ID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1103,9 +1194,8 @@ rules:
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/etc/passwd"}`)
-	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "fs_write", mustHash(args), 0)
 	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
-		Kind: domain.StepKindTool, Target: "fs_write", Args: args, StepID: stepID,
+		Kind: domain.StepKindTool, Target: "fs_write", Args: args, DispatchID: dispatchOf(t, k, exec.ID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1171,4 +1261,50 @@ func TestApproversGateWhoMayDecide(t *testing.T) {
 			t.Fatalf("grant by carol on an unrestricted approval: %v", err)
 		}
 	})
+}
+
+// A dispatch reclaimed after a crashed attempt is redelivered under the SAME id
+// (ReclaimStalled updates the row in place). The resumed agent replays from the
+// top, so its occurrence counting has to restart too.
+func TestReclaimedDispatchReplaysFromZero(t *testing.T) {
+	k, ctx := setup(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	q := k.Deps().Queue
+	now := time.Now().UTC()
+
+	claimed, err := q.Claim(ctx, "replica-1", 10, now)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %v (n=%d)", err, len(claimed))
+	}
+	did := claimed[0].ID
+
+	args := json.RawMessage(`{"path":"/tmp"}`)
+	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: did}
+	first, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.CompleteStep(ctx, first.StepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"n":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Agent crashes; the lease expires and the dispatch is reclaimed and redelivered.
+	if _, err := q.ReclaimStalled(ctx, now.Add(time.Hour), time.Minute, 10); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := q.Claim(ctx, "replica-2", 10, now.Add(time.Hour))
+	if err != nil || len(reclaimed) != 1 {
+		t.Fatalf("reclaim-claim: %v (n=%d)", err, len(reclaimed))
+	}
+	if reclaimed[0].ID != did {
+		t.Fatalf("expected the same dispatch id on redelivery, got %s", reclaimed[0].ID)
+	}
+
+	resumed, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Decision != "replay" {
+		t.Fatalf("redelivered dispatch must replay, got %s (would re-run the effect)", resumed.Decision)
+	}
 }
