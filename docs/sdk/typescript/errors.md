@@ -30,8 +30,7 @@ RebunoError                  .details
 │  ├─ UnauthorizedError     401  authentication failed
 │  ├─ NotFoundError         404  resource not found
 │  ├─ ConflictError         409  conflict
-│  ├─ PolicyError           403  denied by policy (carries .ruleId)
-│  └─ StepIDMismatch        409  kernel rejected the SDK-computed step id
+│  └─ PolicyError           403  denied by policy (carries .ruleId)
 ├─ ToolError                a tool's effect body failed (carries .toolId, .stepId, .retryable)
 ├─ RateLimited              a step was rejected by a policy rate limit (carries .reason)
 ├─ Blocked                  internal: a step is awaiting approval (carries .approvalId)
@@ -47,12 +46,6 @@ disagree on which class a code means.
 
 - **`PolicyError`** — an action was denied by policy. Also has `.ruleId` naming
   the rule that denied it.
-- **`StepIDMismatch`** — the kernel rejected the step id the SDK computed
-  (`409 step_id_divergence`). This signals the agent's effect sequence diverged
-  from a prior dispatch — usually **non-determinism that wasn't wrapped in
-  [`step()`](steps.md)**. See
-  [determinism and step ids](internals.md#determinism-and-step-ids).
-
 ### `ToolError`
 
 Thrown when a tool's effect body throws. Carries `.toolId`, `.stepId`, and a
@@ -80,5 +73,5 @@ have a specific reason (and re-throw if you do).
 ## What's exported
 
 `RebunoError`, `NetworkError`, `APIError`, `ValidationError`, `UnauthorizedError`,
-`NotFoundError`, `ConflictError`, `PolicyError`, `StepIDMismatch`, `ToolError`,
+`NotFoundError`, `ConflictError`, `PolicyError`, `ToolError`,
 `RateLimited`, `Blocked`, and `Terminated` are all importable from `rebuno`.

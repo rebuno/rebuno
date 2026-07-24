@@ -92,15 +92,15 @@ Each webhook POST carries an `execution_id`. The agent:
 
 1. **Verifies the signature.** The body is HMAC-SHA256'd with the agent secret
    and compared against the `Rebuno-Signature: sha256=...` header. A bad or
-   missing signature returns `401`; a body with no `execution_id` returns `400`.
+   missing signature returns `401`; a body with no `execution_id` or
+   `dispatch_id` returns `400`.
 2. **Acknowledges immediately.** The handler runs in a background task and the
    webhook returns `200` right away, so the kernel's delivery isn't held open for
    the whole execution.
 3. **Skips terminal executions.** If the execution is already
    `completed`/`failed`/`cancelled`, there's nothing to do.
-4. **Hydrates and runs.** It loads the execution's already-terminal steps in one
-   read (so replay is local, not a round trip per step), sets the ambient
-   execution context, validates/binds the input, and runs your handler.
+4. **Runs.** It fetches the execution's input, sets the ambient execution context
+   (carrying the dispatch id), validates/binds the input, and runs your handler.
 
 Because the same handler runs on every dispatch, **resume is just re-running with
 replay**: each recorded step returns its stored result instead of executing
@@ -117,7 +117,7 @@ The agent maps outcomes from your handler onto the execution:
 |---------|--------|
 | returns normally | execution **completes** with the return value as output |
 | throws `Blocked` / `Terminated` | internal control-flow signals (an approval is pending, or the execution is terminal) — the dispatch unwinds cleanly and returns `200`; not an error |
-| throws `PolicyError`, `ToolError`, `RateLimited`, `StepIDMismatch` | execution is **failed** with the message |
+| throws `PolicyError`, `ToolError`, `RateLimited` | execution is **failed** with the message |
 | throws any other error | logged, execution is **failed** with the message |
 
 See [Errors](errors.md) for what each class means.

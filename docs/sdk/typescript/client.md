@@ -90,5 +90,5 @@ won't break you). The types live in the package's exports:
 - **`Event`** — `executionId`, `eventSeq`, `type`, `payload`, `occurredAt`.
 - **`Approval`** — `id`, `stepId`, `executionId`, `status`, `message`,
   `decidedBy`, `rationale`.
-- **`Step`** — `stepId`, `executionId`, `kind`, `target`, `status`,
-  `idempotency`, `args`, `result`, `error`.
+- **`Step`** — `stepId`, `executionId`, `kind`, `target`, `argsHash`,
+  `occurrence`, `status`, `idempotency`, `args`, `result`, `error`.
