@@ -5,15 +5,14 @@ CREATE TABLE IF NOT EXISTS agents (
     policy_bundle TEXT,
     registered_at TIMESTAMPTZ NOT NULL
 );
-ALTER TABLE IF EXISTS agents ADD COLUMN IF NOT EXISTS policy_bundle TEXT;
 
 CREATE TABLE IF NOT EXISTS executions (
     id UUID PRIMARY KEY,
     agent_id TEXT NOT NULL REFERENCES agents(id),
     agent_version TEXT,
-    input JSONB NOT NULL,
+    input JSONB COMPRESSION lz4 NOT NULL,
     status TEXT NOT NULL,
-    output JSONB,
+    output JSONB COMPRESSION lz4,
     failure_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
@@ -41,9 +40,9 @@ CREATE TABLE IF NOT EXISTS steps (
     occurrence INT NOT NULL,
     status TEXT NOT NULL,
     idempotency TEXT NOT NULL DEFAULT 'safe_to_retry',
-    args JSONB,
-    result JSONB,
-    error JSONB,
+    args JSONB COMPRESSION lz4,
+    result JSONB COMPRESSION lz4,
+    error JSONB COMPRESSION lz4,
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     UNIQUE (execution_id, kind, target, args_hash, occurrence)
@@ -97,9 +96,3 @@ CREATE TABLE IF NOT EXISTS rate_buckets (
     updated_at     TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS rate_buckets_updated_idx ON rate_buckets (updated_at);
-
-ALTER TABLE IF EXISTS executions ALTER COLUMN input  SET COMPRESSION lz4;
-ALTER TABLE IF EXISTS executions ALTER COLUMN output SET COMPRESSION lz4;
-ALTER TABLE IF EXISTS steps      ALTER COLUMN args   SET COMPRESSION lz4;
-ALTER TABLE IF EXISTS steps      ALTER COLUMN result SET COMPRESSION lz4;
-ALTER TABLE IF EXISTS steps      ALTER COLUMN error  SET COMPRESSION lz4;
