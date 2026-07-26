@@ -45,7 +45,7 @@ you can gate models or arguments with [policy](policy.md).
 ## Implementing interception
 
 The Rebuno SDKs ship an interceptor you drop into your model client, so this is
-transparent — see the [Python SDK](sdk/python.md#http_client--durable-llm-calls).
+transparent — see [LLM calls](sdk/python/llm-calls.md) in the Python SDK docs.
 
 **You don't need the SDK for it, though — the contract is just HTTP.** If you
 already run your own LLM gateway or proxy in front of your providers, implement the
