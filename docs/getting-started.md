@@ -29,7 +29,7 @@ When stdin is a terminal, the dev kernel drops you into an interactive REPL
 ## 2. Run an agent
 
 An agent is any HTTP service that speaks the kernel's [protocol](agents.md). This
-quickstart uses the `hello` example built with the [Python SDK](sdk/python.md); it
+quickstart uses the `hello` example built with the [Python SDK](sdk/python); it
 listens on the webhook URL the manifest registered (`:5000`) and talks back to the
 kernel at `:8080`:
 
@@ -39,7 +39,7 @@ python examples/python/hello.py
 ```
 
 See [`examples/python/hello.py`](../examples/python/hello.py) for the source, and
-the [Python SDK](sdk/python.md) doc for how it's built.
+the [Python SDK](sdk/python) doc for how it's built.
 
 ## 3. Create an execution
 
