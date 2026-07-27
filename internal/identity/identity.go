@@ -32,7 +32,7 @@ func ComputeStepID(execID uuid.UUID, kind domain.StepKind, target, argsHash stri
 	}
 	var b strings.Builder
 	for _, f := range fields {
-		b.WriteString(fmt.Sprintf("%d:%s", len(f), f))
+		fmt.Fprintf(&b, "%d:%s", len(f), f)
 	}
 	h := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(h[:])
