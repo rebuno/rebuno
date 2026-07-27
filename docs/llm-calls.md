@@ -59,7 +59,7 @@ same steps there. For each request:
    `.../fail`).
 
 A gateway needs the dispatch id to reach it, so the agent passes it through on
-each request (a header on the call into the gateway is enough).
+each request (a header on the call into the gateway is enough). See [`examples/gateway/litellm_proxy.py`](../examples/gateway/litellm_proxy.py) for a LiteLLM gateway example.
 
 Any interception point that speaks the step contract makes LLM calls durable,
 whether that's an SDK-provided HTTP client or your own gateway. See the
