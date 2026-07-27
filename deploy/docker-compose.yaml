@@ -1,0 +1,55 @@
+name: rebuno
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rebuno}
+      POSTGRES_USER: ${POSTGRES_USER:-rebuno}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [rebuno]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rebuno}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  kernel:
+    image: ghcr.io/rebuno/rebuno:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - "--db-url=postgres://${POSTGRES_USER:-rebuno}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rebuno}?sslmode=disable"
+      - "--bearer-token=${REBUNO_API_KEY:?Set REBUNO_API_KEY}"
+      - "--log-format=json"
+      - "--log-level=info"
+      # Provision agents declaratively (see docs/deployment.md); needs the
+      # volume mount below. Otherwise register them over the admin API.
+      # - "--config=/etc/rebuno/rebuno.yaml"
+    environment:
+      REBUNO_DEADLINE_TIMEOUT: 2h    # max execution lifetime (default: unset, never auto-cancels)
+      REBUNO_RETENTION: 168h         # keep terminal executions 7 days (default: 24h)
+    # volumes:
+    #   - ./rebuno.yaml:/etc/rebuno/rebuno.yaml:ro
+    #   - ./policies:/etc/rebuno/policies:ro
+    ports:
+      - "${KERNEL_PORT:-8080}:8080"
+    networks: [rebuno]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/v0/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:
+
+networks:
+  rebuno:
+    driver: bridge
