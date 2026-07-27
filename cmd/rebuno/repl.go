@@ -44,10 +44,10 @@ func runREPL(ctx context.Context, k *kernel.Kernel, shutdown context.CancelFunc)
 		runREPLBasic(ctx, k)
 		return
 	}
-	defer rl.Close()
+	defer func() { _ = rl.Close() }()
 
 	for {
-		fmt.Fprintln(rl.Stdout())
+		_, _ = fmt.Fprintln(rl.Stdout())
 		line, err := rl.Readline()
 		if err != nil {
 			// Ctrl-C on a non-empty line clears it and keeps going; on an empty
