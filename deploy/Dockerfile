@@ -3,7 +3,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /rebuno ./cmd/rebuno
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -ldflags "-X main.Version=$VERSION" -o /rebuno ./cmd/rebuno
 
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates wget && \
