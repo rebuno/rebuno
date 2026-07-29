@@ -40,20 +40,19 @@ unchanged.
 ## Options
 
 The default `rebunoFetch` reads the model id from the request body's `model`
-field and uses the global `fetch`. Use `createRebunoFetch` to override either:
+field — it names the step `target` — and uses the global `fetch`. Use
+`createRebunoFetch` to forward through a different one:
 
 ```ts
 import { createRebunoFetch } from "rebuno";
 
 const myFetch = createRebunoFetch({
-  modelField: "model",   // request-body field holding the model id (the step target)
   fetch: customFetch,    // inner fetch to forward through (default: global fetch)
 });
 ```
 
-The model id names the step `target`. Most providers use `model`; set
-`modelField` if yours differs. Pass a custom `fetch` to keep a proxy, retry
-wrapper, or instrumented client underneath the recording layer.
+That keeps a proxy, retry wrapper, or instrumented client underneath the
+recording layer.
 
 ## Current limits
 

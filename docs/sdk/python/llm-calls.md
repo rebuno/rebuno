@@ -40,13 +40,11 @@ so your `llm.chat.completions.create(...)` call site is unchanged.
 
 ```python
 rebuno.http_client(
-    model_field="model",   # request-body field holding the model id (the step target)
     timeout=30.0,          # any extra kwargs are forwarded to httpx.AsyncClient
 )
 ```
 
-The model id names the step `target`. Most providers use `model`; set
-`model_field` if yours differs.
+The request body's `model` names the step `target`.
 
 You can also construct the transport directly and wrap an existing transport
 (e.g. to keep a custom proxy or retry config):
@@ -55,7 +53,7 @@ You can also construct the transport directly and wrap an existing transport
 import httpx
 from rebuno import RebunoTransport
 
-transport = RebunoTransport(httpx.AsyncHTTPTransport(), model_field="model")
+transport = RebunoTransport(httpx.AsyncHTTPTransport())
 llm = AsyncOpenAI(http_client=httpx.AsyncClient(transport=transport))
 ```
 
