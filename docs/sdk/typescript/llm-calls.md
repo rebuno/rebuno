@@ -37,6 +37,34 @@ The provider SDK parses the rebuilt `Response` exactly as if it came off the wir
 so your `generateText(...)` / `chat.completions.create(...)` call site is
 unchanged.
 
+## Refused calls
+
+A step the kernel doesn't allow to proceed — denied by policy, rate limited, or
+parked awaiting approval — comes back as an HTTP `403`/`429` rather than a thrown
+error, because an error thrown inside `rebunoFetch` would unwind through the
+provider SDK, which retries unknown errors and rewraps them. The status becomes
+the provider SDK's own error, which every framework propagates untouched.
+
+That failure is already correct for a denial. To handle a *blocked* call — where
+the execution should park for the approval, not fail — pass the provider's error
+to `raiseForRefusal()` at whatever boundary your code owns:
+
+```ts
+import { raiseForRefusal } from "rebuno";
+
+try {
+  const resp = await generateText({ ... });
+} catch (e) {
+  raiseForRefusal(e); // rethrows Blocked / PolicyError / RateLimited
+  throw e;
+}
+```
+
+`Blocked` unwinds the handler and leaves the execution parked; granting the
+approval dispatches it again, and every step recorded so far replays from the log.
+Any error without the `rebuno_refusal` marker is left alone. An upstream
+Rebuno-aware LLM gateway emits the same marker, so the same call covers it.
+
 ## Options
 
 The default `rebunoFetch` reads the model id from the request body's `model`

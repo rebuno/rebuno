@@ -57,7 +57,7 @@ unwind a dispatch cleanly:
 - **`Blocked`** — a tool call hit a step that's awaiting human approval. The
   agent's webhook handler catches it and returns `200`; the execution is already
   `blocked` in the kernel and will be re-dispatched when the approval is
-  resolved. Carries `.approval_id`.
+  resolved.
 - **`Terminated`** — the execution became terminal (e.g. cancelled) mid-dispatch.
   The dispatch unwinds and returns `200`.
 

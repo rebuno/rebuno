@@ -36,6 +36,33 @@ the network:
 The provider SDK parses the rebuilt response exactly as if it came off the wire,
 so your `llm.chat.completions.create(...)` call site is unchanged.
 
+## Refused calls
+
+A step the kernel doesn't allow to proceed — denied by policy, rate limited, or
+parked awaiting approval — comes back as an HTTP `403`/`429` rather than an
+exception, because an exception raised inside the transport would unwind through
+the provider SDK, which retries unknown exceptions and rewraps them as
+`APIConnectionError`. The status becomes the provider SDK's own error
+(`openai.PermissionDeniedError`, `RateLimitError`), which every framework
+propagates untouched.
+
+That failure is already correct for a denial. To handle a *blocked* call — where
+the execution should park for the approval, not fail — pass the provider's error
+to `rebuno.raise_for_refusal()` at whatever boundary your code owns:
+
+```python
+try:
+    resp = await llm.chat.completions.create(...)
+except Exception as e:
+    rebuno.raise_for_refusal(e)  # re-raises Blocked / PolicyError / RateLimited
+    raise
+```
+
+`Blocked` unwinds the handler and leaves the execution parked; granting the
+approval dispatches it again, and every step recorded so far replays from the log.
+Any error without the `rebuno_refusal` marker is left alone. An upstream
+Rebuno-aware LLM gateway emits the same marker, so the same call covers it.
+
 ## Options
 
 ```python

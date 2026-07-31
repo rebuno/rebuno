@@ -33,7 +33,7 @@ RebunoError                  .details
 │  └─ PolicyError           403  denied by policy (carries .ruleId)
 ├─ ToolError                a tool's effect body failed (carries .toolId, .stepId, .retryable)
 ├─ RateLimited              a step was rejected by a policy rate limit (carries .reason)
-├─ Blocked                  internal: a step is awaiting approval (carries .approvalId)
+├─ Blocked                  internal: a step is awaiting approval
 └─ Terminated               internal: the execution is terminal (e.g. cancelled)
 ```
 
@@ -63,7 +63,7 @@ unwind a dispatch cleanly:
 - **`Blocked`** — a tool call hit a step that's awaiting human approval. The
   agent's webhook handler catches it and returns `200`; the execution is already
   `blocked` in the kernel and will be re-dispatched when the approval is
-  resolved. Carries `.approvalId`.
+  resolved.
 - **`Terminated`** — the execution became terminal (e.g. cancelled) mid-dispatch.
   The dispatch unwinds and returns `200`.
 
