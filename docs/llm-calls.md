@@ -57,6 +57,12 @@ same steps there. For each request:
 2. On `replay`, return the recorded response and skip the provider. On `proceed`,
    forward to the provider and record the response via `.../complete` (or
    `.../fail`).
+3. On any other decision, refuse the request with `403` (`429` for
+   `rate_limited`) and a body of `{"error": {"type": "rebuno_refusal", "message":
+   "rebuno_refusal: <decision>[ reason=<why>]"}}`. Provider SDKs only ever surface
+   an error body as text, so the flat marker is what a caller's `raise_for_refusal`
+   reads back to turn a `blocked` call into a parked execution rather than a failed
+   one.
 
 A gateway needs the dispatch id to reach it, so the agent passes it through on
 each request (a header on the call into the gateway is enough). See [`examples/gateway/litellm_proxy.py`](../examples/gateway/litellm_proxy.py) for a LiteLLM gateway example.

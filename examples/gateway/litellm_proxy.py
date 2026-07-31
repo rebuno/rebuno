@@ -100,11 +100,12 @@ class RebunoInterceptor(CustomLogger):
             extra={"Rebuno-Dispatch-Id": dispatch_id},
         )
         if dec["decision"] not in ("proceed", "replay"):
+            message = f"rebuno_refusal: {dec['decision']}"
+            if dec.get("reason"):
+                message += f" reason={dec['reason']}"
             raise HTTPException(
                 status_code=429 if dec["decision"] == "rate_limited" else 403,
-                detail={
-                    "error": f"rebuno gateway: {dec['decision']} {dec.get('reason', '')}".strip()
-                },
+                detail={"error": {"type": "rebuno_refusal", "message": message}},
             )
 
         if dec["decision"] == "replay":
