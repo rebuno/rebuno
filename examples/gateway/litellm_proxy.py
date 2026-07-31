@@ -3,7 +3,9 @@
 No SDK needed — the contract is plain signed HTTP. Each intercepted call becomes an
 `llm_call` step submitted under the dispatch the caller forwards; the kernel assigns
 the step id and says whether to call the provider or return the recorded response.
-Streamed and whole responses are both recorded, and either replays as either.
+Streamed and whole responses are both recorded, and either replays as either. A
+streamed call's chunks are also republished on the kernel's live side channel, so
+clients can render the answer as it is produced — see docs/streaming.md.
 
 The agent forwards four headers per request:
 
@@ -17,6 +19,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 
 import httpx
 from fastapi import HTTPException
@@ -24,6 +27,9 @@ from litellm import ModelResponse, stream_chunk_builder
 from litellm.integrations.custom_logger import CustomLogger
 
 REBUNO_URL = os.environ.get("REBUNO_URL", "http://localhost:8080")
+
+_DELTA_FLUSH_INTERVAL = 0.05
+_DELTA_MAX_CHARS = 1750 # the kernel caps a delta at 7000 bytes; UTF-8 runs to 4 bytes a char
 
 _http = httpx.AsyncClient(base_url=REBUNO_URL.rstrip("/"), timeout=30)
 
@@ -43,6 +49,16 @@ async def _post(
     resp = await _http.post(path, content=raw, headers=headers)
     resp.raise_for_status()
     return resp.json() if resp.content else {}
+
+
+def _record_result(body: dict) -> dict:
+    """A step result in the envelope the Rebuno SDKs record: the provider response
+    as a JSON string under ``body``, alongside the status and content type."""
+    return {
+        "status": 200,
+        "headers": {"content-type": "application/json"},
+        "body": json.dumps(body, default=str),
+    }
 
 
 class RebunoInterceptor(CustomLogger):
@@ -92,7 +108,7 @@ class RebunoInterceptor(CustomLogger):
             )
 
         if dec["decision"] == "replay":
-            data["mock_response"] = ModelResponse(**dec["result"])
+            data["mock_response"] = ModelResponse(**json.loads(dec["result"]["body"]))
         else:
             data["metadata"]["rebuno_step_id"] = dec["step_id"]
 
@@ -105,22 +121,60 @@ class RebunoInterceptor(CustomLogger):
                 response.model_dump() if hasattr(response, "model_dump") else response
             )
             await self._record(
-                data=data, step_id=step_id, outcome="complete", body={"result": body}
+                data=data,
+                step_id=step_id,
+                outcome="complete",
+                body={"result": _record_result(body)},
             )
 
     async def async_post_call_streaming_iterator_hook(
         self, user_api_key_dict, response, request_data
     ):
         """Where litellm sends a streamed call — the success hook never fires for one.
-        Chunks go straight out to the caller as they arrive; the step is completed
-        with the whole response assembled from them, the shape a replay expects.
+        Chunks go straight out to the caller as they arrive and are republished as
+        live deltas; the step is completed with the whole response assembled from
+        them, the shape a replay expects.
         """
         step_id = (request_data.get("metadata") or {}).get("rebuno_step_id")
+        if not step_id:
+            async for chunk in response:
+                yield chunk
+            return
+
+        headers = request_data["proxy_server_request"]["headers"]
+        path = f"/v0/executions/{headers['rebuno-execution-id']}/steps/{step_id}/stream"
         chunks, error = [], None
+        pending, seq = "", 0
+
+        async def flush() -> None:
+            """Publish what has accumulated, sliced to the kernel's delta cap."""
+            nonlocal pending, seq
+            while pending:
+                piece, pending = pending[:_DELTA_MAX_CHARS], pending[_DELTA_MAX_CHARS:]
+                try:
+                    await _post(
+                        path=path,
+                        body={"seq": seq, "data": piece},
+                        agent_id=headers["rebuno-agent-id"],
+                        secret=headers["rebuno-agent-secret"],
+                    )
+                except Exception:
+                    # deltas are best-effort; a client that misses one repaints
+                    # the turn from the recorded result
+                    pass
+                seq += 1
+
+        last_flush = time.monotonic()
         try:
             async for chunk in response:
+                # accumulate before yielding: a caller that breaks on a chunk
+                # never resumes this generator
                 chunks.append(chunk)
+                pending += f"data: {json.dumps(chunk.model_dump(), default=str)}\n\n"
                 yield chunk
+                if time.monotonic() - last_flush >= _DELTA_FLUSH_INTERVAL:
+                    await flush()
+                    last_flush = time.monotonic()
         except Exception as e:
             error = e
             raise
@@ -128,20 +182,22 @@ class RebunoInterceptor(CustomLogger):
             # in `finally`, not after the loop: a caller that disconnects mid-stream
             # closes this generator, and the step still has to be closed out — with
             # whatever arrived, the same as any other half-finished stream
-            if step_id and error is not None:
+            if error is not None:
                 await self._record(
                     data=request_data,
                     step_id=step_id,
                     outcome="fail",
                     body={"error": {"message": str(error)}},
                 )
-            elif step_id:
+            else:
+                await flush()
                 whole = stream_chunk_builder(chunks)
+                result = _record_result(whole.model_dump() if whole else {})
                 await self._record(
                     data=request_data,
                     step_id=step_id,
                     outcome="complete",
-                    body={"result": whole.model_dump() if whole else {}},
+                    body={"result": result},
                 )
 
     async def async_post_call_failure_hook(
