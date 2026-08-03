@@ -50,13 +50,14 @@ The lifecycle of each effect (tool call or LLM call).
 | `step.denied` | Policy denied it (or an approval was denied/expired). |
 | `step.awaiting_approval` | Policy requires a human decision; an approval was created. |
 | `step.executing` | Written **before** the external call runs — the durable "intent to act". |
-| `step.succeeded` | Terminal, with the recorded `result`. |
+| `step.succeeded` | Terminal. The `result` lives on the step, not in the payload. |
 | `step.failed` | Terminal, with the recorded `error`. |
 | `step.cancelled` | The step was cancelled. |
 
-For `llm_call` steps, `step.executing` carries the request input (model, messages,
-tools, params) and `step.succeeded` carries the output (message, tool calls, token
-counts, cost).
+Payloads stay lean: they identify the step (`step_id`, `step_type`, `target`) and
+carry decision context (`rule_id`, `error`). The request and response bodies of an
+`llm_call` live on the step — fetch them with
+`GET /v0/executions/{id}/steps/{step_id}`.
 
 ## `approval.*`
 

@@ -53,7 +53,7 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 		}
 		evts := []store.EventRecord{
 			{Type: domain.EventApprovalGranted, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalGranted, req.DecidedBy, req.Rationale)},
-			{Type: domain.EventStepAllowed, Payload: projector.StepPayload(approval.StepID, step.Kind, "", "")},
+			{Type: domain.EventStepAllowed, Payload: projector.StepPayload(approval.StepID, step.Kind, step.Target, "")},
 			{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
 		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {

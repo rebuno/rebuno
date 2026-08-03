@@ -43,17 +43,19 @@ func StepPayload(stepID string, kind domain.StepKind, target, ruleID string) map
 	return m
 }
 
-func StepResultPayload(stepID string, kind domain.StepKind) map[string]any {
+func StepResultPayload(stepID string, kind domain.StepKind, target string) map[string]any {
 	return map[string]any{
 		"step_id":   stepID,
 		"step_type": string(kind),
+		"target":    target,
 	}
 }
 
-func StepErrorPayload(stepID string, kind domain.StepKind, err []byte) map[string]any {
+func StepErrorPayload(stepID string, kind domain.StepKind, target string, err []byte) map[string]any {
 	m := map[string]any{
 		"step_id":   stepID,
 		"step_type": string(kind),
+		"target":    target,
 	}
 	if len(err) > 0 {
 		m["error"] = json.RawMessage(err)
