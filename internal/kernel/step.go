@@ -316,7 +316,7 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 	step.Result = req.Result
 	step.CompletedAt = &now
 	evts := []store.EventRecord{
-		{Type: domain.EventStepSucceeded, Payload: projector.StepResultPayload(stepID, step.Kind)},
+		{Type: domain.EventStepSucceeded, Payload: projector.StepResultPayload(stepID, step.Kind, step.Target)},
 	}
 	if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
 		return domain.StepDecision{}, err
@@ -355,7 +355,7 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 	step.Error = req.Error
 	step.CompletedAt = &now
 	evts := []store.EventRecord{
-		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(stepID, step.Kind, req.Error)},
+		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(stepID, step.Kind, step.Target, req.Error)},
 	}
 	if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
 		return domain.StepDecision{}, err
@@ -369,7 +369,7 @@ func (k *Kernel) failStepInternal(ctx context.Context, step domain.Step, errPayl
 	step.Error = errPayload
 	step.CompletedAt = &now
 	evts := []store.EventRecord{
-		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(step.StepID, step.Kind, errPayload)},
+		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(step.StepID, step.Kind, step.Target, errPayload)},
 	}
 	return k.writeStepAndEvents(ctx, step, evts)
 }

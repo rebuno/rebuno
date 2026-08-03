@@ -31,10 +31,13 @@ func TestStepPayloadOmitsArgsBody(t *testing.T) {
 }
 
 func TestStepResultPayloadOmitsResultBody(t *testing.T) {
-	p := StepResultPayload("step-1", domain.StepKindLLM)
+	p := StepResultPayload("step-1", domain.StepKindLLM, "gpt-4")
 
 	if _, ok := p["result"]; ok {
 		t.Fatalf("step result payload must not embed result body, got: %v", p)
+	}
+	if p["target"] != "gpt-4" {
+		t.Errorf("target = %v, want gpt-4", p["target"])
 	}
 	if p["step_id"] != "step-1" {
 		t.Errorf("step_id = %v, want step-1", p["step_id"])
