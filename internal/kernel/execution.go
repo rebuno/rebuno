@@ -233,8 +233,8 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 		if err != nil {
 			return err
 		}
+		errPayload, _ := json.Marshal(map[string]string{"reason": "execution_cancelled"})
 		for _, a := range pending {
-			errPayload, _ := json.Marshal(map[string]string{"reason": "execution_cancelled"})
 			step, err := tx.GetStep(ctx, a.StepID)
 			if err != nil {
 				return err
@@ -255,6 +255,24 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 			a.DecidedAt = &now
 			a.Rationale = "execution_cancelled"
 			if err := tx.UpdateApproval(ctx, a); err != nil {
+				return err
+			}
+		}
+		steps, err := tx.ListByExecution(ctx, id)
+		if err != nil {
+			return err
+		}
+		for _, s := range steps {
+			if s.Status != domain.StepExecuting {
+				continue
+			}
+			if _, err := tx.Append(ctx, id, domain.EventStepCancelled, projector.StepErrorPayload(s.StepID, s.Kind, s.Target, errPayload)); err != nil {
+				return err
+			}
+			s.Status = domain.StepCancelled
+			s.Error = errPayload
+			s.CompletedAt = &now
+			if err := tx.Upsert(ctx, s); err != nil {
 				return err
 			}
 		}

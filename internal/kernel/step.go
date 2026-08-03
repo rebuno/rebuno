@@ -301,15 +301,16 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
-	if step.Status.IsTerminal() {
-		return domain.StepDecision{Decision: "replay", Result: step.Result}, nil
-	}
 	exec, err := k.d.Executions.GetExecution(ctx, step.ExecutionID)
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
+
 	if exec.Status.IsTerminal() {
 		return domain.StepDecision{Decision: "execution_terminal"}, nil
+	}
+	if step.Status.IsTerminal() {
+		return domain.StepDecision{Decision: "replay", Result: step.Result}, nil
 	}
 	now := time.Now().UTC()
 	step.Status = domain.StepSucceeded
@@ -340,15 +341,16 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
-	if step.Status.IsTerminal() {
-		return domain.StepDecision{Decision: "replay", Error: step.Error}, nil
-	}
 	exec, err := k.d.Executions.GetExecution(ctx, step.ExecutionID)
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
+
 	if exec.Status.IsTerminal() {
 		return domain.StepDecision{Decision: "execution_terminal"}, nil
+	}
+	if step.Status.IsTerminal() {
+		return domain.StepDecision{Decision: "replay", Error: step.Error}, nil
 	}
 	now := time.Now().UTC()
 	step.Status = domain.StepFailed

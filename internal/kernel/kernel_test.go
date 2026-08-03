@@ -1010,6 +1010,40 @@ func TestFailStepAfterExecutionCancelled(t *testing.T) {
 	}
 }
 
+// TestCancelExecutionCancelsInFlightSteps verifies that cancelling an execution
+// closes out steps left in `executing`: they were handed to the agent and their
+// outcome was never reported back, so they are terminal with an unknown result.
+func TestCancelExecutionCancelsInFlightSteps(t *testing.T) {
+	k, ctx := setup(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	args := json.RawMessage(`{"cmd":"sleep 60"}`)
+	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "bash", mustHash(args), 0)
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "bash", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Decision != "proceed" {
+		t.Fatalf("submit decision = %q, want proceed", dec.Decision)
+	}
+
+	if err := k.CancelExecution(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	step, err := k.GetStep(ctx, stepID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.Status != domain.StepCancelled {
+		t.Fatalf("step status = %q, want %q", step.Status, domain.StepCancelled)
+	}
+	if step.CompletedAt == nil {
+		t.Error("cancelled step has no completed_at")
+	}
+	assertSingleTerminalStepEvent(t, k, ctx, exec.ID, domain.EventStepCancelled)
+}
+
 // TestCancelExecutionCancelsPendingApprovals verifies that cancelling an
 // execution expires its pending approvals and does not leave them orphaned.
 func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {

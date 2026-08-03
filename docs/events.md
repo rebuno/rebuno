@@ -52,7 +52,7 @@ The lifecycle of each effect (tool call or LLM call).
 | `step.executing` | Written **before** the external call runs — the durable "intent to act". |
 | `step.succeeded` | Terminal. The `result` lives on the step, not in the payload. |
 | `step.failed` | Terminal, with the recorded `error`. |
-| `step.cancelled` | The step was cancelled. |
+| `step.cancelled` | Terminal. The execution was cancelled while the step was in flight, so whether the effect ran is unknown. |
 
 Payloads stay lean: they identify the step (`step_id`, `step_type`, `target`) and
 carry decision context (`rule_id`, `error`). The request and response bodies of an

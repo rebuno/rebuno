@@ -24,11 +24,12 @@ const (
 	StepExecuting        StepStatus = "executing"
 	StepSucceeded        StepStatus = "succeeded"
 	StepFailed           StepStatus = "failed"
+	StepCancelled        StepStatus = "cancelled"
 )
 
 func (s StepStatus) IsTerminal() bool {
 	switch s {
-	case StepSucceeded, StepFailed, StepDenied:
+	case StepSucceeded, StepFailed, StepDenied, StepCancelled:
 		return true
 	}
 	return false
