@@ -1,5 +1,11 @@
 <p align="center">
-  <a href="https://rebuno.io"><img src="rebuno.svg" alt="rebuno" width="200"></a>
+  <a href="https://rebuno.io">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="logo/rebuno-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="logo/rebuno-light.svg">
+      <img src="logo/rebuno-dark.svg" alt="rebuno" width="280">
+    </picture>
+  </a>
 </p>
 
 <p align="center"><em>REB-yoo-noh</em></p>
