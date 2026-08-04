@@ -18,7 +18,7 @@ func (q querier) Upsert(ctx context.Context, step domain.Step) error {
 }
 
 func upsertStep(ctx context.Context, q Querier, step domain.Step) error {
-	terminalStatuses := []string{string(domain.StepSucceeded), string(domain.StepFailed), string(domain.StepDenied)}
+	terminalStatuses := []string{string(domain.StepSucceeded), string(domain.StepFailed), string(domain.StepDenied), string(domain.StepCancelled)}
 	result := rawArg(step.Result)
 	errPayload := rawArg(step.Error)
 	argsPayload := rawArg(step.Args)
