@@ -23,20 +23,19 @@ import (
 const (
 	Namespace = "rebuno"
 
-	replayTotalName             = "replay_total"
-	dispatchOutcomesTotalName   = "dispatch_outcomes_total"
-	dispatchLatencyName         = "dispatch_latency_seconds"
-	dispatchesReclaimedTotal    = "dispatches_reclaimed_total"
-	queueDepthName              = "queue_depth"
-	policyLatencyName           = "policy_latency_seconds"
-	policyDecisionsTotalName    = "policy_decisions_total"
-	approvalOutcomesTotalName   = "approval_outcomes_total"
-	stepsSubmittedTotalName     = "steps_submitted_total"
-	executionsCreatedTotal      = "executions_created_total"
-	executionsCompletedTotal    = "executions_completed_total"
-	workerErrorsTotalName       = "worker_errors_total"
-	rateLimitDecisionsTotal     = "rate_limit_decisions_total"
-	executionsRedispatchedTotal = "executions_redispatched_total"
+	replayTotalName           = "replay_total"
+	dispatchOutcomesTotalName = "dispatch_outcomes_total"
+	dispatchLatencyName       = "dispatch_latency_seconds"
+	dispatchesReclaimedTotal  = "dispatches_reclaimed_total"
+	queueDepthName            = "queue_depth"
+	policyLatencyName         = "policy_latency_seconds"
+	policyDecisionsTotalName  = "policy_decisions_total"
+	approvalOutcomesTotalName = "approval_outcomes_total"
+	stepsSubmittedTotalName   = "steps_submitted_total"
+	executionsCreatedTotal    = "executions_created_total"
+	executionsCompletedTotal  = "executions_completed_total"
+	workerErrorsTotalName     = "worker_errors_total"
+	rateLimitDecisionsTotal   = "rate_limit_decisions_total"
 
 	httpRequestsTotalName = "http_requests_total"
 	httpRequestDuration   = "http_request_duration_seconds"
@@ -48,20 +47,19 @@ type Observer struct {
 	registry *prometheus.Registry
 	tracer   trace.Tracer
 
-	replayTotal            *prometheus.CounterVec
-	dispatchOutcomesTotal  *prometheus.CounterVec
-	dispatchLatency        prometheus.Histogram
-	dispatchesReclaimed    prometheus.Counter
-	queueDepth             prometheus.Gauge
-	policyLatency          prometheus.Histogram
-	policyDecisions        *prometheus.CounterVec
-	approvalOutcomes       *prometheus.CounterVec
-	stepsSubmittedTotal    *prometheus.CounterVec
-	executionsCreated      prometheus.Counter
-	executionsCompleted    *prometheus.CounterVec
-	workerErrors           *prometheus.CounterVec
-	rateLimitTotal         *prometheus.CounterVec
-	executionsRedispatched prometheus.Counter
+	replayTotal           *prometheus.CounterVec
+	dispatchOutcomesTotal *prometheus.CounterVec
+	dispatchLatency       prometheus.Histogram
+	dispatchesReclaimed   prometheus.Counter
+	queueDepth            prometheus.Gauge
+	policyLatency         prometheus.Histogram
+	policyDecisions       *prometheus.CounterVec
+	approvalOutcomes      *prometheus.CounterVec
+	stepsSubmittedTotal   *prometheus.CounterVec
+	executionsCreated     prometheus.Counter
+	executionsCompleted   *prometheus.CounterVec
+	workerErrors          *prometheus.CounterVec
+	rateLimitTotal        *prometheus.CounterVec
 
 	httpRequestsTotal *prometheus.CounterVec
 	httpDuration      *prometheus.HistogramVec
@@ -167,12 +165,6 @@ func New() *Observer {
 			Help:      "Rate-limit decisions labelled by outcome (limited, error_allowed, error_denied).",
 		}, []string{"outcome"}),
 
-		executionsRedispatched: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: Namespace,
-			Name:      executionsRedispatchedTotal,
-			Help:      "Total executions re-dispatched by the stalled-step reclaim worker (agent died mid-step after acking).",
-		}),
-
 		httpRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: Namespace,
 			Name:      httpRequestsTotalName,
@@ -201,7 +193,6 @@ func New() *Observer {
 		obs.executionsCompleted,
 		obs.workerErrors,
 		obs.rateLimitTotal,
-		obs.executionsRedispatched,
 		obs.httpRequestsTotal,
 		obs.httpDuration,
 	)
@@ -341,13 +332,6 @@ func (o *Observer) RecordWorkerError(worker string) {
 		return
 	}
 	o.workerErrors.WithLabelValues(worker).Inc()
-}
-
-func (o *Observer) RecordExecutionRedispatched() {
-	if o == nil {
-		return
-	}
-	o.executionsRedispatched.Inc()
 }
 
 func (o *Observer) RecordHTTP(route string, statusCode int, duration time.Duration) {

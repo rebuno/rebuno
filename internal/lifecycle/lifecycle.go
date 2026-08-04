@@ -14,7 +14,6 @@ type Kernel interface {
 	RunDispatches(ctx context.Context, batch int) error
 	ExpireApprovals(ctx context.Context, now time.Time) error
 	CancelExpiredExecutions(ctx context.Context, now time.Time) error
-	ReclaimStalledExecutions(ctx context.Context, now time.Time) error
 	Cleanup(ctx context.Context, retain time.Duration, now time.Time) error
 }
 
@@ -146,9 +145,6 @@ func (m *Manager) runSingletons(ctx context.Context) error {
 		return err
 	}
 	if err := m.kernel.CancelExpiredExecutions(ctx, now); err != nil {
-		return err
-	}
-	if err := m.kernel.ReclaimStalledExecutions(ctx, now); err != nil {
 		return err
 	}
 	return m.kernel.Cleanup(ctx, m.Retention, now)

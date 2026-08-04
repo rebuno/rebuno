@@ -164,7 +164,6 @@ func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slo
 		ExecutionCleanupInterval: cfg.CleanupInterval,
 		ExecutionRetention:       cfg.Retention,
 		DispatchLeaseTimeout:     cfg.DispatchLeaseTimeout,
-		StepStalledTimeout:       cfg.StepStalledTimeout,
 		LeaderLockKey:            cfg.LeaderLockKey,
 	}, deps)
 

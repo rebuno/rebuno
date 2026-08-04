@@ -18,7 +18,6 @@ type fakeKernel struct {
 	dispatches              int32
 	expireApprovals         int32
 	cancelExpiredExecutions int32
-	reclaimStalled          int32
 	cleanups                int32
 	cancelErr               error
 }
@@ -36,11 +35,6 @@ func (f *fakeKernel) ExpireApprovals(ctx context.Context, now time.Time) error {
 func (f *fakeKernel) CancelExpiredExecutions(ctx context.Context, now time.Time) error {
 	atomic.AddInt32(&f.cancelExpiredExecutions, 1)
 	return f.cancelErr
-}
-
-func (f *fakeKernel) ReclaimStalledExecutions(ctx context.Context, now time.Time) error {
-	atomic.AddInt32(&f.reclaimStalled, 1)
-	return nil
 }
 
 func (f *fakeKernel) Cleanup(ctx context.Context, retain time.Duration, now time.Time) error {

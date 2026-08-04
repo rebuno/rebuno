@@ -29,10 +29,6 @@ type Config struct {
 	ExecutionRetention       time.Duration
 	LeaderLockKey            string
 	ReplicaID                string
-	// StepStalledTimeout is how long a step may stay in the executing state
-	// before the re-dispatch worker assumes the agent died mid-step and
-	// re-enqueues a dispatch. Defaults to DispatchLeaseTimeout when zero.
-	StepStalledTimeout time.Duration
 }
 
 func DefaultConfig() Config {
@@ -123,9 +119,6 @@ func New(cfg Config, d Deps) *Kernel {
 	}
 	if cfg.DispatchLeaseTimeout == 0 {
 		cfg.DispatchLeaseTimeout = 2 * time.Minute
-	}
-	if cfg.StepStalledTimeout == 0 {
-		cfg.StepStalledTimeout = cfg.DispatchLeaseTimeout
 	}
 	if cfg.LeaderLockKey == "" {
 		cfg.LeaderLockKey = "rebuno_scheduler_leader"

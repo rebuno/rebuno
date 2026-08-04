@@ -73,11 +73,3 @@ func TestFromEnvReadsDeadlineCheckInterval(t *testing.T) {
 		t.Fatalf("DeadlineCheckInterval = %v, want 5s", c.DeadlineCheckInterval)
 	}
 }
-
-func TestFromEnvReadsStepStalledTimeout(t *testing.T) {
-	t.Setenv("REBUNO_STEP_STALLED_TIMEOUT", "90s")
-	c := FromEnv()
-	if c.StepStalledTimeout != 90*time.Second {
-		t.Fatalf("StepStalledTimeout = %v, want 90s", c.StepStalledTimeout)
-	}
-}
