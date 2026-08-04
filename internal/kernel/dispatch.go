@@ -34,7 +34,10 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, output
 		if _, err := tx.Append(ctx, execID, domain.EventExecutionCompleted, projector.ExecutionPayload(execID, domain.ExecutionCompleted, output, "")); err != nil {
 			return err
 		}
-		return tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionCompleted, output, "")
+		if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionCompleted, output, ""); err != nil {
+			return err
+		}
+		return releaseDispatchesLocked(ctx, tx, execID)
 	}); err != nil {
 		return err
 	}
@@ -60,7 +63,10 @@ func (k *Kernel) FailExecution(ctx context.Context, execID uuid.UUID, reason str
 		if _, err := tx.Append(ctx, execID, domain.EventExecutionFailed, projector.ExecutionPayload(execID, domain.ExecutionFailed, nil, reason)); err != nil {
 			return err
 		}
-		return tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionFailed, nil, reason)
+		if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionFailed, nil, reason); err != nil {
+			return err
+		}
+		return releaseDispatchesLocked(ctx, tx, execID)
 	}); err != nil {
 		return err
 	}
@@ -162,17 +168,29 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 	}
 	switch res.Outcome {
 	case dispatcher.OutcomeSuccess:
+		// The dispatch stays in_flight: the lease window is "the agent is
+		// working on this execution," not "the webhook POST is in flight."
+		// The agent's heartbeats renew locked_at via TouchDispatch; if it
+		// dies mid-step, ReclaimStalled flips the row back to pending and
+		// the drain loop re-delivers. The lease is released at every
+		// legitimate exit (Complete/FailExecution, approval block, cancel).
 		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchAcked, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchAcked, res.AttemptCount)); err != nil {
 			return err
 		}
-		return k.d.Queue.Ack(ctx, d.ID, domain.DispatchAcked, nil)
+		return nil
 	default:
 		if d.Attempt >= d.MaxAttempts {
 			if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchExhausted, d.Attempt)); err != nil {
 				return err
 			}
+			// Ack before FailExecution: releaseDispatchesLocked (called inside
+			// FailExecution) skips already-exhausted rows, avoiding a duplicate
+			// exhausted event and double-ack on this dispatch.
+			if err := k.d.Queue.Ack(ctx, d.ID, domain.DispatchExhausted, nil); err != nil {
+				return err
+			}
 			_ = k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
-			return k.d.Queue.Ack(ctx, d.ID, domain.DispatchExhausted, nil)
+			return nil
 		}
 		next := time.Now().UTC().Add(dispatcher.BackoffDelay(k.cfg.DispatchBaseDelay, k.cfg.DispatchMaxDelay, d.Attempt))
 		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchFailed, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchFailed, d.Attempt)); err != nil {

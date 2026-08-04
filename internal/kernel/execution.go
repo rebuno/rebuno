@@ -215,19 +215,8 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 		if err := tx.UpdateExecutionStatus(ctx, id, domain.ExecutionCancelled, nil, "client_cancelled"); err != nil {
 			return err
 		}
-		dispatches, err := allDispatchesLocked(ctx, tx, id)
-		if err != nil {
+		if err := releaseDispatchesLocked(ctx, tx, id); err != nil {
 			return err
-		}
-		for _, d := range dispatches {
-			if d.Status != domain.DispatchAcked && d.Status != domain.DispatchExhausted {
-				if _, err := tx.Append(ctx, id, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, id, domain.DispatchExhausted, d.Attempt)); err != nil {
-					return err
-				}
-				if err := tx.Ack(ctx, d.ID, domain.DispatchExhausted, nil); err != nil {
-					return err
-				}
-			}
 		}
 		pending, err := allPendingApprovalsLocked(ctx, tx, id)
 		if err != nil {
@@ -323,4 +312,29 @@ func allDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID
 
 func allPendingApprovalsLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID) ([]domain.Approval, error) {
 	return tx.ListPendingApprovalsByExecution(ctx, execID)
+}
+
+// releaseDispatchesLocked retires every live (in_flight/failed) dispatch for an
+// execution as exhausted. It is the single exit point the kernel calls whenever
+// the agent legitimately stops working on an execution: CompleteExecution,
+// FailExecution, the require_approval branch, DenyApproval, expireApproval,
+// and CancelExecution. Everything else is a crash — the lease expires and
+// ReclaimStalled flips the row back to pending for redelivery.
+func releaseDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID) error {
+	dispatches, err := allDispatchesLocked(ctx, tx, execID)
+	if err != nil {
+		return err
+	}
+	for _, d := range dispatches {
+		if d.Status == domain.DispatchAcked || d.Status == domain.DispatchExhausted {
+			continue
+		}
+		if _, err := tx.Append(ctx, execID, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, execID, domain.DispatchExhausted, d.Attempt)); err != nil {
+			return err
+		}
+		if err := tx.Ack(ctx, d.ID, domain.DispatchExhausted, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
