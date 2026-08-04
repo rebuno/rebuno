@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -144,6 +145,29 @@ func listStepsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]d
 	}
 	defer rows.Close()
 
+	return scanSteps(rows)
+}
+
+func (s *Store) ListStalledSteps(ctx context.Context, cutoff time.Time) ([]domain.Step, error) {
+	return listStalledSteps(ctx, s.pool, cutoff)
+}
+
+func (q querier) ListStalledSteps(ctx context.Context, cutoff time.Time) ([]domain.Step, error) {
+	return listStalledSteps(ctx, q.q, cutoff)
+}
+
+func listStalledSteps(ctx context.Context, q Querier, cutoff time.Time) ([]domain.Step, error) {
+	rows, err := q.Query(ctx, `
+		SELECT step_id, execution_id, kind, target, args_hash, occurrence, status,
+		       idempotency, args, result, error, started_at, completed_at
+		FROM steps
+		WHERE status = 'executing' AND started_at < $1
+		ORDER BY started_at
+	`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("list stalled steps: %w", err)
+	}
+	defer rows.Close()
 	return scanSteps(rows)
 }
 

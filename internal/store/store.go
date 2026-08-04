@@ -22,6 +22,10 @@ type StepStore interface {
 	DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error)
 	AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error
 	ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error)
+	// ListStalledSteps returns steps in the executing state whose started_at is
+	// older than the cutoff, indicating the agent stopped making progress after
+	// acking the dispatch. The caller re-dispatches the owning executions.
+	ListStalledSteps(ctx context.Context, cutoff time.Time) ([]domain.Step, error)
 }
 
 type ExecutionStore interface {

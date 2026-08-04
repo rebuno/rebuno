@@ -18,6 +18,7 @@ type Config struct {
 	DispatchTimeout        time.Duration
 	DispatchConcurrency    int
 	DispatchLeaseTimeout   time.Duration
+	StepStalledTimeout     time.Duration
 	DefaultApprovalTimeout time.Duration
 	DeadlineTimeout        time.Duration
 	DeadlineCheckInterval  time.Duration
@@ -84,6 +85,11 @@ func FromEnv() Config {
 	if v := os.Getenv("REBUNO_DISPATCH_LEASE_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.DispatchLeaseTimeout = d
+		}
+	}
+	if v := os.Getenv("REBUNO_STEP_STALLED_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.StepStalledTimeout = d
 		}
 	}
 	if v := os.Getenv("REBUNO_DEADLINE_TIMEOUT"); v != "" {

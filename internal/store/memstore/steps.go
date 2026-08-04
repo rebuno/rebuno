@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
@@ -117,6 +118,27 @@ func (s *Store) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain
 	return out, nil
 }
 
+func (s *Store) ListStalledSteps(ctx context.Context, cutoff time.Time) ([]domain.Step, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.listStalledStepsLocked(cutoff), nil
+}
+
+func (s *Store) listStalledStepsLocked(cutoff time.Time) []domain.Step {
+	var out []domain.Step
+	for _, step := range s.steps {
+		if step.Status != domain.StepExecuting {
+			continue
+		}
+		if step.StartedAt == nil || !step.StartedAt.Before(cutoff) {
+			continue
+		}
+		out = append(out, step)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StepID < out[j].StepID })
+	return out
+}
+
 func (tx *txStore) Upsert(ctx context.Context, step domain.Step) error {
 	tx.upsertStepLocked(ctx, step)
 	return nil
@@ -143,4 +165,8 @@ func (tx *txStore) ListByExecution(ctx context.Context, execID uuid.UUID) ([]dom
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StepID < out[j].StepID })
 	return out, nil
+}
+
+func (tx *txStore) ListStalledSteps(ctx context.Context, cutoff time.Time) ([]domain.Step, error) {
+	return tx.listStalledStepsLocked(cutoff), nil
 }
