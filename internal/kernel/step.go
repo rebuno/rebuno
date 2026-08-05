@@ -38,6 +38,8 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch_id", domain.ErrValidation)
 	}
 
+	_ = k.d.Queue.TouchDispatch(ctx, execID, time.Now().UTC())
+
 	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
 	if err != nil {
 		return domain.StepDecision{}, err
@@ -266,7 +268,11 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 			if err := tx.CreateApproval(ctx, approval); err != nil {
 				return err
 			}
-			return tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionBlocked, nil, "")
+			if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionBlocked, nil, ""); err != nil {
+				return err
+			}
+
+			return releaseDispatchesLocked(ctx, tx, execID)
 		}); err != nil {
 			return domain.StepDecision{}, false, err
 		}
