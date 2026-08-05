@@ -92,7 +92,10 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 		if err := tx.UpdateApproval(ctx, approval); err != nil {
 			return err
 		}
-		return tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionFailed, nil, "approval_timeout")
+		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionFailed, nil, "approval_timeout"); err != nil {
+			return err
+		}
+		return releaseDispatchesLocked(ctx, tx, approval.ExecutionID)
 	}); err != nil {
 		return err
 	}

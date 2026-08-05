@@ -126,7 +126,10 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		if err := tx.Upsert(ctx, step); err != nil {
 			return err
 		}
-		return tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionFailed, nil, "approval_denied")
+		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionFailed, nil, "approval_denied"); err != nil {
+			return err
+		}
+		return releaseDispatchesLocked(ctx, tx, approval.ExecutionID)
 	}); err != nil {
 		return err
 	}
