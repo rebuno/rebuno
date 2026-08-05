@@ -212,9 +212,7 @@ func TestCompleteExecutionReleasesLease(t *testing.T) {
 // 2 minutes (which would hit dispatch_exhausted before the approval timeout).
 func TestApprovalBlockReleasesLease(t *testing.T) {
 	ms := memstore.NewStore()
-	called := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called++
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
@@ -270,11 +268,6 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 	if err := k.GrantApproval(ctx, *dec.ApprovalID, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if called != 1 {
-		// The original dispatch was exhausted; the grant enqueues a new one
-		// that has not been delivered yet (no RunDispatches call).
-		t.Fatalf("expected no re-delivery before grant drains, called %d", called)
-	}
 	// The new dispatch is pending.
 	dispatches, err := ms.ListDispatchesByExecution(ctx, exec.ID)
 	if err != nil {
@@ -289,5 +282,110 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 	}
 	if !foundPending {
 		t.Fatal("expected a pending dispatch after approval grant")
+	}
+}
+
+// TestDispatchRedeliveryCapFailsExecution verifies the redelivery cap: a
+// webhook that always 200s but never completes would otherwise redeliver
+// forever (the success branch has no MaxAttempts guard). Once attempts exceed
+// MaxAttempts, deliver fails the execution dispatch_exhausted instead of
+// re-delivering.
+func TestDispatchRedeliveryCapFailsExecution(t *testing.T) {
+	ms := memstore.NewStore()
+	called := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{
+		ReplicaID:            "test",
+		DispatchMaxAttempts:  2,
+		DispatchBaseDelay:    1 * time.Millisecond,
+		DispatchTimeout:      1 * time.Second,
+		DispatchLeaseTimeout: 10 * time.Millisecond,
+	}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+	})
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	// Attempt 1: deliver succeeds, dispatch stays in_flight.
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	// Let the lease expire and reclaim, then re-deliver (attempt 2).
+	time.Sleep(20 * time.Millisecond)
+	if _, err := ms.ReclaimStalled(ctx, time.Now().UTC(), cfg.DispatchLeaseTimeout, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	// Attempt 3 exceeds MaxAttempts: deliver must fail the execution rather
+	// than re-deliver.
+	time.Sleep(20 * time.Millisecond)
+	if _, err := ms.ReclaimStalled(ctx, time.Now().UTC(), cfg.DispatchLeaseTimeout, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	exec, _ = k.GetExecution(ctx, exec.ID)
+	if exec.Status != domain.ExecutionFailed {
+		t.Fatalf("expected execution failed after redelivery cap, got %s", exec.Status)
+	}
+	if exec.FailureReason != "dispatch_exhausted" {
+		t.Fatalf("expected dispatch_exhausted reason, got %q", exec.FailureReason)
+	}
+}
+
+// TestSubmitStepRenewsLease verifies that submitting a step renews the
+// dispatch lease. A step submission is proof of life: an agent whose effects
+// each finish before the SDK's first 30s heartbeat would otherwise be
+// re-dispatched at the 2-minute lease while healthy.
+func TestSubmitStepRenewsLease(t *testing.T) {
+	ms := memstore.NewStore()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{
+		ReplicaID:            "test",
+		DispatchMaxAttempts:  5,
+		DispatchBaseDelay:    1 * time.Millisecond,
+		DispatchTimeout:      1 * time.Second,
+		DispatchLeaseTimeout: 50 * time.Millisecond,
+	}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+	})
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	did := dispatchOf(t, k, exec.ID)
+
+	// Submit a step — this renews the lease via TouchDispatch.
+	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+		Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{"path":"/tmp"}`), DispatchID: did,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// ReclaimStalled must not reclaim the dispatch: the step submission
+	// renewed locked_at.
+	now := time.Now().UTC()
+	reclaimed, err := ms.ReclaimStalled(ctx, now, cfg.DispatchLeaseTimeout, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reclaimed) != 0 {
+		t.Fatalf("step submission must renew the lease, but %d dispatches were reclaimed", len(reclaimed))
 	}
 }

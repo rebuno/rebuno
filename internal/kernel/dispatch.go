@@ -148,6 +148,13 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		}
 		return k.d.Queue.Ack(ctx, d.ID, domain.DispatchExhausted, nil)
 	}
+	// Cap redelivery: a webhook that always 200s but never completes would
+	// otherwise redeliver forever, stacking concurrent handlers. The failure
+	// branch checks d.Attempt >= d.MaxAttempts, but the success branch has no
+	// such guard — so check it here before re-delivering.
+	if d.Attempt > d.MaxAttempts {
+		return k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
+	}
 	agent, err := k.d.Agents.GetAgent(ctx, exec.AgentID)
 	if err != nil {
 		return err
@@ -180,17 +187,9 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		return nil
 	default:
 		if d.Attempt >= d.MaxAttempts {
-			if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchExhausted, d.Attempt)); err != nil {
-				return err
-			}
-			// Ack before FailExecution: releaseDispatchesLocked (called inside
-			// FailExecution) skips already-exhausted rows, avoiding a duplicate
-			// exhausted event and double-ack on this dispatch.
-			if err := k.d.Queue.Ack(ctx, d.ID, domain.DispatchExhausted, nil); err != nil {
-				return err
-			}
-			_ = k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
-			return nil
+			// FailExecution emits the exhausted event and acks the dispatch
+			// atomically via releaseDispatchesLocked.
+			return k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
 		}
 		next := time.Now().UTC().Add(dispatcher.BackoffDelay(k.cfg.DispatchBaseDelay, k.cfg.DispatchMaxDelay, d.Attempt))
 		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchFailed, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchFailed, d.Attempt)); err != nil {

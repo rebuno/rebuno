@@ -38,6 +38,11 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch_id", domain.ErrValidation)
 	}
 
+	// A step submission is proof of life: renew the lease so an agent whose
+	// effects each finish before the SDK's first 30s heartbeat isn't
+	// re-dispatched at the 2-minute lease while it's healthy.
+	_ = k.d.Queue.TouchDispatch(ctx, execID, time.Now().UTC())
+
 	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
 	if err != nil {
 		return domain.StepDecision{}, err

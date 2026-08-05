@@ -326,7 +326,7 @@ func releaseDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.
 		return err
 	}
 	for _, d := range dispatches {
-		if d.Status == domain.DispatchAcked || d.Status == domain.DispatchExhausted {
+		if d.Status == domain.DispatchExhausted {
 			continue
 		}
 		if _, err := tx.Append(ctx, execID, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, execID, domain.DispatchExhausted, d.Attempt)); err != nil {
