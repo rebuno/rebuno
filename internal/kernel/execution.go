@@ -314,12 +314,6 @@ func allPendingApprovalsLocked(ctx context.Context, tx store.TxStore, execID uui
 	return tx.ListPendingApprovalsByExecution(ctx, execID)
 }
 
-// releaseDispatchesLocked retires every live (in_flight/failed) dispatch for an
-// execution as exhausted. It is the single exit point the kernel calls whenever
-// the agent legitimately stops working on an execution: CompleteExecution,
-// FailExecution, the require_approval branch, DenyApproval, expireApproval,
-// and CancelExecution. Everything else is a crash — the lease expires and
-// ReclaimStalled flips the row back to pending for redelivery.
 func releaseDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.UUID) error {
 	dispatches, err := allDispatchesLocked(ctx, tx, execID)
 	if err != nil {

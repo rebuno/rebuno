@@ -148,10 +148,7 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		}
 		return k.d.Queue.Ack(ctx, d.ID, domain.DispatchExhausted, nil)
 	}
-	// Cap redelivery: a webhook that always 200s but never completes would
-	// otherwise redeliver forever, stacking concurrent handlers. The failure
-	// branch checks d.Attempt >= d.MaxAttempts, but the success branch has no
-	// such guard — so check it here before re-delivering.
+
 	if d.Attempt > d.MaxAttempts {
 		return k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
 	}
@@ -175,20 +172,12 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 	}
 	switch res.Outcome {
 	case dispatcher.OutcomeSuccess:
-		// The dispatch stays in_flight: the lease window is "the agent is
-		// working on this execution," not "the webhook POST is in flight."
-		// The agent's heartbeats renew locked_at via TouchDispatch; if it
-		// dies mid-step, ReclaimStalled flips the row back to pending and
-		// the drain loop re-delivers. The lease is released at every
-		// legitimate exit (Complete/FailExecution, approval block, cancel).
 		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchAcked, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchAcked, res.AttemptCount)); err != nil {
 			return err
 		}
 		return nil
 	default:
 		if d.Attempt >= d.MaxAttempts {
-			// FailExecution emits the exhausted event and acks the dispatch
-			// atomically via releaseDispatchesLocked.
 			return k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
 		}
 		next := time.Now().UTC().Add(dispatcher.BackoffDelay(k.cfg.DispatchBaseDelay, k.cfg.DispatchMaxDelay, d.Attempt))

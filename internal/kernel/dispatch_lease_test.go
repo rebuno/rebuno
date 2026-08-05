@@ -29,11 +29,6 @@ func approvalPolicy() *policy.RuleEngine {
 	return pe
 }
 
-// TestDispatchLeaseSurvivesAck verifies the core fix for issue #126: a
-// successful delivery no longer retires the lease. The dispatch stays
-// in_flight so the agent's heartbeats renew it and ReclaimStalled can
-// recover the execution if the agent dies mid-step after acking.
-//
 // Flow: deliver → no heartbeat → lease expires → ReclaimStalled flips
 // the row back to pending → the drain loop re-delivers under the same
 // dispatch id → the agent replays into handleExistingStep.
@@ -342,10 +337,7 @@ func TestDispatchRedeliveryCapFailsExecution(t *testing.T) {
 	}
 }
 
-// TestSubmitStepRenewsLease verifies that submitting a step renews the
-// dispatch lease. A step submission is proof of life: an agent whose effects
-// each finish before the SDK's first 30s heartbeat would otherwise be
-// re-dispatched at the 2-minute lease while healthy.
+// TestSubmitStepRenewsLease verifies that submitting a step renews the dispatch lease.
 func TestSubmitStepRenewsLease(t *testing.T) {
 	ms := memstore.NewStore()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
