@@ -21,7 +21,7 @@ Rebuno gives your agents durable execution (crash and resume without re-running 
 
 ## Quick Start
 
-**Prerequisites:** Go 1.25+, Python 3.10+
+**Prerequisites:** Go 1.26+, Python 3.10+ / Node 22+
 
 Start the dev kernel (in-memory, no dependencies). With a terminal attached it drops you into a REPL:
 
@@ -31,9 +31,16 @@ go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
 
 Start an agent in another terminal:
 
+Python
 ```bash
 pip install rebuno
 python examples/python/hello.py
+```
+
+TypeScript
+```bash
+npm install rebuno
+npx tsx examples/typescript/hello.ts
 ```
 
 Create an execution from the REPL and follow its event log:
