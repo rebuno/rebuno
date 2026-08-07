@@ -302,7 +302,7 @@ func (k *Kernel) enqueueDispatchTx(ctx context.Context, tx store.TxStore, execID
 	if err := tx.Enqueue(ctx, d); err != nil {
 		return err
 	}
-	_, err := tx.Append(ctx, execID, domain.EventDispatchSent, projector.DispatchPayload(d.ID, execID, d.Status, d.Attempt))
+	_, err := tx.Append(ctx, execID, domain.EventDispatchQueued, projector.DispatchPayload(d.ID, execID, d.Status, d.Attempt))
 	return err
 }
 
@@ -322,9 +322,6 @@ func releaseDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.
 	for _, d := range dispatches {
 		if d.Status == domain.DispatchExhausted {
 			continue
-		}
-		if _, err := tx.Append(ctx, execID, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, execID, domain.DispatchExhausted, d.Attempt)); err != nil {
-			return err
 		}
 		if err := tx.Ack(ctx, d.ID, domain.DispatchExhausted, nil); err != nil {
 			return err

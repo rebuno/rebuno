@@ -72,12 +72,12 @@ The lifecycle of each human-in-the-loop approval.
 
 ## `dispatch.*`
 
-Webhook delivery attempts.
+Webhook delivery. `attempt` counts the times the kernel has claimed this dispatch
+and handed the execution to an agent; it is `0` until the first claim.
 
 | Type | When |
 |------|------|
-| `dispatch.sent` | A dispatch was enqueued. |
-| `dispatch.acked` | The agent acked the webhook with `200 OK`. |
-| `dispatch.failed` | A delivery attempt failed. |
-| `dispatch.retried` | A failed dispatch was re-claimed for another attempt. |
-| `dispatch.exhausted` | Max attempts reached; the execution fails with `dispatch_exhausted`. |
+| `dispatch.queued` | A dispatch was created and enqueued. |
+| `dispatch.acked` | A delivery attempt returned `200 OK`. |
+| `dispatch.failed` | A delivery attempt failed. Emitted on every attempt, including the one that reaches `max_attempts`. |
+| `dispatch.discarded` | A claimed dispatch was dropped undelivered; its execution was already terminal. |
