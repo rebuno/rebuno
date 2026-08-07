@@ -30,11 +30,10 @@ const (
 	EventApprovalDenied    = "approval.denied"
 	EventApprovalExpired   = "approval.expired"
 
-	EventDispatchSent      = "dispatch.sent"
+	EventDispatchQueued    = "dispatch.queued"
 	EventDispatchAcked     = "dispatch.acked"
 	EventDispatchFailed    = "dispatch.failed"
-	EventDispatchRetried   = "dispatch.retried"
-	EventDispatchExhausted = "dispatch.exhausted"
+	EventDispatchDiscarded = "dispatch.discarded"
 )
 
 type Event struct {

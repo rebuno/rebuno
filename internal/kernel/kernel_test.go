@@ -1342,3 +1342,151 @@ func TestReclaimedDispatchReplaysFromZero(t *testing.T) {
 		t.Fatalf("redelivered dispatch must replay, got %s (would re-run the effect)", resumed.Decision)
 	}
 }
+
+// dispatchEvents returns the events of the given type, oldest first.
+func dispatchEvents(t *testing.T, k *kernel.Kernel, execID uuid.UUID, typ string) []map[string]any {
+	t.Helper()
+	events, err := k.GetEvents(context.Background(), execID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, ev := range events {
+		if ev.Type != typ {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal %s payload: %v", ev.Type, err)
+		}
+		out = append(out, payload)
+	}
+	return out
+}
+
+// dispatch.acked must report the dispatch row's own attempt.
+func TestDispatchAckedRecordsRealAttempt(t *testing.T) {
+	ms := memstore.NewStore()
+	called := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called++
+		if called < 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+	})
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+
+	acked := dispatchEvents(t, k, exec.ID, domain.EventDispatchAcked)
+	if len(acked) != 1 {
+		t.Fatalf("expected one dispatch.acked, got %d", len(acked))
+	}
+	if got := acked[0]["attempt"]; got != float64(2) {
+		t.Fatalf("dispatch.acked must report the second attempt, got %v", got)
+	}
+	queued := dispatchEvents(t, k, exec.ID, domain.EventDispatchQueued)
+	if len(queued) != 1 || queued[0]["attempt"] != float64(0) {
+		t.Fatalf("dispatch.queued must report attempt 0, got %v", queued)
+	}
+}
+
+// Every delivery attempt is recorded, including the one that reaches
+// max_attempts and fails the execution.
+func TestFinalDispatchFailureIsRecorded(t *testing.T) {
+	ms := memstore.NewStore()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+	})
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	for i := 0; i < cfg.DispatchMaxAttempts; i++ {
+		if err := k.RunDispatches(ctx, 5); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	failed := dispatchEvents(t, k, exec.ID, domain.EventDispatchFailed)
+	if len(failed) != cfg.DispatchMaxAttempts {
+		t.Fatalf("expected %d dispatch.failed events, got %d", cfg.DispatchMaxAttempts, len(failed))
+	}
+	for i, p := range failed {
+		if got := p["attempt"]; got != float64(i+1) {
+			t.Fatalf("dispatch.failed %d reports attempt %v", i, got)
+		}
+	}
+	got, _ := k.GetExecution(ctx, exec.ID)
+	if got.Status != domain.ExecutionFailed || got.FailureReason != "dispatch_exhausted" {
+		t.Fatalf("expected dispatch_exhausted failure, got %s %q", got.Status, got.FailureReason)
+	}
+}
+
+func TestReleasedDispatchRecordsNoEvent(t *testing.T) {
+	ms := memstore.NewStore()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+	})
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.CompleteExecution(ctx, exec.ID, json.RawMessage(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := dispatchEvents(t, k, exec.ID, domain.EventDispatchDiscarded); len(got) != 0 {
+		t.Fatalf("completing an execution must not record a dispatch event, got %v", got)
+	}
+	events, err := k.GetEvents(ctx, exec.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := events[len(events)-1]
+	if last.Type != domain.EventExecutionCompleted {
+		t.Fatalf("execution.completed must be the final event, got %s", last.Type)
+	}
+
+	// The rows are still retired, so the drain loop cannot re-deliver them.
+	dispatches, err := ms.ListDispatchesByExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatches) == 0 {
+		t.Fatal("expected at least one dispatch row")
+	}
+	for _, d := range dispatches {
+		if d.Status != domain.DispatchExhausted {
+			t.Fatalf("dispatch %s must be retired, got %s", d.ID, d.Status)
+		}
+	}
+}

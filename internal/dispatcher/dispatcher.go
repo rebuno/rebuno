@@ -48,10 +48,9 @@ const (
 )
 
 type Result struct {
-	Outcome      Outcome
-	AttemptCount int
-	StatusCode   int
-	Err          error
+	Outcome    Outcome
+	StatusCode int
+	Err        error
 }
 
 type Dispatcher struct {
@@ -93,19 +92,19 @@ func (d *Dispatcher) Deliver(ctx context.Context, url, secret string, execID, di
 	resp, err := d.client.Do(req)
 	if err != nil {
 		d.logger.Debug("dispatch attempt failed", slog.String("execution_id", execID.String()), slog.String("error", err.Error()))
-		return Result{Outcome: OutcomeExhausted, AttemptCount: 1, Err: err}
+		return Result{Outcome: OutcomeExhausted, Err: err}
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return Result{Outcome: OutcomeSuccess, AttemptCount: 1, StatusCode: resp.StatusCode}
+		return Result{Outcome: OutcomeSuccess, StatusCode: resp.StatusCode}
 	}
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-		return Result{Outcome: OutcomeRejected, AttemptCount: 1, StatusCode: resp.StatusCode, Err: fmt.Errorf("agent rejected dispatch with %d", resp.StatusCode)}
+		return Result{Outcome: OutcomeRejected, StatusCode: resp.StatusCode, Err: fmt.Errorf("agent rejected dispatch with %d", resp.StatusCode)}
 	}
 	d.logger.Debug("dispatch attempt server error", slog.String("execution_id", execID.String()), slog.Int("status", resp.StatusCode))
-	return Result{Outcome: OutcomeExhausted, AttemptCount: 1, StatusCode: resp.StatusCode, Err: fmt.Errorf("agent returned %d", resp.StatusCode)}
+	return Result{Outcome: OutcomeExhausted, StatusCode: resp.StatusCode, Err: fmt.Errorf("agent returned %d", resp.StatusCode)}
 }
 
 func SignPayload(secret string, body []byte) string {

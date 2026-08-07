@@ -143,7 +143,7 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		return err
 	}
 	if exec.Status.IsTerminal() {
-		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchExhausted, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchExhausted, d.Attempt)); err != nil {
+		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchDiscarded, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchExhausted, d.Attempt)); err != nil {
 			return err
 		}
 		return k.d.Queue.Ack(ctx, d.ID, domain.DispatchExhausted, nil)
@@ -172,18 +172,18 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 	}
 	switch res.Outcome {
 	case dispatcher.OutcomeSuccess:
-		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchAcked, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchAcked, res.AttemptCount)); err != nil {
+		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchAcked, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchAcked, d.Attempt)); err != nil {
 			return err
 		}
 		return nil
 	default:
+		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchFailed, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchFailed, d.Attempt)); err != nil {
+			return err
+		}
 		if d.Attempt >= d.MaxAttempts {
 			return k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
 		}
 		next := time.Now().UTC().Add(dispatcher.BackoffDelay(k.cfg.DispatchBaseDelay, k.cfg.DispatchMaxDelay, d.Attempt))
-		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchFailed, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchFailed, d.Attempt)); err != nil {
-			return err
-		}
 		return k.d.Queue.Ack(ctx, d.ID, domain.DispatchFailed, &next)
 	}
 }
