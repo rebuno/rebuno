@@ -17,7 +17,8 @@ thread through your code:
 
 If any of these runs with no active context (outside a handler), it raises
 `RuntimeError`. You can also read the current context ambiently via
-`rebuno.execution`, which proxies to the active `ExecutionContext`.
+`rebuno.execution()`, which returns the active `ExecutionContext` (and raises if
+there is none).
 
 ## Determinism and step ids
 
