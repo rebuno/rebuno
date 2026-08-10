@@ -131,6 +131,16 @@ func (k *Kernel) decideStep(
 	return k.recordStepDecision(ctx, execID, exec.AgentID, stepID, req, argsHash, occurrence, polResult)
 }
 
+func denialReason(errPayload json.RawMessage) string {
+	var recorded struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(errPayload, &recorded); err != nil || recorded.Reason == "" {
+		return "policy_denied"
+	}
+	return recorded.Reason
+}
+
 func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idempotency string) (domain.StepDecision, error) {
 	switch step.Status {
 	case domain.StepSucceeded:
@@ -162,7 +172,9 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 		}
 		return domain.StepDecision{Decision: "proceed"}, nil
 	case domain.StepDenied:
-		return domain.StepDecision{Decision: "denied", Reason: "policy_denied"}, nil
+		// A resumed handler re-proposing a refused effect is told why it was
+		// refused, so it can distinguish a policy rule from a human decision.
+		return domain.StepDecision{Decision: "denied", Reason: denialReason(step.Error)}, nil
 	default:
 		return domain.StepDecision{Decision: "proceed"}, nil
 	}

@@ -112,7 +112,7 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		evts := []store.EventRecord{
 			{Type: domain.EventApprovalDenied, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
 			{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(approval.StepID, step.Kind, step.Target, "", errPayload)},
-			{Type: domain.EventExecutionFailed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionFailed, nil, "approval_denied")},
+			{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
 		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 			return err
@@ -126,10 +126,12 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		if err := tx.Upsert(ctx, step); err != nil {
 			return err
 		}
-		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionFailed, nil, "approval_denied"); err != nil {
+		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
 			return err
 		}
-		return releaseDispatchesLocked(ctx, tx, approval.ExecutionID)
+		// Resume rather than fail: a refusal is something the handler is told,
+		// like any other denied step, so it can report or route around it.
+		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID)
 	}); err != nil {
 		return err
 	}

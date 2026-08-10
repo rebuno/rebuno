@@ -78,7 +78,7 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 		evts := []store.EventRecord{
 			{Type: domain.EventApprovalExpired, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
 			{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(approval.StepID, step.Kind, step.Target, "", errPayload)},
-			{Type: domain.EventExecutionFailed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionFailed, nil, "approval_timeout")},
+			{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
 		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 			return err
@@ -92,10 +92,12 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 		if err := tx.UpdateApproval(ctx, approval); err != nil {
 			return err
 		}
-		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionFailed, nil, "approval_timeout"); err != nil {
+		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
 			return err
 		}
-		return releaseDispatchesLocked(ctx, tx, approval.ExecutionID)
+		// An approval nobody answered is a refusal like any other: resume and
+		// let the handler decide what to do without it.
+		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID)
 	}); err != nil {
 		return err
 	}
