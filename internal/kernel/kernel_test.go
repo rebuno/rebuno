@@ -835,9 +835,11 @@ func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
 	assertSingleTerminalStepEvent(t, k, ctx, exec.ID, domain.EventStepDenied)
 }
 
-// TestApprovalDenyFailsExecution verifies that denying an approval fails the
-// execution directly (consistent with expiry) rather than resuming it.
-func TestApprovalDenyFailsExecution(t *testing.T) {
+// TestApprovalDenyResumesExecution verifies that denying an approval resumes the
+// execution with the step denied, so the handler is told what happened rather
+// than being killed, and that re-proposing the same effect stays denied without
+// asking the approver again.
+func TestApprovalDenyResumesExecution(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	k := kernel.New(cfg, kernel.Deps{
@@ -853,27 +855,30 @@ func TestApprovalDenyFailsExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := k.GetExecution(ctx, exec.ID)
-	if got.Status != domain.ExecutionFailed {
-		t.Fatalf("expected execution failed after deny, got %s", got.Status)
+	if got.Status != domain.ExecutionRunning {
+		t.Fatalf("expected execution running after deny, got %s %s", got.Status, got.FailureReason)
 	}
-	if got.FailureReason != "approval_denied" {
-		t.Fatalf("expected failure reason approval_denied, got %q", got.FailureReason)
-	}
-	// Deny must not enqueue a new dispatch: count dispatches before and after.
-	before, err := ms.ListDispatchesByExecution(ctx, exec.ID)
+
+	// The resumed handler re-proposes the effect and is told a human refused it.
+	req := json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	beforeCount := len(before)
+	if dec.Decision != "denied" || dec.Reason != "approval_denied" {
+		t.Fatalf("expected denied approval_denied on re-propose, got %+v", dec)
+	}
+
+	// Re-proposing must not ask the approver a second time.
+	pending, err := ms.ListPendingApprovals(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending approvals after deny, got %d", len(pending))
+	}
 	if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob"}); err != nil && !errors.Is(err, domain.ErrConflict) {
 		t.Fatal(err)
-	}
-	after, err := ms.ListDispatchesByExecution(ctx, exec.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(after) != beforeCount {
-		t.Fatalf("deny must not enqueue a dispatch, had %d before and %d after", beforeCount, len(after))
 	}
 }
 

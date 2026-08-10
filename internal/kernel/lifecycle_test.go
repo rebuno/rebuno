@@ -43,8 +43,16 @@ func TestApprovalExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec, _ = k.GetExecution(ctx, exec.ID)
-	if exec.Status != domain.ExecutionFailed || exec.FailureReason != "approval_timeout" {
-		t.Fatalf("expected failed approval_timeout, got %s %s", exec.Status, exec.FailureReason)
+	if exec.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after expiry, got %s %s", exec.Status, exec.FailureReason)
+	}
+	// The step carries the refusal; re-proposing it tells the handler why.
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Decision != "denied" || dec.Reason != "approval_timeout" {
+		t.Fatalf("expected denied approval_timeout on re-propose, got %+v", dec)
 	}
 }
 
