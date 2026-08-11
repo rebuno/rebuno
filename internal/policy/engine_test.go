@@ -166,3 +166,43 @@ rules:
 		t.Fatalf("rule_id: got %q, want real-id", res.RuleID)
 	}
 }
+
+func TestLocalStepsBypassDefaultActionButNotRules(t *testing.T) {
+	bundle := `
+default_action: deny
+rules:
+  - id: no-charging
+    priority: 10
+    when:
+      target: charge_card
+    then:
+      decision: deny
+`
+	engine, err := NewRuleEngineFromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name   string
+		kind   domain.StepKind
+		target string
+		want   string
+	}{
+		{"unmatched local step", domain.StepKindLocal, "brief_ref", domain.DecisionAllow},
+		{"unmatched tool call", domain.StepKindTool, "send_email", domain.DecisionDeny},
+		{"local step a rule names", domain.StepKindLocal, "charge_card", domain.DecisionDeny},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := engine.Evaluate(context.Background(), domain.PolicyInput{StepKind: tc.kind, Target: tc.target})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Decision != tc.want {
+				t.Fatalf("expected %s, got %s", tc.want, res.Decision)
+			}
+		})
+	}
+}

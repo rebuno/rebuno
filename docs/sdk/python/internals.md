@@ -13,7 +13,7 @@ thread through your code:
 
 - `@tool` and `wrap_tool` call `ctx.invoke_tool(...)`
 - `http_client()` calls `ctx.invoke_llm(...)`
-- `step()` calls `ctx.invoke_tool(...)` (a step is a `tool_call`-kind step)
+- `step()` calls `ctx.invoke_tool(..., kind="local")`
 
 If any of these runs with no active context (outside a handler), it raises
 `RuntimeError`. You can also read the current context ambiently via
