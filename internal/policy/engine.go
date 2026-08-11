@@ -108,6 +108,9 @@ func (e *RuleEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (do
 			return res, nil
 		}
 	}
+	if input.StepKind == domain.StepKindLocal {
+		return domain.PolicyResult{Decision: domain.DecisionAllow, Reason: "local step", RuleID: "local"}, nil
+	}
 	return e.defaultResult, nil
 }
 

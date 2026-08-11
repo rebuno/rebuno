@@ -215,7 +215,7 @@ func (o *Observer) initLabels() {
 		o.dispatchOutcomesTotal: {"success", "rejected", "exhausted"},
 		o.policyDecisions:       {"allow", "deny", "require_approval"},
 		o.approvalOutcomes:      {"granted", "denied", "expired"},
-		o.stepsSubmittedTotal:   {"tool_call", "llm_call"},
+		o.stepsSubmittedTotal:   {"tool_call", "llm_call", "local"},
 		o.executionsCompleted:   {"completed", "failed", "cancelled"},
 		o.rateLimitTotal:        {"limited", "error_allowed", "error_denied"},
 	} {

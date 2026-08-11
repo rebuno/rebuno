@@ -37,6 +37,10 @@ Rules are sorted by **priority** (lowest number first). The first rule whose
 `when` block matches wins. If none match, `default_action` applies. Priorities
 must be unique within a bundle, and every rule needs an `id`.
 
+`default_action` applies to `tool_call` and `llm_call` steps. An unmatched
+`local` step is allowed regardless of `default_action`; to govern one, match it
+with a rule (`target` or `step_kind: local`).
+
 ## Conditions (`when`)
 
 All fields present in a `when` block must match (AND). Omitted fields are not
@@ -48,7 +52,7 @@ checked.
 | `targets` | A list of targets/globs; matches if any matches. |
 | `agent_id` | The submitting agent's id. |
 | `agent_ids` | A list of agent ids; matches if the agent is in it. |
-| `step_kind` | `tool_call` or `llm_call`. |
+| `step_kind` | `tool_call`, `llm_call`, or `local`. |
 | `arguments` | Predicates against fields inside the call's JSON arguments (see below). |
 
 ### Argument predicates

@@ -13,7 +13,7 @@ no object to thread through your code:
 
 - `defineTool` and `wrapTool` call `ctx.invokeTool(...)`
 - `rebunoFetch` calls `ctx.invokeLlm(...)`
-- `step()` calls `ctx.invokeTool(...)` (a step is a `tool_call`-kind step)
+- `step()` calls `ctx.invokeTool(..., { kind: "local" })`
 
 If any of these runs with no active context (outside a handler), it throws an
 `Error`. You can also read the current context ambiently via the exported

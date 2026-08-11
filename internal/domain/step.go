@@ -10,8 +10,9 @@ import (
 type StepKind string
 
 const (
-	StepKindTool StepKind = "tool_call"
-	StepKindLLM  StepKind = "llm_call"
+	StepKindTool  StepKind = "tool_call"
+	StepKindLLM   StepKind = "llm_call"
+	StepKindLocal StepKind = "local"
 )
 
 type StepStatus string
