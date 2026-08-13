@@ -160,7 +160,17 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 		return domain.StepDecision{Decision: "blocked"}, nil
 	case domain.StepAllowed, domain.StepProposed:
 		// Recorded but the body never ran (approved-and-resumed, or a crash
-		// before execution). Safe to run now, even for at_most_once.
+		// before execution). Safe to run now, even for at_most_once. The body
+		// runs once this decision returns, so the step advances to executing.
+		now := time.Now().UTC()
+		step.Status = domain.StepExecuting
+		step.StartedAt = &now
+		evts := []store.EventRecord{
+			{Type: domain.EventStepExecuting, Payload: projector.StepPayload(step.StepID, step.Kind, step.Target, "")},
+		}
+		if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
+			return domain.StepDecision{}, err
+		}
 		return domain.StepDecision{Decision: "proceed"}, nil
 	case domain.StepExecuting:
 		if idempotency == "at_most_once" {

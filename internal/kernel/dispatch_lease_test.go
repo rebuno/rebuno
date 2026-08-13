@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
@@ -379,5 +381,85 @@ func TestSubmitStepRenewsLease(t *testing.T) {
 	}
 	if len(reclaimed) != 0 {
 		t.Fatalf("step submission must renew the lease, but %d dispatches were reclaimed", len(reclaimed))
+	}
+}
+
+// TestApprovedAtMostOnceStepIsNotRerunAfterCrash approves a step, resumes it,
+// then re-delivers the dispatch with no result recorded: the at_most_once step
+// must resolve as indeterminate rather than proceed a second time.
+func TestApprovedAtMostOnceStepIsNotRerunAfterCrash(t *testing.T) {
+	ms := memstore.NewStore()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{
+		ReplicaID:              "test",
+		DispatchMaxAttempts:    5,
+		DispatchBaseDelay:      1 * time.Millisecond,
+		DispatchTimeout:        1 * time.Second,
+		DispatchLeaseTimeout:   50 * time.Millisecond,
+		DefaultApprovalTimeout: time.Hour,
+	}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalPolicy(),
+	})
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	submit := func(did uuid.UUID) domain.StepDecision {
+		t.Helper()
+		dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+			Kind:        domain.StepKindTool,
+			Target:      "fs_write",
+			Args:        json.RawMessage(`{"path":"/etc"}`),
+			Idempotency: "at_most_once",
+			DispatchID:  did,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dec
+	}
+
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	dec := submit(dispatchOf(t, k, exec.ID))
+	if dec.Decision != "blocked" {
+		t.Fatalf("expected blocked, got %s", dec.Decision)
+	}
+
+	if err := k.GrantApproval(ctx, *dec.ApprovalID, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	if dec := submit(dispatchOf(t, k, exec.ID)); dec.Decision != "proceed" {
+		t.Fatalf("approved step must proceed on resume, got %s", dec.Decision)
+	}
+
+	// No result is recorded. Reclaiming and re-delivering the dispatch gives it
+	// a fresh occurrence namespace, so the same effect maps to the same step.
+	reclaimed, err := ms.ReclaimStalled(ctx, time.Now().UTC(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reclaimed) != 1 {
+		t.Fatalf("expected the in_flight dispatch to be reclaimed, got %d", len(reclaimed))
+	}
+	if err := k.RunDispatches(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+
+	dec = submit(dispatchOf(t, k, exec.ID))
+	if dec.Decision != "replay" {
+		t.Fatalf("approved at_most_once step must not run again, got %s", dec.Decision)
+	}
+	if got := string(dec.Error); !strings.Contains(got, "indeterminate") {
+		t.Fatalf("expected an indeterminate error, got %s", got)
 	}
 }
