@@ -15,8 +15,8 @@ const wordCount = defineTool({
 });
 
 async function process(input: { query: string }): Promise<Record<string, unknown>> {
-  const { reversed } = await reverse.execute({ text: input.query });
-  const { count } = await wordCount.execute({ text: input.query });
+  const { reversed } = await reverse({ text: input.query });
+  const { count } = await wordCount({ text: input.query });
   console.log(`reversed=${reversed} count=${count}`);
   return { query: input.query, reversed, word_count: count };
 }

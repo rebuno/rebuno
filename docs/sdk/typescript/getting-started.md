@@ -67,13 +67,11 @@ import { Agent, defineTool } from "rebuno";
 
 const search = defineTool({
   name: "search",
-  description: "Search the web",
-  inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
   execute: async ({ query }: { query: string }) => [`result for ${query}`],
 });
 
 async function process(input: { prompt: string }) {
-  const hits = await search.execute({ query: input.prompt });
+  const hits = await search({ query: input.prompt });
   return { answer: hits };
 }
 

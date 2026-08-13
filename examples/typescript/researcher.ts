@@ -2,7 +2,7 @@ import { env } from "node:process";
 
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, jsonSchema, stepCountIs, tool } from "ai";
-import { Agent, defineTool, rebunoFetch, type RebunoTool } from "rebuno";
+import { Agent, defineTool, rebunoFetch } from "rebuno";
 
 const SYSTEM_PROMPT =
   "You are a research assistant. You have access to tools for searching the web, " +
@@ -13,8 +13,6 @@ const MODEL = env.OPENAI_MODEL ?? "gpt-4o-mini";
 
 const webSearch = defineTool({
   name: "web_search",
-  description: "Search the web for information about a topic.",
-  inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
   execute: async ({ query }: { query: string }) => {
     console.log(`web_search: ${query}`);
     await sleep(200);
@@ -30,8 +28,6 @@ const webSearch = defineTool({
 
 const docFetch = defineTool({
   name: "doc_fetch",
-  description: "Fetch and read the contents of a document at a URL.",
-  inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
   execute: async ({ url }: { url: string }) => {
     console.log(`doc_fetch: ${url}`);
     await sleep(100);
@@ -41,8 +37,6 @@ const docFetch = defineTool({
 
 const calculator = defineTool({
   name: "calculator",
-  description: "Evaluate a mathematical expression. Example: '2 + 3 * 4'.",
-  inputSchema: { type: "object", properties: { expression: { type: "string" } }, required: ["expression"] },
   execute: async ({ expression }: { expression: string }) => {
     console.log(`calculator: ${expression}`);
     return { expression, result: safeEval(expression) };
@@ -53,26 +47,41 @@ async function process(input: { query: string }): Promise<Record<string, unknown
   const openai = createOpenAI({ fetch: rebunoFetch });
   const { text } = await generateText({
     model: openai(MODEL),
-    system: SYSTEM_PROMPT,
+    instructions: SYSTEM_PROMPT,
     prompt: input.query,
     tools: {
-      web_search: asAiTool(webSearch),
-      doc_fetch: asAiTool(docFetch),
-      calculator: asAiTool(calculator),
+      web_search: tool({
+        description: "Search the web for information about a topic.",
+        inputSchema: jsonSchema<{ query: string }>({
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        }),
+        execute: webSearch,
+      }),
+      doc_fetch: tool({
+        description: "Fetch and read the contents of a document at a URL.",
+        inputSchema: jsonSchema<{ url: string }>({
+          type: "object",
+          properties: { url: { type: "string" } },
+          required: ["url"],
+        }),
+        execute: docFetch,
+      }),
+      calculator: tool({
+        description: "Evaluate a mathematical expression. Example: '2 + 3 * 4'.",
+        inputSchema: jsonSchema<{ expression: string }>({
+          type: "object",
+          properties: { expression: { type: "string" } },
+          required: ["expression"],
+        }),
+        execute: calculator,
+      }),
     },
     stopWhen: stepCountIs(10),
   });
   console.log(`done: ${text}`);
   return { query: input.query, answer: text };
-}
-
-/** Expose a durable Rebuno tool to the Vercel AI SDK; its execute routes through the kernel. */
-function asAiTool(t: RebunoTool<any, any>) {
-  return tool({
-    description: t.description,
-    inputSchema: jsonSchema(t.inputSchema as Record<string, unknown>),
-    execute: (args) => t.execute(args as Record<string, unknown>),
-  });
 }
 
 function sleep(ms: number): Promise<void> {

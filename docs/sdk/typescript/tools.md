@@ -10,13 +10,7 @@ on resume, and visible in the execution's audit trail.
 import { defineTool } from "rebuno";
 
 const search = defineTool({
-  name: "search",
-  description: "Search the corpus",              // shown to the LLM
-  inputSchema: {                                  // JSON Schema, passed to your framework
-    type: "object",
-    properties: { query: { type: "string" }, limit: { type: "number", default: 10 } },
-    required: ["query"],
-  },
+  name: "search",                                 // tool id the LLM and kernel see
   execute: async ({ query, limit = 10 }: { query: string; limit?: number }) => {
     // ... do the work
     return [`result for ${query}`];
@@ -24,23 +18,38 @@ const search = defineTool({
 });
 ```
 
-`defineTool` returns a plain object — `{ name, description, inputSchema,
-idempotency, execute }` — with a durable `execute`. Two ways to use it:
+`defineTool` returns an async function that routes through the kernel. Call it
+inside a handler:
 
 ```ts
-// call it yourself inside a handler
-const hits = await search.execute({ query: "hello" });
-
-// or hand it to your LLM framework (e.g. the Vercel AI SDK) as part of a tool set
+const hits = await search({ query: "hello" });
 ```
 
 Because the SDK is framework-agnostic, it doesn't register tools with a model for
-you — you wire `search` into whatever agent framework you use, and its `execute`
-carries the durability. There's a small adapter pattern for the Vercel AI SDK:
-wrap `search.inputSchema` with `jsonSchema(...)` and point the AI SDK tool's
-`execute` at `search.execute`. See the
-[TypeScript examples](../../../examples/typescript) for a working `asAiTool`
-helper.
+you. Every TypeScript agent framework takes a description and a schema alongside
+the function it calls, so declare those where the framework wants them and hand
+it `search` as the function:
+
+```ts
+import { tool } from "ai";
+import { z } from "zod";
+
+const searchTool = tool({
+  description: "Search the corpus",
+  inputSchema: z.object({ query: z.string(), limit: z.number().default(10) }),
+  execute: search,
+});
+```
+
+The same shape works for Mastra (`createTool({ id: search.name, ..., execute:
+search })`) and LangChain (`tool(search, { name: search.name, ..., schema })`).
+`search.name` is the tool id the kernel records, so using it as the framework's
+id keeps policy rules and framework config in sync. See the
+[TypeScript examples](../../../examples/typescript).
+
+`description` and `inputSchema` may also be passed to `defineTool`, which stores
+them on the returned function. The SDK never reads them — only frameworks that
+introspect a tool object do.
 
 ### Idempotency
 
