@@ -115,6 +115,21 @@ func (k *Kernel) decideStep(
 	}
 
 	execID := exec.ID
+	if req.Idempotency == "at_most_once" {
+		retry, err := k.indeterminateRetry(ctx, execID, req, argsHash)
+		if err != nil {
+			return domain.StepDecision{}, false, err
+		}
+		if retry {
+			return k.recordStepDecision(ctx, execID, exec.AgentID, stepID, req, argsHash, occurrence,
+				domain.PolicyResult{
+					Decision: domain.DecisionDeny,
+					Reason:   "prior attempt outcome unknown; retry refused",
+					RuleID:   "__indeterminate_retry",
+				})
+		}
+	}
+
 	input := domain.PolicyInput{
 		AgentID:  exec.AgentID,
 		Target:   req.Target,
@@ -131,12 +146,31 @@ func (k *Kernel) decideStep(
 	return k.recordStepDecision(ctx, execID, exec.AgentID, stepID, req, argsHash, occurrence, polResult)
 }
 
-func denialReason(errPayload json.RawMessage) string {
+const indeterminateReason = "indeterminate"
+
+// indeterminateRetry reports whether this effect already resolved indeterminate
+// in this execution: an at_most_once step the kernel found mid-flight on a
+// re-dispatch and failed rather than re-run.
+func (k *Kernel) indeterminateRetry(ctx context.Context, execID uuid.UUID, req SubmitStepRequest, argsHash string) (bool, error) {
+	steps, err := k.d.Steps.ListByExecution(ctx, execID)
+	if err != nil {
+		return false, err
+	}
+	for _, s := range steps {
+		if s.Status == domain.StepFailed && s.Kind == req.Kind && s.Target == req.Target &&
+			s.ArgsHash == argsHash && stepErrorReason(s.Error) == indeterminateReason {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func stepErrorReason(errPayload json.RawMessage) string {
 	var recorded struct {
 		Reason string `json:"reason"`
 	}
-	if err := json.Unmarshal(errPayload, &recorded); err != nil || recorded.Reason == "" {
-		return "policy_denied"
+	if err := json.Unmarshal(errPayload, &recorded); err != nil {
+		return ""
 	}
 	return recorded.Reason
 }
@@ -174,7 +208,7 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 		return domain.StepDecision{Decision: "proceed"}, nil
 	case domain.StepExecuting:
 		if idempotency == "at_most_once" {
-			errPayload, _ := json.Marshal(map[string]string{"reason": "indeterminate"})
+			errPayload, _ := json.Marshal(map[string]string{"reason": indeterminateReason})
 			if err := k.failStepInternal(ctx, step, errPayload); err != nil {
 				return domain.StepDecision{}, err
 			}
@@ -184,7 +218,11 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 	case domain.StepDenied:
 		// A resumed handler re-proposing a refused effect is told why it was
 		// refused, so it can distinguish a policy rule from a human decision.
-		return domain.StepDecision{Decision: "denied", Reason: denialReason(step.Error)}, nil
+		reason := stepErrorReason(step.Error)
+		if reason == "" {
+			reason = "policy_denied"
+		}
+		return domain.StepDecision{Decision: "denied", Reason: reason}, nil
 	default:
 		return domain.StepDecision{Decision: "proceed"}, nil
 	}
@@ -244,7 +282,11 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 	case domain.DecisionDeny:
 		step.Status = domain.StepDenied
 		step.CompletedAt = &now
-		errPayload, _ := json.Marshal(map[string]string{"reason": "policy_denied", "rule_id": pol.RuleID})
+		reason := pol.Reason
+		if reason == "" {
+			reason = "policy_denied"
+		}
+		errPayload, _ := json.Marshal(map[string]string{"reason": reason, "rule_id": pol.RuleID})
 		step.Error = errPayload
 		evts = append(evts,
 			store.EventRecord{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(stepID, req.Kind, req.Target, pol.RuleID, errPayload)},

@@ -1495,3 +1495,67 @@ func TestReleasedDispatchRecordsNoEvent(t *testing.T) {
 		}
 	}
 }
+
+// An at_most_once effect that resolved indeterminate must not run again in the
+// same execution, while a different effect on the same target still proceeds.
+func TestIndeterminateRetryIsDenied(t *testing.T) {
+	k, ctx := setup(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	submit := func(did uuid.UUID, args string) domain.StepDecision {
+		t.Helper()
+		dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+			Kind:        domain.StepKindTool,
+			Target:      "send_email",
+			Args:        json.RawMessage(args),
+			Idempotency: "at_most_once",
+			DispatchID:  did,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dec
+	}
+
+	const emailA = `{"to":"a@example.com"}`
+	if dec := submit(dispatchOf(t, k, exec.ID), emailA); dec.Decision != "proceed" {
+		t.Fatalf("first call must proceed, got %s", dec.Decision)
+	}
+
+	// No result is recorded. The next dispatch replays the same effect and
+	// finds it mid-flight, which an at_most_once step resolves as indeterminate.
+	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	did := dispatchOf(t, k, exec.ID)
+	dec := submit(did, emailA)
+	if dec.Decision != "replay" || !bytes.Contains(dec.Error, []byte("indeterminate")) {
+		t.Fatalf("replayed step must resolve indeterminate, got %s %s", dec.Decision, dec.Error)
+	}
+
+	// The agent calls the same effect again: a fresh occurrence, so a new step,
+	// which the kernel refuses rather than running the side effect twice.
+	dec = submit(did, emailA)
+	if dec.Decision != "denied" {
+		t.Fatalf("retry of an indeterminate effect must be denied, got %s", dec.Decision)
+	}
+	refusal := dec.Reason
+	if refusal == "" {
+		t.Fatal("denial must carry a reason")
+	}
+
+	if dec := submit(did, `{"to":"b@example.com"}`); dec.Decision != "proceed" {
+		t.Fatalf("a different effect on the same target must proceed, got %s", dec.Decision)
+	}
+
+	// A later dispatch replays both calls and is told why the second was
+	// refused, not just that some policy denied it.
+	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+	did = dispatchOf(t, k, exec.ID)
+	submit(did, emailA)
+	if dec := submit(did, emailA); dec.Reason != refusal {
+		t.Fatalf("replayed denial reason = %q, want %q", dec.Reason, refusal)
+	}
+}
