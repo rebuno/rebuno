@@ -103,7 +103,11 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 	approval.DecidedAt = &now
 	approval.Rationale = req.Rationale
 
-	errPayload, _ := json.Marshal(map[string]string{"reason": "approval_denied"})
+	reason := req.Rationale
+	if reason == "" {
+		reason = "approval_denied"
+	}
+	errPayload, _ := json.Marshal(map[string]string{"reason": reason})
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 		step, err := tx.GetStep(ctx, approval.StepID)
 		if err != nil {

@@ -882,6 +882,34 @@ func TestApprovalDenyResumesExecution(t *testing.T) {
 	}
 }
 
+// Denying with a rationale makes that rationale the reason a re-proposed step is given.
+func TestApprovalDenyRationaleReachesHandler(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: approvalLLMEngine(t, time.Hour),
+	})
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	_, approvalID := submitLLMStep(t, k, ctx, exec)
+
+	rationale := "use the existing helper in utils.go instead"
+	if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob", Rationale: rationale}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Decision != "denied" || dec.Reason != rationale {
+		t.Fatalf("expected denied with rationale %q, got %+v", rationale, dec)
+	}
+}
+
 func TestApprovalExpireRecordsActualStepKind(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: 1 * time.Millisecond}
