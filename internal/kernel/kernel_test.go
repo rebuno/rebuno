@@ -1560,6 +1560,9 @@ func TestIndeterminateRetryIsDenied(t *testing.T) {
 	if dec.Decision != "replay" || !bytes.Contains(dec.Error, []byte("indeterminate")) {
 		t.Fatalf("replayed step must resolve indeterminate, got %s %s", dec.Decision, dec.Error)
 	}
+	if !bytes.Contains(dec.Error, []byte("outcome unknown")) {
+		t.Fatalf("indeterminate error must carry an explanatory message, got %s", dec.Error)
+	}
 
 	// The agent calls the same effect again: a fresh occurrence, so a new step,
 	// which the kernel refuses rather than running the side effect twice.

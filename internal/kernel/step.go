@@ -208,7 +208,10 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 		return domain.StepDecision{Decision: "proceed"}, nil
 	case domain.StepExecuting:
 		if idempotency == "at_most_once" {
-			errPayload, _ := json.Marshal(map[string]string{"reason": indeterminateReason})
+			errPayload, _ := json.Marshal(map[string]string{
+				"reason":  indeterminateReason,
+				"message": "outcome unknown: this may already have taken effect. Check the state before continuing.",
+			})
 			if err := k.failStepInternal(ctx, step, errPayload); err != nil {
 				return domain.StepDecision{}, err
 			}
