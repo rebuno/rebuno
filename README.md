@@ -15,9 +15,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?&style=for-the-badge" alt="License"></a>
 </p>
 
-An open-source execution runtime for production agents.
+Rebuno is an open-source execution runtime for production agents.
 
-Rebuno gives your agents durable execution (crash and resume without re-running side effects), an event-sourced record of everything they did, and optional governance over what they're allowed to do.
+It records every tool call and LLM call as a durable step. Interrupted runs resume from the last recorded step instead of starting over. Any step can be allowed, denied, or held for human approval.
 
 ## Quick Start
 
