@@ -26,8 +26,9 @@ func upsertStep(ctx context.Context, q Querier, step domain.Step) error {
 	_, err := q.Exec(ctx, `
 		INSERT INTO steps (
 			step_id, execution_id, kind, target, args_hash, occurrence, status,
-			idempotency, args, result, error, started_at, completed_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13)
+			idempotency, args, result, error, started_at, completed_at,
+			usage_input, usage_output
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, $15, $16)
 		ON CONFLICT (step_id) DO UPDATE SET
 			execution_id = EXCLUDED.execution_id,
 			kind         = EXCLUDED.kind,
@@ -44,11 +45,16 @@ func upsertStep(ctx context.Context, q Querier, step domain.Step) error {
 							THEN steps.error ELSE EXCLUDED.error END,
 			started_at   = EXCLUDED.started_at,
 			completed_at = CASE WHEN steps.status = ANY($14::text[])
-							THEN steps.completed_at ELSE EXCLUDED.completed_at END
+							THEN steps.completed_at ELSE EXCLUDED.completed_at END,
+			usage_input  = CASE WHEN steps.status = ANY($14::text[])
+							THEN steps.usage_input ELSE EXCLUDED.usage_input END,
+			usage_output = CASE WHEN steps.status = ANY($14::text[])
+							THEN steps.usage_output ELSE EXCLUDED.usage_output END
 	`,
 		step.StepID, step.ExecutionID.String(), string(step.Kind), step.Target, step.ArgsHash, step.Occurrence,
 		string(step.Status), step.Idempotency, argsPayload, result, errPayload,
 		timeArg(step.StartedAt), timeArg(step.CompletedAt), terminalStatuses,
+		step.UsageInput, step.UsageOutput,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert step: %w", err)
@@ -67,7 +73,8 @@ func (q querier) GetStep(ctx context.Context, stepID string) (domain.Step, error
 func getStep(ctx context.Context, q Querier, stepID string) (domain.Step, error) {
 	row := q.QueryRow(ctx, `
 		SELECT step_id, execution_id, kind, target, args_hash, occurrence, status,
-		       idempotency, args, result, error, started_at, completed_at
+		       idempotency, args, result, error, started_at, completed_at,
+		       COALESCE(usage_input, 0), COALESCE(usage_output, 0)
 		FROM steps
 		WHERE step_id = $1
 	`, stepID)
@@ -134,7 +141,8 @@ func (q querier) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domai
 func listStepsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]domain.Step, error) {
 	rows, err := q.Query(ctx, `
 		SELECT step_id, execution_id, kind, target, args_hash, occurrence, status,
-		       idempotency, args, result, error, started_at, completed_at
+		       idempotency, args, result, error, started_at, completed_at,
+		       COALESCE(usage_input, 0), COALESCE(usage_output, 0)
 		FROM steps
 		WHERE execution_id = $1
 		ORDER BY step_id
@@ -147,6 +155,27 @@ func listStepsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]d
 	return scanSteps(rows)
 }
 
+func executionUsage(ctx context.Context, q Querier, execID uuid.UUID) (int, error) {
+	var total int
+	err := q.QueryRow(ctx, `
+		SELECT COALESCE(SUM(COALESCE(usage_input, 0) + COALESCE(usage_output, 0)), 0)
+		FROM steps
+		WHERE execution_id = $1
+	`, execID.String()).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum execution usage: %w", err)
+	}
+	return total, nil
+}
+
+func (s *Store) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error) {
+	return executionUsage(ctx, s.pool, execID)
+}
+
+func (q querier) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error) {
+	return executionUsage(ctx, q.q, execID)
+}
+
 func scanStep(row pgx.Row) (domain.Step, error) {
 	var step domain.Step
 	var execID string
@@ -157,6 +186,7 @@ func scanStep(row pgx.Row) (domain.Step, error) {
 	if err := row.Scan(
 		&step.StepID, &execID, &kind, &step.Target, &step.ArgsHash, &step.Occurrence, &status,
 		&step.Idempotency, &args, &result, &errPayload, &step.StartedAt, &step.CompletedAt,
+		&step.UsageInput, &step.UsageOutput,
 	); err != nil {
 		return domain.Step{}, err
 	}

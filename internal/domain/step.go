@@ -50,4 +50,6 @@ type Step struct {
 	Error       json.RawMessage `json:"error,omitempty"`
 	StartedAt   *time.Time      `json:"started_at,omitempty"`
 	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	UsageInput  int             `json:"usage_input,omitempty"`
+	UsageOutput int             `json:"usage_output,omitempty"`
 }

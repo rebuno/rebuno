@@ -22,6 +22,7 @@ type StepStore interface {
 	DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error)
 	AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error
 	ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error)
+	ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error)
 }
 
 type ExecutionStore interface {

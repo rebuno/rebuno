@@ -25,6 +25,12 @@ type PolicyResult struct {
 	RuleID         string               `json:"rule_id,omitempty" yaml:"-"`
 	ApprovalConfig PolicyApprovalConfig `json:"approval_config,omitempty" yaml:"approval_config,omitempty"`
 	RateLimit      RateLimitConfig      `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
+	Budget         BudgetConfig         `json:"budget,omitempty" yaml:"budget,omitempty"`
+}
+
+type BudgetConfig struct {
+	MaxTokens int    `json:"max_tokens,omitempty" yaml:"max_tokens,omitempty"`
+	OnExceed  string `json:"on_exceed,omitempty" yaml:"on_exceed,omitempty"`
 }
 
 type RateLimitConfig struct {

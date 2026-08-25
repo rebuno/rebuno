@@ -41,6 +41,8 @@ func (s *Store) upsertStepLocked(ctx context.Context, step domain.Step) {
 			step.Result = existing.Result
 			step.Error = existing.Error
 			step.CompletedAt = existing.CompletedAt
+			step.UsageInput = existing.UsageInput
+			step.UsageOutput = existing.UsageOutput
 		}
 	}
 	s.steps[key] = step
@@ -115,6 +117,26 @@ func (s *Store) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StepID < out[j].StepID })
 	return out, nil
+}
+
+func (s *Store) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return sumUsage(s.steps, execID), nil
+}
+
+func (tx *txStore) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error) {
+	return sumUsage(tx.steps, execID), nil
+}
+
+func sumUsage(steps map[string]domain.Step, execID uuid.UUID) int {
+	var total int
+	for _, step := range steps {
+		if step.ExecutionID == execID {
+			total += step.UsageInput + step.UsageOutput
+		}
+	}
+	return total
 }
 
 func (tx *txStore) Upsert(ctx context.Context, step domain.Step) error {

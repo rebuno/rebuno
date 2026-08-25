@@ -151,6 +151,29 @@ and the scope in `per_what`, so two rules never share a bucket.
 A step over the limit is rejected with `rate_limited` rather than denied by
 policy. A hard ceiling belongs in a `deny` or `require_approval` rule instead.
 
+### budget
+
+A rule may cap the LLM tokens an execution is allowed to spend.
+
+```yaml
+  - id: cap-llm-spend
+    priority: 5
+    when: { step_kind: llm_call }
+    then:
+      decision: allow
+      budget:
+        max_tokens: 200000
+        on_exceed: deny        # deny (default) | require_approval
+```
+
+The meter sums the input and output tokens recorded on the execution's completed
+`llm_call` steps, so an effect counts once however many times it was attempted.
+
+The check runs before the call, so the step that crosses the limit still runs. A
+response with no parseable usage never advances the meter — most often an
+OpenAI-style stream requested without `stream_options.include_usage` — and
+`rebuno_llm_usage_missing_total` counts those.
+
 ## Examples
 
 **Deny by default, allow only known tools:**

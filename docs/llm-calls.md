@@ -30,7 +30,8 @@ submits it (`POST /v0/executions/{id}/steps`) exactly like a tool call:
 - On `replay`, the recorded provider response is returned and **no provider call
   ever happens**. On `proceed`, the request is forwarded to the provider and the
   response is recorded as the step outcome — its `step.succeeded` event carries the
-  response, token counts, and cost.
+  response. The kernel reads token counts out of that response and records them
+  on the step, which is what a policy [budget](policy.md#budget) meters.
 
 For **live** token streaming to observers while the call is in flight, see
 [live streaming](streaming.md) — an ephemeral side channel that does not affect

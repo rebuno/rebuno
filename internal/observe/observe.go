@@ -36,6 +36,7 @@ const (
 	executionsCompletedTotal  = "executions_completed_total"
 	workerErrorsTotalName     = "worker_errors_total"
 	rateLimitDecisionsTotal   = "rate_limit_decisions_total"
+	usageMissingTotalName     = "llm_usage_missing_total"
 
 	httpRequestsTotalName = "http_requests_total"
 	httpRequestDuration   = "http_request_duration_seconds"
@@ -60,6 +61,7 @@ type Observer struct {
 	executionsCompleted   *prometheus.CounterVec
 	workerErrors          *prometheus.CounterVec
 	rateLimitTotal        *prometheus.CounterVec
+	usageMissingTotal     prometheus.Counter
 
 	httpRequestsTotal *prometheus.CounterVec
 	httpDuration      *prometheus.HistogramVec
@@ -165,6 +167,12 @@ func New() *Observer {
 			Help:      "Rate-limit decisions labelled by outcome (limited, error_allowed, error_denied).",
 		}, []string{"outcome"}),
 
+		usageMissingTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      usageMissingTotalName,
+			Help:      "Completed llm_call steps whose recorded response carried no parseable token usage.",
+		}),
+
 		httpRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: Namespace,
 			Name:      httpRequestsTotalName,
@@ -193,6 +201,7 @@ func New() *Observer {
 		obs.executionsCompleted,
 		obs.workerErrors,
 		obs.rateLimitTotal,
+		obs.usageMissingTotal,
 		obs.httpRequestsTotal,
 		obs.httpDuration,
 	)
@@ -255,6 +264,13 @@ func (o *Observer) RecordRateLimit(outcome string) {
 		return
 	}
 	o.rateLimitTotal.WithLabelValues(outcome).Inc()
+}
+
+func (o *Observer) RecordUsageMissing() {
+	if o == nil {
+		return
+	}
+	o.usageMissingTotal.Inc()
 }
 
 func (o *Observer) RecordDispatchOutcome(outcome string) {

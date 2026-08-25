@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/usage"
 )
 
 // Event payloads reference the step by id; the step row is the system of record
@@ -31,7 +32,7 @@ func TestStepPayloadOmitsArgsBody(t *testing.T) {
 }
 
 func TestStepResultPayloadOmitsResultBody(t *testing.T) {
-	p := StepResultPayload("step-1", domain.StepKindLLM, "gpt-4")
+	p := StepResultPayload("step-1", domain.StepKindLLM, "gpt-4", usage.Tokens{Input: 12, Output: 3})
 
 	if _, ok := p["result"]; ok {
 		t.Fatalf("step result payload must not embed result body, got: %v", p)

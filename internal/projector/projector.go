@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/store"
+	"github.com/rebuno/rebuno/internal/usage"
 )
 
 type State struct {
@@ -43,12 +44,19 @@ func StepPayload(stepID string, kind domain.StepKind, target, ruleID string) map
 	return m
 }
 
-func StepResultPayload(stepID string, kind domain.StepKind, target string) map[string]any {
-	return map[string]any{
+func StepResultPayload(stepID string, kind domain.StepKind, target string, tokens usage.Tokens) map[string]any {
+	payload := map[string]any{
 		"step_id":   stepID,
 		"step_type": string(kind),
 		"target":    target,
 	}
+	if tokens.Found() {
+		payload["usage"] = map[string]any{
+			"input_tokens":  tokens.Input,
+			"output_tokens": tokens.Output,
+		}
+	}
+	return payload
 }
 
 func StepErrorPayload(stepID string, kind domain.StepKind, target string, err []byte) map[string]any {

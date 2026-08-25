@@ -12,6 +12,7 @@ import (
 	"github.com/rebuno/rebuno/internal/projector"
 	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store"
+	"github.com/rebuno/rebuno/internal/usage"
 )
 
 type SubmitStepRequest struct {
@@ -148,6 +149,8 @@ func (k *Kernel) decideStep(
 
 const indeterminateReason = "indeterminate"
 
+const budgetExceededReason = "execution_token_budget_exceeded"
+
 // indeterminateRetry reports whether this effect already resolved indeterminate
 // in this execution: an at_most_once step the kernel found mid-flight on a
 // re-dispatch and failed rather than re-run.
@@ -249,6 +252,24 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		if !allowed {
 			k.d.Observer.RecordRateLimit("limited")
 			return domain.StepDecision{Decision: "rate_limited", Reason: "rate_limit_exceeded"}, false, nil
+		}
+	}
+
+	if pol.Budget.MaxTokens > 0 && pol.Decision == domain.DecisionAllow {
+		spent, err := k.d.Steps.ExecutionUsage(ctx, execID)
+		switch {
+		case err != nil:
+			k.log.Warn("execution usage unavailable, allowing step",
+				"rule_id", pol.RuleID, "execution_id", execID.String(), "error", err)
+		case spent >= pol.Budget.MaxTokens:
+			pol.Decision = domain.DecisionDeny
+			if pol.Budget.OnExceed == domain.DecisionRequireApproval {
+				pol.Decision = domain.DecisionRequireApproval
+			}
+			pol.Reason = budgetExceededReason
+			k.log.Info("execution token budget exceeded",
+				"rule_id", pol.RuleID, "execution_id", execID.String(),
+				"spent", spent, "max_tokens", pol.Budget.MaxTokens, "decision", pol.Decision)
 		}
 	}
 
@@ -389,8 +410,19 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 	step.Status = domain.StepSucceeded
 	step.Result = req.Result
 	step.CompletedAt = &now
+
+	var tokens usage.Tokens
+	if step.Kind == domain.StepKindLLM {
+		tokens = usage.Parse(req.Result)
+		if !tokens.Found() {
+			k.d.Observer.RecordUsageMissing()
+		}
+		step.UsageInput = tokens.Input
+		step.UsageOutput = tokens.Output
+	}
+
 	evts := []store.EventRecord{
-		{Type: domain.EventStepSucceeded, Payload: projector.StepResultPayload(stepID, step.Kind, step.Target)},
+		{Type: domain.EventStepSucceeded, Payload: projector.StepResultPayload(stepID, step.Kind, step.Target, tokens)},
 	}
 	if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
 		return domain.StepDecision{}, err
