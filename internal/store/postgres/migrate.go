@@ -24,10 +24,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS,
 		goose.WithSessionLocker(locker))
 	if err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("create migration provider: %w", err)
 	}
-	defer provider.Close()
+	defer func() { _ = provider.Close() }()
 
 	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
