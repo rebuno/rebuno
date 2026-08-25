@@ -1,3 +1,5 @@
+-- +goose Up
+
 CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
     webhook_url TEXT NOT NULL,

@@ -3,35 +3,34 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"io/fs"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/lock"
 	"github.com/rebuno/rebuno/migrations"
 )
 
-const migrateLockKey = "rebuno-schema-migrate"
-
-// Migrate reads the embedded migration SQL and executes it against the pool,
-// under an advisory lock so concurrent replicas can't race on schema creation.
+// Migrate applies the embedded migrations in version order, each exactly once,
+// recorded in goose_db_version. A session lock serializes concurrent replicas.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	sqlBytes, err := fs.ReadFile(migrations.FS, "001_initial.sql")
+	locker, err := lock.NewPostgresSessionLocker()
 	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
+		return fmt.Errorf("create migration locker: %w", err)
 	}
 
-	keyInt := hashKey(migrateLockKey)
-	conn, err := pool.Acquire(ctx)
+	// Closing this *sql.DB does not close the pool it wraps.
+	db := stdlib.OpenDBFromPool(pool)
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS,
+		goose.WithSessionLocker(locker))
 	if err != nil {
-		return fmt.Errorf("acquire connection: %w", err)
+		db.Close()
+		return fmt.Errorf("create migration provider: %w", err)
 	}
-	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", keyInt); err != nil {
-		conn.Release()
-		return fmt.Errorf("acquire migration lock: %w", err)
-	}
-	defer releaseAdvisoryLock(conn, keyInt)
+	defer provider.Close()
 
-	if _, err := conn.Exec(ctx, string(sqlBytes)); err != nil {
-		return fmt.Errorf("execute migration: %w", err)
+	if _, err := provider.Up(ctx); err != nil {
+		return fmt.Errorf("apply migrations: %w", err)
 	}
 	return nil
 }
