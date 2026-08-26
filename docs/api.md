@@ -107,7 +107,8 @@ carrying the ID to address the step's `complete`/`fail` routes:
 | `proceed` | New step allowed — perform the effect, then call `complete`/`fail`. |
 | `replay` | Already recorded — `result` or `error` is returned; do **not** re-run. |
 | `denied` | Policy denied it; `reason` explains. |
-| `blocked` | Awaiting human approval; `approval_id` is returned. |
+| `blocked` | Stop and exit; the kernel will re-dispatch. `approval_id` is returned when a human decision is pending. |
+| `rate_limited` | A rule's rate limit refused it; `reason` explains. |
 | `execution_terminal` | The execution is cancelled/done; exit cleanly. |
 
 ### Report a step outcome

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/google/uuid"
@@ -244,10 +245,63 @@ func (k *Kernel) refuseRateLimited(
 	return domain.StepDecision{Decision: "rate_limited", Reason: reason}, false, nil
 }
 
+// onRateLimited parks the step when the rule allows a wait and the execution
+// has not parked before, and refuses it otherwise.
+func (k *Kernel) onRateLimited(
+	ctx context.Context, execID uuid.UUID, stepID string,
+	req SubmitStepRequest, pol domain.PolicyResult, wait time.Duration,
+) (domain.StepDecision, bool, error) {
+	cfg := pol.RateLimit
+	if cfg.MaxWait <= 0 {
+		return k.refuseRateLimited(ctx, execID, stepID, req, pol.RuleID, domain.ReasonRateLimited)
+	}
+	if wait <= 0 {
+		// The Postgres limiter reports no balance on a denial, so fall back to
+		// the interval at which the bucket refills one token.
+		wait = cfg.Window / time.Duration(cfg.MaxCalls)
+	}
+	parked, err := k.d.Events.CountByType(ctx, execID, domain.EventStepRateLimited)
+	if err != nil {
+		k.log.Warn("rate limit park history unavailable, refusing step",
+			"rule_id", pol.RuleID, "execution_id", execID.String(), "error", err)
+	}
+	if err != nil || parked > 0 || wait > cfg.MaxWait {
+		return k.refuseRateLimited(ctx, execID, stepID, req, pol.RuleID, domain.ReasonRateLimited)
+	}
+	// Jitter so executions on one key do not all become claimable on one tick.
+	wait = min(wait+rand.N(wait/2+1), cfg.MaxWait)
+	return k.parkRateLimited(ctx, execID, stepID, req, pol.RuleID, wait)
+}
+
+// parkRateLimited leaves the execution running and writes no step row: the
+// queued dispatch is its own resumer, and the retry reuses this step_id.
+func (k *Kernel) parkRateLimited(
+	ctx context.Context, execID uuid.UUID, stepID string,
+	req SubmitStepRequest, ruleID string, wait time.Duration,
+) (domain.StepDecision, bool, error) {
+	errPayload, _ := json.Marshal(map[string]string{"reason": domain.ReasonRateLimited, "rule_id": ruleID})
+	at := time.Now().UTC().Add(wait)
+	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		if _, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
+			projector.StepDeniedPayload(stepID, req.Kind, req.Target, ruleID, errPayload)); err != nil {
+			return err
+		}
+		if err := releaseDispatchesLocked(ctx, tx, execID); err != nil {
+			return err
+		}
+		return k.enqueueDispatchTx(ctx, tx, execID, at)
+	}); err != nil {
+		return domain.StepDecision{}, false, err
+	}
+	k.log.Info("step parked on rate limit",
+		"rule_id", ruleID, "execution_id", execID.String(), "wait", wait)
+	return domain.StepDecision{Decision: "blocked", Reason: domain.ReasonRateLimited}, false, nil
+}
+
 func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agentID, stepID string, req SubmitStepRequest, argsHash string, occurrence int, pol domain.PolicyResult) (domain.StepDecision, bool, error) {
 	if pol.RateLimit.MaxCalls > 0 {
 		key := ratelimit.ScopeKey(pol.RuleID, pol.RateLimit.PerWhat, execID.String(), agentID)
-		allowed, _, err := k.d.RateLimiter.Allow(ctx, key, pol.RateLimit)
+		allowed, wait, err := k.d.RateLimiter.Allow(ctx, key, pol.RateLimit)
 		if err != nil {
 			if pol.RateLimit.OnLimiterError == domain.LimiterErrorDeny {
 				k.d.Observer.RecordRateLimit("error_denied")
@@ -261,7 +315,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		}
 		if !allowed {
 			k.d.Observer.RecordRateLimit("limited")
-			return k.refuseRateLimited(ctx, execID, stepID, req, pol.RuleID, domain.ReasonRateLimited)
+			return k.onRateLimited(ctx, execID, stepID, req, pol, wait)
 		}
 	}
 

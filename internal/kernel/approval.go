@@ -71,7 +71,7 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 			return err
 		}
 		// Resume the execution by enqueueing a dispatch atomically.
-		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID)
+		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
 	}); err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		}
 		// Resume rather than fail: a refusal is something the handler is told,
 		// like any other denied step, so it can report or route around it.
-		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID)
+		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
 	}); err != nil {
 		return err
 	}

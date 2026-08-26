@@ -163,7 +163,7 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 		if err := tx.UpdateExecutionStatus(ctx, exec.ID, domain.ExecutionRunning, nil, ""); err != nil {
 			return err
 		}
-		return k.enqueueDispatchTx(ctx, tx, exec.ID)
+		return k.enqueueDispatchTx(ctx, tx, exec.ID, time.Now().UTC())
 	}); err != nil {
 		return domain.Execution{}, err
 	}
@@ -283,11 +283,11 @@ func lockKey(id uuid.UUID) string {
 
 func (k *Kernel) enqueueDispatch(ctx context.Context, execID uuid.UUID) error {
 	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		return k.enqueueDispatchTx(ctx, tx, execID)
+		return k.enqueueDispatchTx(ctx, tx, execID, time.Now().UTC())
 	})
 }
 
-func (k *Kernel) enqueueDispatchTx(ctx context.Context, tx store.TxStore, execID uuid.UUID) error {
+func (k *Kernel) enqueueDispatchTx(ctx context.Context, tx store.TxStore, execID uuid.UUID, at time.Time) error {
 	now := time.Now().UTC()
 	d := domain.Dispatch{
 		ID:            uuid.Must(uuid.NewV7()),
@@ -295,7 +295,7 @@ func (k *Kernel) enqueueDispatchTx(ctx context.Context, tx store.TxStore, execID
 		Status:        domain.DispatchPending,
 		Attempt:       0,
 		MaxAttempts:   k.cfg.DispatchMaxAttempts,
-		NextAttemptAt: now,
+		NextAttemptAt: at,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}

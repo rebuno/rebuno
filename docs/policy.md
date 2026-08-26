@@ -145,11 +145,17 @@ and the scope in `per_what`, so two rules never share a bucket.
         max_calls: 5
         window: 1m
         per_what: execution      # execution (default) | agent | global
+        max_wait: 5m             # unset (default) refuses instead of waiting
         on_limiter_error: allow  # allow (default, fail-open) | deny (fail-closed)
 ```
 
-A step over the limit is rejected with `rate_limited` rather than denied by
+A step over the limit is refused with `rate_limited` rather than denied by
 policy. A hard ceiling belongs in a `deny` or `require_approval` rule instead.
+
+With `max_wait` set, a limited step parks instead: the submit returns `blocked`
+and the kernel re-dispatches once the bucket refills, leaving the execution
+`running`. An execution parks once — a step still over the limit on the retry,
+or a wait longer than `max_wait`, is refused.
 
 ### budget
 

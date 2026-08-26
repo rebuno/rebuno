@@ -38,14 +38,17 @@ is what makes crashes and approvals transparent:
    - `proceed` → the agent performs the effect, then reports the outcome
      (`.../complete` or `.../fail`).
    - `denied` → policy rejected it; surface it as an error.
-   - `blocked` → a human approval is required (see below).
+   - `rate_limited` → a rule's rate limit refused it; surface it as an error.
+   - `blocked` → stop and exit (see below).
    - `execution_terminal` → the execution is cancelled/done; exit cleanly.
 5. **Block.** On a `blocked` decision the agent stops and exits the dispatch
-   cleanly. The execution is `blocked` waiting on an approval. **The process may
-   die here** — no state is held in memory.
-6. **Resume.** When the approval resolves, the kernel re-dispatches. The agent runs
-   from the top again; every prior effect returns `replay`, and the
-   previously-blocked step now proceeds.
+   cleanly. Either a human approval is pending — `approval_id` is returned and
+   the execution is `blocked` — or a rate limit parked the step and the
+   execution stays `running`. **The process may die here** — no state is held
+   in memory.
+6. **Resume.** When the approval resolves, or the rate limit's wait elapses, the
+   kernel re-dispatches. The agent runs from the top again; every prior effect
+   returns `replay`, and the previously-blocked step is decided afresh.
 7. **Complete.** When the agent's logic finishes, it reports the result
    (`POST /v0/executions/{id}/complete`), and the kernel records
    `execution.completed`.

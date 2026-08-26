@@ -34,13 +34,11 @@ type BudgetConfig struct {
 }
 
 type RateLimitConfig struct {
-	MaxCalls int           `json:"max_calls,omitempty" yaml:"max_calls,omitempty"`
-	Window   time.Duration `json:"window,omitempty" yaml:"window,omitempty"`
-	PerWhat  string        `json:"per_what,omitempty" yaml:"per_what,omitempty"` // "execution" (default), "agent", "global"
-	// OnLimiterError selects behavior when the limiter backend errors:
-	// LimiterErrorAllow (default, fail-open) or LimiterErrorDeny (fail-closed).
-	// Hard ceilings should generally be expressed as policy deny/require_approval.
-	OnLimiterError string `json:"on_limiter_error,omitempty" yaml:"on_limiter_error,omitempty"`
+	MaxCalls       int           `json:"max_calls,omitempty" yaml:"max_calls,omitempty"`
+	Window         time.Duration `json:"window,omitempty" yaml:"window,omitempty"`
+	PerWhat        string        `json:"per_what,omitempty" yaml:"per_what,omitempty"` // "execution" (default), "agent", "global"
+	MaxWait        time.Duration `json:"max_wait,omitempty" yaml:"max_wait,omitempty"`
+	OnLimiterError string        `json:"on_limiter_error,omitempty" yaml:"on_limiter_error,omitempty"`
 }
 
 const (

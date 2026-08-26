@@ -135,3 +135,23 @@ func (tx *txStore) GetLatestSequence(ctx context.Context, execID uuid.UUID) (int
 	}
 	return log[len(log)-1].EventSeq, nil
 }
+
+func (s *Store) CountByType(ctx context.Context, execID uuid.UUID, eventType string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.countByTypeLocked(execID, eventType), nil
+}
+
+func (s *Store) countByTypeLocked(execID uuid.UUID, eventType string) int {
+	n := 0
+	for _, ev := range s.events[execID] {
+		if ev.Type == eventType {
+			n++
+		}
+	}
+	return n
+}
+
+func (tx *txStore) CountByType(ctx context.Context, execID uuid.UUID, eventType string) (int, error) {
+	return tx.countByTypeLocked(execID, eventType), nil
+}

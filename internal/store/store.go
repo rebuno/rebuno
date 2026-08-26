@@ -14,6 +14,7 @@ type EventStore interface {
 	AppendBatch(ctx context.Context, execID uuid.UUID, events []EventRecord) ([]domain.Event, error)
 	GetEvents(ctx context.Context, execID uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error)
 	GetLatestSequence(ctx context.Context, execID uuid.UUID) (int64, error)
+	CountByType(ctx context.Context, execID uuid.UUID, eventType string) (int, error)
 }
 
 type StepStore interface {

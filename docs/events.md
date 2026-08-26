@@ -49,6 +49,7 @@ The lifecycle of each effect (tool call or LLM call).
 | `step.allowed` | Policy allowed it. Payload carries the matched `rule_id`. |
 | `step.denied` | Policy denied it (or an approval was denied/expired). |
 | `step.awaiting_approval` | Policy requires a human decision; an approval was created. |
+| `step.rate_limited` | A rule's rate limit refused or parked it. No step row is written. |
 | `step.executing` | Written **before** the external call runs — the durable "intent to act". |
 | `step.succeeded` | Terminal. The `result` lives on the step, not in the payload. |
 | `step.failed` | Terminal, with the recorded `error`. |

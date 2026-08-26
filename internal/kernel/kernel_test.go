@@ -1679,3 +1679,150 @@ func TestDenyReasonMatchesOnReplay(t *testing.T) {
 		t.Fatalf("replay reason %q != first reason %q", replay.Reason, first.Reason)
 	}
 }
+
+func rateLimitedKernel(t *testing.T, cfg domain.RateLimitConfig) (*kernel.Kernel, context.Context, domain.Execution) {
+	t.Helper()
+	ms := memstore.NewStore()
+	pe, err := policy.NewRuleEngine(policy.Config{
+		Rules: []policy.Rule{{
+			ID:       "rate-limit-read",
+			Priority: 1,
+			When:     policy.Condition{Target: "read"},
+			Then:     domain.PolicyResult{Decision: domain.DecisionAllow, RateLimit: cfg},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
+		Events:      ms,
+		Steps:       ms,
+		Executions:  ms,
+		Agents:      ms,
+		Approvals:   ms,
+		Queue:       ms,
+		Locker:      ms,
+		UnitOfWork:  ms,
+		Policy:      pe,
+		RateLimiter: ratelimit.NewMemoryLimiter(),
+	})
+	ctx := context.Background()
+	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k, ctx, exec
+}
+
+func submitRead(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UUID) domain.StepDecision {
+	t.Helper()
+	dec, err := k.SubmitStep(ctx, execID, kernel.SubmitStepRequest{
+		Kind:       domain.StepKindTool,
+		Target:     "read",
+		Args:       json.RawMessage(`{"path":"/tmp"}`),
+		DispatchID: dispatchOf(t, k, execID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dec
+}
+
+func TestRateLimitParksForRedispatch(t *testing.T) {
+	k, ctx, exec := rateLimitedKernel(t, domain.RateLimitConfig{
+		MaxCalls: 1, Window: time.Minute, PerWhat: "execution", MaxWait: 5 * time.Minute,
+	})
+
+	if dec := submitRead(t, k, ctx, exec.ID); dec.Decision != "proceed" {
+		t.Fatalf("first step expected proceed, got %+v", dec)
+	}
+	dec := submitRead(t, k, ctx, exec.ID)
+	if dec.Decision != "blocked" || dec.Reason != domain.ReasonRateLimited {
+		t.Fatalf("second step expected blocked/%s, got %+v", domain.ReasonRateLimited, dec)
+	}
+
+	// The queued dispatch is its own resumer, so it must still accept steps.
+	got, err := k.GetExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.ExecutionRunning {
+		t.Fatalf("expected execution to stay running, got %s", got.Status)
+	}
+
+	dispatches, err := k.Deps().Queue.ListDispatchesByExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pending []domain.Dispatch
+	for _, d := range dispatches {
+		if d.Status == domain.DispatchPending {
+			pending = append(pending, d)
+		}
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected exactly one pending dispatch, got %d of %d", len(pending), len(dispatches))
+	}
+	if !pending[0].NextAttemptAt.After(time.Now().UTC()) {
+		t.Fatalf("expected the resume dispatch to be deferred, next_attempt_at=%s", pending[0].NextAttemptAt)
+	}
+
+	steps, err := k.ListSteps(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("a parked step writes no step row, got %d steps", len(steps))
+	}
+}
+
+func TestRateLimitParksOnlyOnce(t *testing.T) {
+	k, ctx, exec := rateLimitedKernel(t, domain.RateLimitConfig{
+		MaxCalls: 1, Window: time.Minute, PerWhat: "execution", MaxWait: 5 * time.Minute,
+	})
+
+	first := submitRead(t, k, ctx, exec.ID)
+	if dec := submitRead(t, k, ctx, exec.ID); dec.Decision != "blocked" {
+		t.Fatalf("expected the first limited step to park, got %+v", dec)
+	}
+
+	// What the agent does when the resume dispatch lands: replay the steps it
+	// already recorded, then re-submit the one that was limited.
+	replayed := submitRead(t, k, ctx, exec.ID)
+	if replayed.StepID != first.StepID {
+		t.Fatalf("resume should replay step %s, got %s", first.StepID, replayed.StepID)
+	}
+	dec := submitRead(t, k, ctx, exec.ID)
+	if dec.Decision != "rate_limited" || dec.Reason != domain.ReasonRateLimited {
+		t.Fatalf("expected the second limited step to be refused, got %+v", dec)
+	}
+
+	dispatches, err := k.Deps().Queue.ListDispatchesByExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := 0
+	for _, d := range dispatches {
+		if d.Status == domain.DispatchPending {
+			pending++
+		}
+	}
+	if pending != 1 {
+		t.Fatalf("a refusal queues no dispatch, got %d pending", pending)
+	}
+}
+
+func TestRateLimitRefusesWaitOverMaxWait(t *testing.T) {
+	k, ctx, exec := rateLimitedKernel(t, domain.RateLimitConfig{
+		MaxCalls: 1, Window: time.Hour, PerWhat: "execution", MaxWait: time.Minute,
+	})
+
+	submitRead(t, k, ctx, exec.ID)
+	dec := submitRead(t, k, ctx, exec.ID)
+	if dec.Decision != "rate_limited" || dec.Reason != domain.ReasonRateLimited {
+		t.Fatalf("a 1h wait under a 1m max_wait should refuse, got %+v", dec)
+	}
+}

@@ -175,3 +175,22 @@ func getLatestSequence(ctx context.Context, q Querier, execID uuid.UUID) (int64,
 	}
 	return seq, nil
 }
+
+func (s *Store) CountByType(ctx context.Context, execID uuid.UUID, eventType string) (int, error) {
+	return countByType(ctx, s.pool, execID, eventType)
+}
+
+func (q querier) CountByType(ctx context.Context, execID uuid.UUID, eventType string) (int, error) {
+	return countByType(ctx, q.q, execID, eventType)
+}
+
+func countByType(ctx context.Context, q Querier, execID uuid.UUID, eventType string) (int, error) {
+	var n int
+	err := q.QueryRow(ctx, `
+		SELECT count(*) FROM events WHERE execution_id = $1 AND type = $2
+	`, execID.String(), eventType).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count events by type: %w", err)
+	}
+	return n, nil
+}

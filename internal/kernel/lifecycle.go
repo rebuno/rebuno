@@ -97,7 +97,7 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 		}
 		// An approval nobody answered is a refusal like any other: resume and
 		// let the handler decide what to do without it.
-		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID)
+		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
 	}); err != nil {
 		return err
 	}
