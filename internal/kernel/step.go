@@ -147,10 +147,6 @@ func (k *Kernel) decideStep(
 	return k.recordStepDecision(ctx, execID, exec.AgentID, stepID, req, argsHash, occurrence, polResult)
 }
 
-const indeterminateReason = "indeterminate"
-
-const budgetExceededReason = "execution_token_budget_exceeded"
-
 // indeterminateRetry reports whether this effect already resolved indeterminate
 // in this execution: an at_most_once step the kernel found mid-flight on a
 // re-dispatch and failed rather than re-run.
@@ -161,7 +157,7 @@ func (k *Kernel) indeterminateRetry(ctx context.Context, execID uuid.UUID, req S
 	}
 	for _, s := range steps {
 		if s.Status == domain.StepFailed && s.Kind == req.Kind && s.Target == req.Target &&
-			s.ArgsHash == argsHash && stepErrorReason(s.Error) == indeterminateReason {
+			s.ArgsHash == argsHash && stepErrorReason(s.Error) == domain.ReasonIndeterminate {
 			return true, nil
 		}
 	}
@@ -212,7 +208,7 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 	case domain.StepExecuting:
 		if idempotency == "at_most_once" {
 			errPayload, _ := json.Marshal(map[string]string{
-				"reason":  indeterminateReason,
+				"reason":  domain.ReasonIndeterminate,
 				"message": "outcome unknown: this may already have taken effect. Check the state before continuing.",
 			})
 			if err := k.failStepInternal(ctx, step, errPayload); err != nil {
@@ -226,12 +222,26 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 		// refused, so it can distinguish a policy rule from a human decision.
 		reason := stepErrorReason(step.Error)
 		if reason == "" {
-			reason = "policy_denied"
+			reason = domain.ReasonPolicyDenied
 		}
 		return domain.StepDecision{Decision: "denied", Reason: reason}, nil
 	default:
 		return domain.StepDecision{Decision: "proceed"}, nil
 	}
+}
+
+// refuseRateLimited appends the refusal to the event log and returns the
+// decision. No step row is written.
+func (k *Kernel) refuseRateLimited(
+	ctx context.Context, execID uuid.UUID, stepID string,
+	req SubmitStepRequest, ruleID, reason string,
+) (domain.StepDecision, bool, error) {
+	errPayload, _ := json.Marshal(map[string]string{"reason": reason, "rule_id": ruleID})
+	if _, err := k.d.Events.Append(ctx, execID, domain.EventStepRateLimited,
+		projector.StepDeniedPayload(stepID, req.Kind, req.Target, ruleID, errPayload)); err != nil {
+		return domain.StepDecision{}, false, err
+	}
+	return domain.StepDecision{Decision: "rate_limited", Reason: reason}, false, nil
 }
 
 func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agentID, stepID string, req SubmitStepRequest, argsHash string, occurrence int, pol domain.PolicyResult) (domain.StepDecision, bool, error) {
@@ -241,7 +251,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		if err != nil {
 			if pol.RateLimit.OnLimiterError == domain.LimiterErrorDeny {
 				k.d.Observer.RecordRateLimit("error_denied")
-				return domain.StepDecision{Decision: "rate_limited", Reason: "rate_limiter_unavailable"}, false, nil
+				return k.refuseRateLimited(ctx, execID, stepID, req, pol.RuleID, domain.ReasonRateLimiterUnavailable)
 			}
 			// Fail open
 			k.log.Warn("rate limiter error, failing open",
@@ -251,7 +261,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		}
 		if !allowed {
 			k.d.Observer.RecordRateLimit("limited")
-			return domain.StepDecision{Decision: "rate_limited", Reason: "rate_limit_exceeded"}, false, nil
+			return k.refuseRateLimited(ctx, execID, stepID, req, pol.RuleID, domain.ReasonRateLimited)
 		}
 	}
 
@@ -266,7 +276,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 			if pol.Budget.OnExceed == domain.DecisionRequireApproval {
 				pol.Decision = domain.DecisionRequireApproval
 			}
-			pol.Reason = budgetExceededReason
+			pol.Reason = domain.ReasonBudgetExceeded
 			k.log.Info("execution token budget exceeded",
 				"rule_id", pol.RuleID, "execution_id", execID.String(),
 				"spent", spent, "max_tokens", pol.Budget.MaxTokens, "decision", pol.Decision)
@@ -308,7 +318,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		step.CompletedAt = &now
 		reason := pol.Reason
 		if reason == "" {
-			reason = "policy_denied"
+			reason = domain.ReasonPolicyDenied
 		}
 		errPayload, _ := json.Marshal(map[string]string{"reason": reason, "rule_id": pol.RuleID})
 		step.Error = errPayload
@@ -318,7 +328,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
 			return domain.StepDecision{}, false, err
 		}
-		return domain.StepDecision{Decision: "denied", Reason: pol.Reason}, true, nil
+		return domain.StepDecision{Decision: "denied", Reason: reason}, true, nil
 
 	case domain.DecisionRequireApproval:
 		approvalID := uuid.Must(uuid.NewV7())

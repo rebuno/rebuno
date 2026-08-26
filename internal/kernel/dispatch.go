@@ -150,7 +150,7 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 	}
 
 	if d.Attempt > d.MaxAttempts {
-		return k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
+		return k.FailExecution(ctx, d.ExecutionID, domain.ReasonDispatchExhausted)
 	}
 	agent, err := k.d.Agents.GetAgent(ctx, exec.AgentID)
 	if err != nil {
@@ -181,7 +181,7 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 			return err
 		}
 		if d.Attempt >= d.MaxAttempts {
-			return k.FailExecution(ctx, d.ExecutionID, "dispatch_exhausted")
+			return k.FailExecution(ctx, d.ExecutionID, domain.ReasonDispatchExhausted)
 		}
 		next := time.Now().UTC().Add(dispatcher.BackoffDelay(k.cfg.DispatchBaseDelay, k.cfg.DispatchMaxDelay, d.Attempt))
 		return k.d.Queue.Ack(ctx, d.ID, domain.DispatchFailed, &next)

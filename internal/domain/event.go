@@ -24,6 +24,7 @@ const (
 	EventStepSucceeded        = "step.succeeded"
 	EventStepFailed           = "step.failed"
 	EventStepCancelled        = "step.cancelled"
+	EventStepRateLimited      = "step.rate_limited"
 
 	EventApprovalRequested = "approval.requested"
 	EventApprovalGranted   = "approval.granted"

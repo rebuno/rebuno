@@ -614,6 +614,50 @@ func TestRateLimitDoubleStep(t *testing.T) {
 	if dec.Decision != "rate_limited" || dec.Reason != "rate_limit_exceeded" {
 		t.Fatalf("second step expected rate_limited, got %+v", dec)
 	}
+
+	events, err := k.GetEvents(ctx, exec.ID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		RuleID string `json:"rule_id"`
+		Target string `json:"target"`
+		Error  struct {
+			Reason string `json:"reason"`
+		} `json:"error"`
+	}
+	var found bool
+	for _, ev := range events {
+		if ev.Type != domain.EventStepRateLimited {
+			continue
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("expected a %s event, got %v", domain.EventStepRateLimited, eventTypes(events))
+	}
+	if payload.RuleID != "rate-limit-read" || payload.Target != "read" || payload.Error.Reason != "rate_limit_exceeded" {
+		t.Fatalf("unexpected %s payload: %+v", domain.EventStepRateLimited, payload)
+	}
+
+	steps, err := k.ListSteps(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("expected the refused effect to record no step, got %d", len(steps))
+	}
+}
+
+func eventTypes(events []domain.Event) []string {
+	types := make([]string, len(events))
+	for i, ev := range events {
+		types[i] = ev.Type
+	}
+	return types
 }
 
 // TestDispatchTimeoutBoundsHungAgent verifies a non-responsive agent webhook is
@@ -1588,5 +1632,50 @@ func TestIndeterminateRetryIsDenied(t *testing.T) {
 	submit(did, emailA)
 	if dec := submit(did, emailA); dec.Reason != refusal {
 		t.Fatalf("replayed denial reason = %q, want %q", dec.Reason, refusal)
+	}
+}
+
+func TestDenyReasonMatchesOnReplay(t *testing.T) {
+	ms := memstore.NewStore()
+	pe, err := policy.NewRuleEngine(policy.Config{
+		Rules: []policy.Rule{{
+			ID:       "deny-read",
+			Priority: 1,
+			When:     policy.Condition{Target: "read"},
+			Then:     domain.PolicyResult{Decision: domain.DecisionDeny},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
+		Events: ms, Steps: ms, Executions: ms, Agents: ms,
+		Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: pe,
+	})
+	ctx := context.Background()
+	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`)}
+	req.DispatchID = dispatchOf(t, k, exec.ID)
+	first, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Decision != "denied" || first.Reason != domain.ReasonPolicyDenied {
+		t.Fatalf("first submission: got %+v, want denied/%s", first, domain.ReasonPolicyDenied)
+	}
+
+	replay, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.Reason != first.Reason {
+		t.Fatalf("replay reason %q != first reason %q", replay.Reason, first.Reason)
 	}
 }

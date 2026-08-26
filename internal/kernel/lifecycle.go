@@ -69,7 +69,7 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 	approval.DecidedAt = &now
 	approval.Rationale = "timeout"
 
-	errPayload, _ := json.Marshal(map[string]string{"reason": "approval_timeout"})
+	errPayload, _ := json.Marshal(map[string]string{"reason": domain.ReasonApprovalTimeout})
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 		step, err := tx.GetStep(ctx, approval.StepID)
 		if err != nil {
