@@ -9,8 +9,7 @@ import (
 
 // A bundle whose rule is missing an id fails to compile in NewRuleEngine.
 const invalidBundle = `rules:
-  - priority: 1
-    when:
+  - when:
       target: write
     then:
       decision: allow
@@ -18,7 +17,6 @@ const invalidBundle = `rules:
 
 const validBundle = `rules:
   - id: allow-write
-    priority: 1
     when:
       target: write
     then:

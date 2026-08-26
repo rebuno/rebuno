@@ -25,13 +25,11 @@ agents:
       default_action: deny
       rules:
         - id: allow-llm
-          priority: 5
           when:
             step_kind: llm_call
           then:
             decision: allow
         - id: allow-research-tools
-          priority: 10
           when:
             targets: ["web_search", "doc_fetch", "calculator"]
           then:
@@ -56,7 +54,6 @@ agents:
       default_action: allow
       rules:
         - id: approve-fs-writes
-          priority: 10
           when:
             targets: ["fs_write_*", "fs_edit_*", "fs_move_*", "fs_create_*"]
           then:

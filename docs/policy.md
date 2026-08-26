@@ -16,14 +16,12 @@ permissive (allow-all) engine in dev.
 default_action: deny        # allow | deny (default: deny)
 rules:
   - id: allow-llm
-    priority: 5
     when:
       step_kind: llm_call
     then:
       decision: allow
 
   - id: allow-research-tools
-    priority: 10
     when:
       targets: ["web_search", "doc_fetch", "calculator"]
     then:
@@ -33,9 +31,11 @@ rules:
 
 ## Evaluation
 
-Rules are sorted by **priority** (lowest number first). The first rule whose
-`when` block matches wins. If none match, `default_action` applies. Priorities
-must be unique within a bundle, and every rule needs an `id`.
+Rules are evaluated **top to bottom** in the order they appear in the bundle:
+the first rule whose `when` block matches wins, so put the specific rules above
+the broad ones. If none match, `default_action` applies. Every rule needs an
+`id`, unique within the bundle. Unknown keys are rejected: a bundle with a key
+no rule field claims fails to load.
 
 `default_action` applies to `tool_call` and `llm_call` steps. An unmatched
 `local` step is allowed regardless of `default_action`; to govern one, match it
@@ -104,7 +104,6 @@ execution resumes. See [events.md](events.md) and
 
 ```yaml
   - id: approve-fs-writes
-    priority: 10
     when:
       targets: ["fs_write_*", "fs_edit_*"]
     then:
@@ -136,7 +135,6 @@ and the scope in `per_what`, so two rules never share a bucket.
 
 ```yaml
   - id: limit-search
-    priority: 10
     when:
       target: web_search
     then:
@@ -163,7 +161,6 @@ A rule may cap the LLM tokens an execution is allowed to spend.
 
 ```yaml
   - id: cap-llm-spend
-    priority: 5
     when: { step_kind: llm_call }
     then:
       decision: allow
@@ -188,11 +185,9 @@ OpenAI-style stream requested without `stream_options.include_usage` — and
 default_action: deny
 rules:
   - id: allow-llm
-    priority: 5
     when: { step_kind: llm_call }
     then: { decision: allow }
   - id: allow-tools
-    priority: 10
     when: { targets: ["web_search", "calculator"] }
     then: { decision: allow }
 ```
@@ -203,11 +198,9 @@ rules:
 default_action: deny
 rules:
   - id: allow-llm
-    priority: 5
     when: { step_kind: llm_call }
     then: { decision: allow }
   - id: allow-safe-shell
-    priority: 10
     when:
       target: shell_exec
       arguments:
@@ -217,7 +210,6 @@ rules:
       decision: allow
       reason: safe read-only command
   - id: approve-other-shell
-    priority: 20
     when: { target: shell_exec }
     then:
       decision: require_approval

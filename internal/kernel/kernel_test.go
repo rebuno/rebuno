@@ -249,9 +249,8 @@ func TestApprovalFlow(t *testing.T) {
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	pe, _ := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "approve-read",
-			Priority: 1,
-			When:     policy.Condition{Target: "write"},
+			ID:   "approve-read",
+			When: policy.Condition{Target: "write"},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionRequireApproval,
 				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: time.Hour, Message: "approve write"},
@@ -317,9 +316,8 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	pe, _ := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "approve-write",
-			Priority: 1,
-			When:     policy.Condition{Target: "write"},
+			ID:   "approve-write",
+			When: policy.Condition{Target: "write"},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionRequireApproval,
 				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: time.Hour, Message: "approve write"},
@@ -365,9 +363,8 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	pe, _ := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "approve-read",
-			Priority: 1,
-			When:     policy.Condition{Target: "write"},
+			ID:   "approve-read",
+			When: policy.Condition{Target: "write"},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionRequireApproval,
 				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: time.Hour, Message: "approve write"},
@@ -569,9 +566,8 @@ func TestRateLimitDoubleStep(t *testing.T) {
 	ms := memstore.NewStore()
 	pe, err := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "rate-limit-read",
-			Priority: 1,
-			When:     policy.Condition{Target: "read"},
+			ID:   "rate-limit-read",
+			When: policy.Condition{Target: "read"},
 			Then: domain.PolicyResult{
 				Decision:  domain.DecisionAllow,
 				RateLimit: domain.RateLimitConfig{MaxCalls: 1, Window: time.Hour, PerWhat: "execution"},
@@ -746,9 +742,8 @@ func approvalLLMEngine(t *testing.T, timeout time.Duration) *policy.RuleEngine {
 	t.Helper()
 	pe, err := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "approve-llm",
-			Priority: 1,
-			When:     policy.Condition{StepKind: string(domain.StepKindLLM)},
+			ID:   "approve-llm",
+			When: policy.Condition{StepKind: string(domain.StepKindLLM)},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionRequireApproval,
 				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: timeout, Message: "approve llm"},
@@ -1210,7 +1205,6 @@ func TestApprovalConfigFromYAMLBundleReachesApproval(t *testing.T) {
 default_action: deny
 rules:
   - id: approve-fs-writes
-    priority: 10
     when:
       target: fs_write
     then:
@@ -1280,7 +1274,6 @@ func blockedApproval(t *testing.T, approvalConfig string) (*kernel.Kernel, uuid.
 default_action: deny
 rules:
   - id: approve-fs-writes
-    priority: 10
     when:
       target: fs_write
     then:
@@ -1639,10 +1632,9 @@ func TestDenyReasonMatchesOnReplay(t *testing.T) {
 	ms := memstore.NewStore()
 	pe, err := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "deny-read",
-			Priority: 1,
-			When:     policy.Condition{Target: "read"},
-			Then:     domain.PolicyResult{Decision: domain.DecisionDeny},
+			ID:   "deny-read",
+			When: policy.Condition{Target: "read"},
+			Then: domain.PolicyResult{Decision: domain.DecisionDeny},
 		}},
 	})
 	if err != nil {
@@ -1685,10 +1677,9 @@ func rateLimitedKernel(t *testing.T, cfg domain.RateLimitConfig) (*kernel.Kernel
 	ms := memstore.NewStore()
 	pe, err := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "rate-limit-read",
-			Priority: 1,
-			When:     policy.Condition{Target: "read"},
-			Then:     domain.PolicyResult{Decision: domain.DecisionAllow, RateLimit: cfg},
+			ID:   "rate-limit-read",
+			When: policy.Condition{Target: "read"},
+			Then: domain.PolicyResult{Decision: domain.DecisionAllow, RateLimit: cfg},
 		}},
 	})
 	if err != nil {

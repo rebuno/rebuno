@@ -17,9 +17,8 @@ func TestApprovalExpiry(t *testing.T) {
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: 1 * time.Millisecond}
 	pe, _ := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "approve-read",
-			Priority: 1,
-			When:     policy.Condition{Target: "write"},
+			ID:   "approve-read",
+			When: policy.Condition{Target: "write"},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionRequireApproval,
 				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: 1 * time.Millisecond},

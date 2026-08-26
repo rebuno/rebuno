@@ -273,7 +273,6 @@ func TestAdminLoadPolicyBundle(t *testing.T) {
 	bundle := `
 rules:
   - id: allow-prod
-    priority: 10
     when:
       target: read
       arguments:

@@ -16,11 +16,12 @@ type Engine interface {
 	Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error)
 }
 
+// Rules are evaluated in the order they appear in the bundle; the first match
+// wins.
 type Rule struct {
-	ID       string              `yaml:"id"`
-	Priority int                 `yaml:"priority"`
-	When     Condition           `yaml:"when"`
-	Then     domain.PolicyResult `yaml:"then"`
+	ID   string              `yaml:"id"`
+	When Condition           `yaml:"when"`
+	Then domain.PolicyResult `yaml:"then"`
 }
 
 type Condition struct {
@@ -51,19 +52,18 @@ type RuleEngine struct {
 }
 
 func NewRuleEngine(cfg Config) (*RuleEngine, error) {
-	seen := make(map[int]string)
+	seen := make(map[string]bool)
 	for _, r := range cfg.Rules {
 		if r.ID == "" {
 			return nil, fmt.Errorf("rule missing id")
 		}
-		if existing, ok := seen[r.Priority]; ok {
-			return nil, fmt.Errorf("duplicate priority %d used by %q and %q", r.Priority, existing, r.ID)
+		if seen[r.ID] {
+			return nil, fmt.Errorf("duplicate rule id %q", r.ID)
 		}
-		seen[r.Priority] = r.ID
+		seen[r.ID] = true
 	}
 	rules := make([]Rule, len(cfg.Rules))
 	copy(rules, cfg.Rules)
-	slices.SortFunc(rules, func(a, b Rule) int { return a.Priority - b.Priority })
 
 	def := domain.PolicyResult{Decision: domain.DecisionDeny, Reason: "no explicit allow rule matched", RuleID: "default"}
 	if cfg.DefaultAction == domain.DecisionAllow {

@@ -24,8 +24,7 @@ func (f fakeAgentStore) DeleteAgent(ctx context.Context, id string) error       
 
 // A rule missing its id fails to compile in NewRuleEngine.
 const uncompilableBundle = `rules:
-  - priority: 1
-    when:
+  - when:
       target: write
     then:
       decision: allow
@@ -36,7 +35,6 @@ const unparsableBundle = `rules: "not-a-list"`
 
 const allowWriteBundle = `rules:
   - id: allow-write
-    priority: 1
     when:
       target: write
     then:
@@ -45,7 +43,6 @@ const allowWriteBundle = `rules:
 
 const denyWriteBundle = `rules:
   - id: deny-write
-    priority: 1
     when:
       target: write
     then:

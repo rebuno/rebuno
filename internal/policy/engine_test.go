@@ -13,7 +13,6 @@ func TestArgPredicateRegex(t *testing.T) {
 	bundle := `
 rules:
   - id: allow-prod
-    priority: 1
     when:
       arguments:
         env:
@@ -56,7 +55,6 @@ func TestThenApprovalConfigAndRateLimitFromBundle(t *testing.T) {
 default_action: deny
 rules:
   - id: approve-writes
-    priority: 10
     when:
       target: fs_write
     then:
@@ -67,7 +65,6 @@ rules:
         timeout: 5m
         message: please review
   - id: limit-search
-    priority: 20
     when:
       target: web_search
     then:
@@ -146,15 +143,17 @@ func TestEmptyArgPredicateIsRejectedAtLoad(t *testing.T) {
 }
 
 func TestRuleIDIsNotSettableFromBundle(t *testing.T) {
-	engine, err := NewRuleEngineFromBundle(`
+	if _, err := NewRuleEngineFromBundle(`
 rules:
   - id: real-id
-    priority: 1
     then:
       decision: allow
-      ruleid: forged
       rule_id: forged
-`)
+`); err == nil {
+		t.Fatal("a bundle setting rule_id should be rejected")
+	}
+
+	engine, err := NewRuleEngineFromBundle("rules:\n  - id: real-id\n    then: { decision: allow }\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +171,6 @@ func TestLocalStepsBypassDefaultActionButNotRules(t *testing.T) {
 default_action: deny
 rules:
   - id: no-charging
-    priority: 10
     when:
       target: charge_card
     then:

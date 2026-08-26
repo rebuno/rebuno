@@ -19,9 +19,8 @@ func budgetKernel(t *testing.T, maxTokens int, onExceed string) (*kernel.Kernel,
 	ms := memstore.NewStore()
 	pe, err := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "llm-budget",
-			Priority: 1,
-			When:     policy.Condition{StepKind: string(domain.StepKindLLM)},
+			ID:   "llm-budget",
+			When: policy.Condition{StepKind: string(domain.StepKindLLM)},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionAllow,
 				Budget:         domain.BudgetConfig{MaxTokens: maxTokens, OnExceed: onExceed},

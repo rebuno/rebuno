@@ -19,9 +19,8 @@ import (
 func approvalPolicy() *policy.RuleEngine {
 	pe, _ := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
-			ID:       "approve-fs-write",
-			Priority: 1,
-			When:     policy.Condition{Target: "fs_write"},
+			ID:   "approve-fs-write",
+			When: policy.Condition{Target: "fs_write"},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionRequireApproval,
 				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: time.Hour, Message: "approve write"},

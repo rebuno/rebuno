@@ -1,13 +1,24 @@
 package policy
 
 import (
+	"errors"
+	"io"
+	"strings"
+
 	"gopkg.in/yaml.v3"
 )
 
-// LoadBundle parses a raw YAML policy bundle into a policy Config.
+// LoadBundle parses a raw YAML policy bundle into a policy Config. Unknown
+// keys are rejected: a misspelled predicate would otherwise be ignored, and a
+// rule whose constraint silently vanished matches every input.
 func LoadBundle(bundleYAML string) (Config, error) {
+	dec := yaml.NewDecoder(strings.NewReader(bundleYAML))
+	dec.KnownFields(true)
 	var cfg Config
-	if err := yaml.Unmarshal([]byte(bundleYAML), &cfg); err != nil {
+	if err := dec.Decode(&cfg); err != nil {
+		if errors.Is(err, io.EOF) {
+			return Config{}, nil
+		}
 		return Config{}, err
 	}
 	return cfg, nil
