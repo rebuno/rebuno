@@ -22,9 +22,10 @@ type fakeKernel struct {
 	cancelErr               error
 }
 
-func (f *fakeKernel) RunDispatches(ctx context.Context, batch int) error {
+func (f *fakeKernel) RunDispatcher(ctx context.Context) error {
 	atomic.AddInt32(&f.dispatches, 1)
-	return nil
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (f *fakeKernel) ExpireApprovals(ctx context.Context, now time.Time) error {

@@ -25,9 +25,7 @@ func TestApprovalExpiry(t *testing.T) {
 			},
 		}},
 	})
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: pe,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")

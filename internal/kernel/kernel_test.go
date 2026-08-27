@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +23,34 @@ import (
 	"github.com/rebuno/rebuno/internal/store"
 	"github.com/rebuno/rebuno/internal/store/memstore"
 )
+
+func memDeps(ms *memstore.Store, d kernel.Deps) kernel.Deps {
+	if d.Events == nil {
+		d.Events = ms
+	}
+	if d.Steps == nil {
+		d.Steps = ms
+	}
+	if d.Executions == nil {
+		d.Executions = ms
+	}
+	if d.Agents == nil {
+		d.Agents = ms
+	}
+	if d.Approvals == nil {
+		d.Approvals = ms
+	}
+	if d.Queue == nil {
+		d.Queue = ms
+	}
+	if d.Locker == nil {
+		d.Locker = ms
+	}
+	if d.UnitOfWork == nil {
+		d.UnitOfWork = ms
+	}
+	return d
+}
 
 func setup(t *testing.T) (*kernel.Kernel, context.Context) {
 	t.Helper()
@@ -257,17 +287,7 @@ func TestApprovalFlow(t *testing.T) {
 			},
 		}},
 	})
-	k := kernel.New(cfg, kernel.Deps{
-		Events:     ms,
-		Steps:      ms,
-		Executions: ms,
-		Agents:     ms,
-		Approvals:  ms,
-		Queue:      ms,
-		Locker:     ms,
-		UnitOfWork: ms,
-		Policy:     pe,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -324,10 +344,7 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 			},
 		}},
 	})
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms,
-		Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: pe,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -371,10 +388,7 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 			},
 		}},
 	})
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: pe,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -491,19 +505,17 @@ func TestDispatcherDeliveryAndRetry(t *testing.T) {
 	}))
 	defer ts.Close()
 	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	// Wait for queue-level exponential backoff.
 	time.Sleep(5 * time.Millisecond)
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if called < 2 {
@@ -535,19 +547,17 @@ func TestDispatchRejectionExhaustsAndFails(t *testing.T) {
 	}))
 	defer ts.Close()
 	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 2, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	// Attempt 1 (fails, schedules retry), then attempt 2 (hits max, exhausts).
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if called < 2 {
@@ -577,18 +587,7 @@ func TestRateLimitDoubleStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
-		Events:      ms,
-		Steps:       ms,
-		Executions:  ms,
-		Agents:      ms,
-		Approvals:   ms,
-		Queue:       ms,
-		Locker:      ms,
-		UnitOfWork:  ms,
-		Policy:      pe,
-		RateLimiter: ratelimit.NewMemoryLimiter(),
-	})
+	k := kernel.New(kernel.DefaultConfig(), memDeps(ms, kernel.Deps{Policy: pe, RateLimiter: ratelimit.NewMemoryLimiter()}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -674,15 +673,13 @@ func TestDispatchTimeoutBoundsHungAgent(t *testing.T) {
 		DispatchBaseDelay:   1 * time.Millisecond,
 		DispatchTimeout:     50 * time.Millisecond,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: hung.URL, Secret: "secret"})
 	_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	start := time.Now()
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
@@ -709,9 +706,7 @@ func TestDispatchConcurrency(t *testing.T) {
 		DispatchTimeout:     2 * time.Second,
 		DispatchConcurrency: n,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: slow.URL, Secret: "secret"})
 	for i := 0; i < n; i++ {
@@ -719,7 +714,7 @@ func TestDispatchConcurrency(t *testing.T) {
 	}
 
 	start := time.Now()
-	if err := k.RunDispatches(ctx, n); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	elapsed := time.Since(start)
@@ -727,6 +722,155 @@ func TestDispatchConcurrency(t *testing.T) {
 	// finish in roughly one perCall window; allow generous slack for CI jitter.
 	if elapsed >= n*perCall/2 {
 		t.Fatalf("deliveries did not run concurrently: took %v for %d jobs of %v each", elapsed, n, perCall)
+	}
+}
+
+func TestDispatchNeverExceedsConcurrency(t *testing.T) {
+	ms := memstore.NewStore()
+	const concurrency = 4
+	var live, peak atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := live.Add(1)
+		for {
+			old := peak.Load()
+			if n <= old || peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+		live.Add(-1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	k := kernel.New(kernel.Config{
+		ReplicaID:            "test",
+		DispatchMaxAttempts:  3,
+		DispatchBaseDelay:    1 * time.Millisecond,
+		DispatchTimeout:      5 * time.Second,
+		DispatchLeaseTimeout: time.Minute,
+		DispatchConcurrency:  concurrency,
+	}, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: srv.URL, Secret: "secret"})
+	for i := 0; i < concurrency*10; i++ {
+		if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := peak.Load(); got > concurrency {
+		t.Fatalf("%d deliveries ran at once with a pool of %d", got, concurrency)
+	}
+}
+
+func TestDispatchLoopClaimsWhileBusy(t *testing.T) {
+	ms := memstore.NewStore()
+	var mu sync.Mutex
+	var slowSeen bool
+	var delivered atomic.Int64
+	slowStarted := make(chan struct{})
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		isSlow := !slowSeen
+		slowSeen = true
+		mu.Unlock()
+		if isSlow {
+			close(slowStarted)
+			<-release
+		}
+		delivered.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	k := kernel.New(kernel.Config{
+		ReplicaID:            "test",
+		DispatchMaxAttempts:  3,
+		DispatchBaseDelay:    1 * time.Millisecond,
+		DispatchTimeout:      5 * time.Second,
+		DispatchLeaseTimeout: time.Minute,
+		DispatchConcurrency:  4,
+	}, memDeps(ms, kernel.Deps{}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: srv.URL, Secret: "secret"})
+	if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- k.RunDispatcher(ctx) }()
+
+	<-slowStarted
+	const later = 5
+	for i := 0; i < later; i++ {
+		if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for delivered.Load() < later && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	got := delivered.Load()
+	close(release)
+	cancel()
+	<-done
+	if got != later {
+		t.Fatalf("delivered %d of %d dispatches enqueued while a worker was busy", got, later)
+	}
+}
+
+func TestReclaimDrainsStalledBacklog(t *testing.T) {
+	ms := memstore.NewStore()
+	var delivered atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		delivered.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	k := kernel.New(kernel.Config{
+		ReplicaID:            "test",
+		DispatchMaxAttempts:  5,
+		DispatchBaseDelay:    1 * time.Millisecond,
+		DispatchTimeout:      5 * time.Second,
+		DispatchLeaseTimeout: time.Minute,
+		DispatchConcurrency:  4,
+	}, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: srv.URL, Secret: "secret"})
+
+	// Must exceed the reclaim query's page size for the drain to matter.
+	const stranded = 250
+	dead, expired := "dead-replica", time.Now().UTC().Add(-time.Hour)
+	for i := 0; i < stranded; i++ {
+		exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ds, err := ms.ListDispatchesByExecution(ctx, exec.ID)
+		if err != nil || len(ds) != 1 {
+			t.Fatalf("dispatches for %s: %v, %v", exec.ID, ds, err)
+		}
+		d := ds[0]
+		d.Status, d.LockedBy, d.LockedAt = domain.DispatchInFlight, &dead, &expired
+		if err := ms.Enqueue(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := delivered.Load(); got != stranded {
+		t.Fatalf("recovered %d of %d stranded dispatches in one pass", got, stranded)
 	}
 }
 
@@ -836,10 +980,7 @@ func assertSingleTerminalStepEvent(t *testing.T, k *kernel.Kernel, ctx context.C
 func TestApprovalGrantRecordsActualStepKind(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalLLMEngine(t, time.Hour),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -856,10 +997,7 @@ func TestApprovalGrantRecordsActualStepKind(t *testing.T) {
 func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalLLMEngine(t, time.Hour),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -881,10 +1019,7 @@ func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
 func TestApprovalDenyResumesExecution(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalLLMEngine(t, time.Hour),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -925,10 +1060,7 @@ func TestApprovalDenyResumesExecution(t *testing.T) {
 func TestApprovalDenyRationaleReachesHandler(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalLLMEngine(t, time.Hour),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -952,10 +1084,7 @@ func TestApprovalDenyRationaleReachesHandler(t *testing.T) {
 func TestApprovalExpireRecordsActualStepKind(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: 1 * time.Millisecond}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalLLMEngine(t, 1*time.Millisecond),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, 1*time.Millisecond)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -974,10 +1103,7 @@ func TestApprovalExpireRecordsActualStepKind(t *testing.T) {
 func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalLLMEngine(t, time.Hour),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -1121,10 +1247,7 @@ func TestCancelExecutionCancelsInFlightSteps(t *testing.T) {
 func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalLLMEngine(t, time.Hour),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -1218,17 +1341,7 @@ rules:
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events:     ms,
-		Steps:      ms,
-		Executions: ms,
-		Agents:     ms,
-		Approvals:  ms,
-		Queue:      ms,
-		Locker:     ms,
-		UnitOfWork: ms,
-		Policy:     pe,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -1282,17 +1395,7 @@ rules:
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := kernel.New(kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}, kernel.Deps{
-		Events:     ms,
-		Steps:      ms,
-		Executions: ms,
-		Agents:     ms,
-		Approvals:  ms,
-		Queue:      ms,
-		Locker:     ms,
-		UnitOfWork: ms,
-		Policy:     pe,
-	})
+	k := kernel.New(kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -1448,18 +1551,16 @@ func TestDispatchAckedRecordsRealAttempt(t *testing.T) {
 	}))
 	defer ts.Close()
 	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1485,15 +1586,13 @@ func TestFinalDispatchFailureIsRecorded(t *testing.T) {
 	}))
 	defer ts.Close()
 	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	for i := 0; i < cfg.DispatchMaxAttempts; i++ {
-		if err := k.RunDispatches(ctx, 5); err != nil {
+		if err := k.DrainDispatches(ctx); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -1521,13 +1620,11 @@ func TestReleasedDispatchRecordsNoEvent(t *testing.T) {
 	}))
 	defer ts.Close()
 	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := k.CompleteExecution(ctx, exec.ID, json.RawMessage(`{"ok":true}`)); err != nil {
@@ -1640,10 +1737,7 @@ func TestDenyReasonMatchesOnReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms,
-		Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: pe,
-	})
+	k := kernel.New(kernel.DefaultConfig(), memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
@@ -1685,18 +1779,7 @@ func rateLimitedKernel(t *testing.T, cfg domain.RateLimitConfig) (*kernel.Kernel
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
-		Events:      ms,
-		Steps:       ms,
-		Executions:  ms,
-		Agents:      ms,
-		Approvals:   ms,
-		Queue:       ms,
-		Locker:      ms,
-		UnitOfWork:  ms,
-		Policy:      pe,
-		RateLimiter: ratelimit.NewMemoryLimiter(),
-	})
+	k := kernel.New(kernel.DefaultConfig(), memDeps(ms, kernel.Deps{Policy: pe, RateLimiter: ratelimit.NewMemoryLimiter()}))
 	ctx := context.Background()
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)

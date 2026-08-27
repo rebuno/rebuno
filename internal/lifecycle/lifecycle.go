@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -11,7 +12,7 @@ import (
 )
 
 type Kernel interface {
-	RunDispatches(ctx context.Context, batch int) error
+	RunDispatcher(ctx context.Context) error
 	ExpireApprovals(ctx context.Context, now time.Time) error
 	CancelExpiredExecutions(ctx context.Context, now time.Time) error
 	Cleanup(ctx context.Context, retain time.Duration, now time.Time) error
@@ -24,7 +25,7 @@ type Manager struct {
 	wg               sync.WaitGroup
 	interval         time.Duration
 	deadlineInterval time.Duration
-	batch            int
+	cancel           context.CancelFunc
 	LeaderLockKey    string
 	Retention        time.Duration
 	leaderLocker     store.Locker
@@ -59,8 +60,8 @@ func NewManager(k Kernel, logger *slog.Logger, opts ...ManagerOption) *Manager {
 
 // NewManagerWithLocker returns a lifecycle manager that gates singleton workers
 // behind a non-blocking leader lock held via the provided store.Locker. The
-// interval controls how often singleton workers run; dispatch drain always runs
-// on a fixed 2 second cadence on every replica.
+// interval controls how often singleton workers run; the dispatch coordinator
+// runs continuously on every replica.
 func NewManagerWithLocker(k Kernel, logger *slog.Logger, interval time.Duration, locker store.Locker, opts ...ManagerOption) *Manager {
 	if logger == nil {
 		logger = slog.Default()
@@ -70,7 +71,6 @@ func NewManagerWithLocker(k Kernel, logger *slog.Logger, interval time.Duration,
 		logger:        logger,
 		stop:          make(chan struct{}),
 		interval:      interval,
-		batch:         10,
 		LeaderLockKey: "rebuno_scheduler_leader",
 		leaderLocker:  locker,
 	}
@@ -84,8 +84,9 @@ func NewManagerWithLocker(k Kernel, logger *slog.Logger, interval time.Duration,
 }
 
 func (m *Manager) Start(ctx context.Context) {
+	ctx, m.cancel = context.WithCancel(ctx)
 	m.wg.Add(1)
-	go m.loop(ctx, "dispatch", 2*time.Second, m.dispatchTick)
+	go m.runDispatch(ctx)
 	if m.interval > 0 {
 		m.wg.Add(1)
 		go m.loop(ctx, "singletons", m.interval, m.singletonsTick)
@@ -98,11 +99,19 @@ func (m *Manager) Start(ctx context.Context) {
 
 func (m *Manager) Stop() {
 	close(m.stop)
+	if m.cancel != nil {
+		m.cancel()
+	}
 	m.wg.Wait()
 }
 
-func (m *Manager) dispatchTick(ctx context.Context) error {
-	return m.kernel.RunDispatches(ctx, m.batch)
+func (m *Manager) runDispatch(ctx context.Context) {
+	defer m.wg.Done()
+	err := m.kernel.RunDispatcher(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		m.observer.RecordWorkerError("dispatch")
+		m.logger.Error("dispatch coordinator stopped", "error", err)
+	}
 }
 
 // deadlineTick enforces execution deadlines on its own cadence so that an

@@ -33,10 +33,7 @@ func budgetKernel(t *testing.T, maxTokens int, onExceed string) (*kernel.Kernel,
 	}
 	k := kernel.New(
 		kernel.Config{ReplicaID: "test", DispatchBaseDelay: time.Millisecond},
-		kernel.Deps{
-			Events: ms, Steps: ms, Executions: ms, Agents: ms,
-			Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: pe,
-		},
+		memDeps(ms, kernel.Deps{Policy: pe}),
 	)
 	ctx := context.Background()
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {

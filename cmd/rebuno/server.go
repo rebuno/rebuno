@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -177,6 +178,12 @@ func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slo
 	handler := api.NewRouter(adapt, adapt, adapt, cfg.AgentBearerToken, streamer, ready, observer)
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: handler}
 
+	// Bind before dispatching: a delivered agent calls straight back into the API.
+	ln, err := net.Listen("tcp", cfg.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", cfg.ListenAddr, err)
+	}
+
 	mgr := lifecycle.NewManagerWithLocker(k, logger, cfg.CleanupInterval, deps.Locker,
 		lifecycle.WithObserver(observer),
 		lifecycle.WithDeadlineInterval(cfg.DeadlineCheckInterval),
@@ -189,7 +196,7 @@ func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slo
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("rebuno kernel listening", "addr", cfg.ListenAddr, "replica", replicaID)
-		errCh <- srv.ListenAndServe()
+		errCh <- srv.Serve(ln)
 	}()
 
 	select {

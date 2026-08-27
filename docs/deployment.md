@@ -18,8 +18,7 @@ rebuno server \
 The schema is applied from embedded migrations on boot. The HTTP API is stateless,
 so you scale by running more replicas behind a load balancer — Postgres is the
 only coordination point, and singleton background work (approval expiry, execution
-deadlines, cleanup, stale-dispatch reaping) is leader-elected via a Postgres
-advisory lock.
+deadlines, cleanup) is leader-elected via a Postgres advisory lock.
 
 ## Authentication
 
@@ -76,8 +75,8 @@ Additional environment-only settings:
 |-----|---------|-------------|
 | `REBUNO_DISPATCH_MAX_ATTEMPTS` | `5` | Webhook delivery attempts before exhaustion. |
 | `REBUNO_DISPATCH_TIMEOUT` | `30s` | Per-attempt webhook timeout. |
-| `REBUNO_DISPATCH_CONCURRENCY` | `8` | Concurrent dispatch workers per replica. |
-| `REBUNO_DISPATCH_LEASE_TIMEOUT` | — | How long a claimed dispatch stays owned before the reaper reclaims it. |
+| `REBUNO_DISPATCH_CONCURRENCY` | `8` | Deliveries in flight per replica, and the most rows one claim takes. |
+| `REBUNO_DISPATCH_LEASE_TIMEOUT` | `2m` | How long a claimed dispatch stays owned before the reaper reclaims it. Reclamation runs every two seconds, or four times per lease period if that is sooner. |
 | `REBUNO_DEADLINE_TIMEOUT` | — | Max execution lifetime before auto-cancel. |
 | `REBUNO_DEADLINE_CHECK_INTERVAL` | `30s` | How often expired executions are cancelled. Set to `0` to fall back to the cleanup interval. |
 | `REBUNO_APPROVAL_TIMEOUT` | `15m` | Default time an approval can stay pending before it expires (execution fails). |

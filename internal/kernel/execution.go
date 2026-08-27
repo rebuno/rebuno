@@ -117,7 +117,7 @@ func New(cfg Config, d Deps) *Kernel {
 	if cfg.ReplicaID == "" {
 		cfg.ReplicaID = uuid.NewString()
 	}
-	if cfg.DispatchLeaseTimeout == 0 {
+	if cfg.DispatchLeaseTimeout <= 0 {
 		cfg.DispatchLeaseTimeout = 2 * time.Minute
 	}
 	if cfg.LeaderLockKey == "" {

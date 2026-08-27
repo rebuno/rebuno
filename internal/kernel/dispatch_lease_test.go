@@ -48,16 +48,14 @@ func TestDispatchLeaseSurvivesAck(t *testing.T) {
 		DispatchTimeout:      1 * time.Second,
 		DispatchLeaseTimeout: 10 * time.Millisecond,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	// First delivery: the webhook returns 200. The dispatch must stay
 	// in_flight (not be acked) so the lease can expire and be reclaimed.
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if called != 1 {
@@ -84,7 +82,7 @@ func TestDispatchLeaseSurvivesAck(t *testing.T) {
 	}
 
 	// The drain loop re-delivers under the same dispatch id.
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if called != 2 {
@@ -130,14 +128,12 @@ func TestDispatchLeaseRenewedByHeartbeat(t *testing.T) {
 		DispatchTimeout:      1 * time.Second,
 		DispatchLeaseTimeout: 50 * time.Millisecond,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,14 +166,12 @@ func TestCompleteExecutionReleasesLease(t *testing.T) {
 		DispatchTimeout:      1 * time.Second,
 		DispatchLeaseTimeout: 50 * time.Millisecond,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	did := dispatchOf(t, k, exec.ID)
@@ -220,16 +214,13 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 		DispatchLeaseTimeout:   50 * time.Millisecond,
 		DefaultApprovalTimeout: time.Hour,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalPolicy(),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalPolicy()}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	// Deliver, then submit a step that requires approval.
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	did := dispatchOf(t, k, exec.ID)
@@ -301,15 +292,13 @@ func TestDispatchRedeliveryCapFailsExecution(t *testing.T) {
 		DispatchTimeout:      1 * time.Second,
 		DispatchLeaseTimeout: 10 * time.Millisecond,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	// Attempt 1: deliver succeeds, dispatch stays in_flight.
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	// Let the lease expire and reclaim, then re-deliver (attempt 2).
@@ -317,7 +306,7 @@ func TestDispatchRedeliveryCapFailsExecution(t *testing.T) {
 	if _, err := ms.ReclaimStalled(ctx, time.Now().UTC(), cfg.DispatchLeaseTimeout, 10); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	// Attempt 3 exceeds MaxAttempts: deliver must fail the execution rather
@@ -326,7 +315,7 @@ func TestDispatchRedeliveryCapFailsExecution(t *testing.T) {
 	if _, err := ms.ReclaimStalled(ctx, time.Now().UTC(), cfg.DispatchLeaseTimeout, 10); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	exec, _ = k.GetExecution(ctx, exec.ID)
@@ -352,14 +341,12 @@ func TestSubmitStepRenewsLease(t *testing.T) {
 		DispatchTimeout:      1 * time.Second,
 		DispatchLeaseTimeout: 50 * time.Millisecond,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	did := dispatchOf(t, k, exec.ID)
@@ -400,10 +387,7 @@ func TestApprovedAtMostOnceStepIsNotRerunAfterCrash(t *testing.T) {
 		DispatchLeaseTimeout:   50 * time.Millisecond,
 		DefaultApprovalTimeout: time.Hour,
 	}
-	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: approvalPolicy(),
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalPolicy()}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
@@ -423,7 +407,7 @@ func TestApprovedAtMostOnceStepIsNotRerunAfterCrash(t *testing.T) {
 		return dec
 	}
 
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	dec := submit(dispatchOf(t, k, exec.ID))
@@ -434,7 +418,7 @@ func TestApprovedAtMostOnceStepIsNotRerunAfterCrash(t *testing.T) {
 	if err := k.GrantApproval(ctx, *dec.ApprovalID, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if dec := submit(dispatchOf(t, k, exec.ID)); dec.Decision != "proceed" {
@@ -450,7 +434,7 @@ func TestApprovedAtMostOnceStepIsNotRerunAfterCrash(t *testing.T) {
 	if len(reclaimed) != 1 {
 		t.Fatalf("expected the in_flight dispatch to be reclaimed, got %d", len(reclaimed))
 	}
-	if err := k.RunDispatches(ctx, 5); err != nil {
+	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 

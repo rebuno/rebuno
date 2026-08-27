@@ -3,7 +3,6 @@ package kernel
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,49 +81,152 @@ func (k *Kernel) Heartbeat(ctx context.Context, execID uuid.UUID) error {
 	return k.d.Queue.TouchDispatch(ctx, execID, time.Now().UTC())
 }
 
-func (k *Kernel) RunDispatches(ctx context.Context, batch int) error {
-	now := time.Now().UTC()
-	// Reclaim dispatches left in_flight by a crashed replica before claiming new work.
-	reclaimed, err := k.d.Queue.ReclaimStalled(ctx, now, k.cfg.DispatchLeaseTimeout, batch)
-	if err != nil {
-		return err
-	}
-	k.d.Observer.RecordReclaimedStalled(len(reclaimed))
-	jobs, err := k.d.Queue.Claim(ctx, k.cfg.ReplicaID, batch, now)
-	if err != nil {
-		return err
-	}
-	k.d.Observer.RecordQueueDepth(len(jobs))
-	if len(jobs) == 0 {
-		return nil
-	}
-	k.log.Info("dispatch drain", "jobs", len(jobs))
+const (
+	dispatchPoll = 250 * time.Millisecond
+	reapInterval = 2 * time.Second
+)
 
-	// Deliver concurrently with a bounded worker pool. Each delivery makes a
-	// blocking, timeout-bounded webhook call; running them serially would let one
-	// slow agent stall delivery for every other agent claimed in the same batch.
+// reap returns expired leases to the queue for as long as ctx lives.
+func (k *Kernel) reap(ctx context.Context) {
+	// Reaping is bounded by the lease, but a short lease has to be reaped sooner.
+	t := time.NewTicker(max(time.Millisecond, min(reapInterval, k.cfg.DispatchLeaseTimeout/4)))
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := k.reclaimAllStalled(ctx); err != nil {
+				k.workerError("reclaim stalled dispatches", err)
+			}
+		}
+	}
+}
+
+// RunDispatcher logs store errors and backs off rather than returning them.
+func (k *Kernel) RunDispatcher(ctx context.Context) error {
+	return k.runDispatches(ctx, dispatchPoll)
+}
+
+func (k *Kernel) DrainDispatches(ctx context.Context) error {
+	return k.runDispatches(ctx, 0)
+}
+
+func (k *Kernel) runDispatches(ctx context.Context, poll time.Duration) error {
 	concurrency := k.cfg.DispatchConcurrency
 	if concurrency <= 0 {
 		concurrency = 1
 	}
-	if concurrency > len(jobs) {
-		concurrency = len(jobs)
+
+	active := 0
+	completed := make(chan struct{}, concurrency)
+	defer func() {
+		for ; active > 0; active-- {
+			<-completed
+		}
+	}()
+
+	// A replica starting after a crash reclaims before the reaper's first tick.
+	if err := k.reclaimAllStalled(ctx); err != nil {
+		if poll <= 0 {
+			return err
+		}
+		k.workerError("reclaim stalled dispatches", err)
 	}
-	sem := make(chan struct{}, concurrency)
-	var wg sync.WaitGroup
-	for _, job := range jobs {
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(job domain.Dispatch) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if err := k.deliver(ctx, job); err != nil {
-				k.log.Info("delivery error", "dispatch_id", job.ID, "err", err)
+	if poll > 0 {
+		go k.reap(ctx)
+	}
+
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if active == concurrency {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-completed:
+				active--
 			}
-		}(job)
+		}
+	idle:
+		for active > 0 {
+			select {
+			case <-completed:
+				active--
+			default:
+				break idle
+			}
+		}
+
+		jobs, err := k.d.Queue.Claim(ctx, k.cfg.ReplicaID, concurrency-active, time.Now().UTC())
+		if err != nil {
+			if poll <= 0 {
+				return err
+			}
+			k.workerError("claim dispatches", err)
+			if err := wait(ctx, poll); err != nil {
+				return err
+			}
+			continue
+		}
+		k.d.Observer.RecordQueueDepth(len(jobs))
+		active += len(jobs)
+		for _, job := range jobs {
+			go func(job domain.Dispatch) {
+				defer func() { completed <- struct{}{} }()
+				if err := k.deliver(ctx, job); err != nil {
+					k.log.Info("delivery error", "dispatch_id", job.ID, "err", err)
+				}
+			}(job)
+		}
+		if len(jobs) > 0 {
+			k.log.Info("dispatch drain", "jobs", len(jobs))
+			continue
+		}
+		if poll <= 0 {
+			return nil
+		}
+		if err := wait(ctx, poll); err != nil {
+			return err
+		}
 	}
-	wg.Wait()
-	return nil
+}
+
+// workerError reports an error the dispatcher absorbs rather than returns.
+func (k *Kernel) workerError(msg string, err error) {
+	k.d.Observer.RecordWorkerError("dispatch")
+	k.log.Error(msg, "err", err)
+}
+
+// reclaimBatch bounds one statement's locks; reclaiming pages until drained.
+const reclaimBatch = 100
+
+func (k *Kernel) reclaimAllStalled(ctx context.Context) error {
+	for {
+		reclaimed, err := k.d.Queue.ReclaimStalled(ctx, time.Now().UTC(), k.cfg.DispatchLeaseTimeout, reclaimBatch)
+		if err != nil {
+			return err
+		}
+		k.d.Observer.RecordReclaimedStalled(len(reclaimed))
+		if len(reclaimed) < reclaimBatch {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+}
+
+func wait(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {

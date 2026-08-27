@@ -131,6 +131,12 @@ dispatch, and step identity makes re-issued effects converge rather than
 duplicate. Failed dispatches retry with exponential backoff; after exhaustion the
 execution fails with `dispatch_exhausted`.
 
+A replica claims no more rows than it has idle delivery workers, so a claim never
+withholds work from a replica that could deliver it sooner. Claiming leases the
+row for the length of the agent's run, renewed by heartbeat; a lease left behind
+by a crashed replica expires and is returned to the queue by any replica's
+dispatch loop.
+
 ## Governance (policy)
 
 Policy is evaluated once per effect, at step submission, for both tool and LLM
@@ -146,8 +152,8 @@ substitutes an in-memory store with the same interfaces.
 
 The HTTP API is stateless — any replica serves any request, and any replica
 dispatches any execution (no connection registry, no sticky routing). Singleton
-background work (approval-expiry, execution deadlines, cleanup, stale-dispatch
-reaping) runs under Postgres advisory-lock leadership.
+background work (approval-expiry, execution deadlines, cleanup) runs under
+Postgres advisory-lock leadership.
 
 For the full mechanics — the write path, canonicalization rules, and per-failure
 recovery behavior — see the rest of the docs: [agents](agents.md),
