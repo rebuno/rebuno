@@ -10,7 +10,6 @@ import (
 type Config struct {
 	ListenAddr             string
 	AgentBearerToken       string
-	DevMode                bool
 	DBURL                  string
 	DispatchMaxAttempts    int
 	DispatchBaseDelay      time.Duration
@@ -62,9 +61,6 @@ func FromEnv() Config {
 	}
 	if v := os.Getenv("REBUNO_DB_URL"); v != "" {
 		cfg.DBURL = v
-	}
-	if v := os.Getenv("REBUNO_DEV"); v == "true" || v == "1" {
-		cfg.DevMode = true
 	}
 	if v := os.Getenv("REBUNO_DISPATCH_MAX_ATTEMPTS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -145,9 +141,6 @@ func FromEnv() Config {
 }
 
 func (c Config) Validate() error {
-	if c.DevMode {
-		return nil
-	}
 	if c.DBURL == "" {
 		return fmt.Errorf("REBUNO_DB_URL (--db-url) required in server mode")
 	}

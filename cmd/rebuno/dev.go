@@ -34,7 +34,6 @@ func devCmd() *cobra.Command {
 		Use:   "dev",
 		Short: "Start a development kernel (in-memory, no auth, no dependencies)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg.DevMode = true
 			cfg.AgentBearerToken = "" // auth disabled in dev
 			return runDev(cfg, configPath)
 		},

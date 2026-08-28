@@ -49,7 +49,6 @@ func serverCmd() *cobra.Command {
 		Use:   "server",
 		Short: "Start the production kernel (Postgres-backed)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg.DevMode = false
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("config: %w", err)
 			}

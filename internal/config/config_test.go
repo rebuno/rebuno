@@ -38,24 +38,17 @@ func TestFromEnvReadsNewFields(t *testing.T) {
 }
 
 func TestValidateServerMode(t *testing.T) {
-	c := Config{DevMode: false}
+	c := Config{}
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected error for missing db-url")
 	}
-	c = Config{DevMode: false, DBURL: "postgres://x"}
+	c = Config{DBURL: "postgres://x"}
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected error for missing bearer token")
 	}
-	c = Config{DevMode: false, DBURL: "postgres://x", AgentBearerToken: "tok"}
+	c = Config{DBURL: "postgres://x", AgentBearerToken: "tok"}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidateDevModeNoRequirements(t *testing.T) {
-	c := Config{DevMode: true}
-	if err := c.Validate(); err != nil {
-		t.Fatalf("dev mode should validate: %v", err)
 	}
 }
 
