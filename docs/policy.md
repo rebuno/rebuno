@@ -1,14 +1,20 @@
 # Policy
 
-Policy governs which effects an agent may perform. A rule bundle is evaluated
-**once per step submission** — for both tool calls and LLM calls — and returns
-one of three decisions: `allow`, `deny`, or `require_approval`. Policy is
-gate-keeping only; it never rewrites a request.
+Policy decides which effects an agent may perform. Each agent has its own rule
+bundle, evaluated the first time a step is submitted. A rule returns `allow`,
+`deny`, or `require_approval`.
 
-Each agent has its own bundle. Provide it inline (`policy:`) or by file
-(`policy_file:`) in a provisioning manifest, or load it over the admin API
-(`POST /v0/policies/{agent_id}`). An agent with no bundle runs under the
-permissive (allow-all) engine in dev.
+A replayed step returns its recorded outcome without consulting policy again, so
+editing a bundle does not re-gate work an execution has already done.
+
+Attach a bundle inline with `policy:` or from a file with `policy_file:` in a
+provisioning manifest. Set one or the other, not both, and write the
+`policy_file` path relative to the manifest. You can also load a bundle over the
+admin API with `POST /v0/policies/{agent_id}`.
+
+The kernel compiles a bundle before storing it, so a malformed one is rejected
+with a validation error at registration rather than failing later at a step. An
+agent with no bundle is unrestricted, in production as much as in dev.
 
 ## Bundle format
 
@@ -31,20 +37,21 @@ rules:
 
 ## Evaluation
 
-Rules are evaluated **top to bottom** in the order they appear in the bundle:
-the first rule whose `when` block matches wins, so put the specific rules above
-the broad ones. If none match, `default_action` applies. Every rule needs an
-`id`, unique within the bundle. Unknown keys are rejected: a bundle with a key
-no rule field claims fails to load.
+Rules are evaluated top to bottom in the order they appear in the bundle. The
+first rule whose `when` block matches wins, so put the specific rules above the
+broad ones. If nothing matches, `default_action` applies, and any value other
+than `allow` means deny. Every rule needs an `id`, unique within the bundle.
+Unknown keys are rejected, so a bundle carrying a key no rule field claims will
+not load.
 
-`default_action` applies to `tool_call` and `llm_call` steps. An unmatched
-`local` step is allowed regardless of `default_action`; to govern one, match it
-with a rule (`target` or `step_kind: local`).
+`default_action` covers `tool_call` and `llm_call` steps. An unmatched `local`
+step is allowed whatever `default_action` says. To govern one, match it with a
+rule on `target` or `step_kind: local`.
 
-## Conditions (`when`)
+## Match conditions
 
-All fields present in a `when` block must match (AND). Omitted fields are not
-checked.
+All fields present in a rule's `when` block must match (AND). Omitted fields are
+not checked.
 
 | Field | Matches |
 |-------|---------|
@@ -53,17 +60,17 @@ checked.
 | `agent_id` | The submitting agent's id. |
 | `agent_ids` | A list of agent ids; matches if the agent is in it. |
 | `step_kind` | `tool_call`, `llm_call`, or `local`. |
-| `arguments` | Predicates against fields inside the call's JSON arguments (see below). |
+| `arguments` | Predicates against fields inside the call's JSON arguments. See [Argument predicates](#argument-predicates). |
 
 ### Argument predicates
 
-`arguments` is a map of argument key → predicate. The key must be present in the
-call's arguments, and every listed constraint must pass. Values are compared as
-strings.
+`arguments` is a map of argument key to predicate. The key must be present in
+the call's arguments, and every constraint listed under it must pass. Values are
+compared as strings.
 
-A predicate must carry at least one constraint. A bundle with an empty predicate
-(`command: {}`, or `command: {equals: ""}`) is rejected at load — an empty
-constraint would match any value and silently widen the rule.
+A predicate needs at least one constraint. An empty one (`command: {}`, or
+`command: {equals: ""}`) is rejected at load, because a constraint that matches
+any value would silently widen the rule.
 
 ```yaml
 when:
@@ -80,27 +87,33 @@ when:
 | `one_of` | is one of the listed strings |
 | `regex` | matches the RE2 regular expression |
 
-## Decisions (`then`)
+## Rule decisions
+
+A rule's `then` block carries the decision and its options:
 
 | Field | Meaning |
 |-------|---------|
-| `decision` | `allow`, `deny`, or `require_approval`. **Required.** |
+| `decision` | `allow`, `deny`, or `require_approval`. Required. |
 | `reason` | Human-readable explanation. Recorded in the decision event and returned on deny. |
-| `approval_config` | Who approves, and for how long. Only meaningful with `require_approval` (see below). |
-| `rate_limit` | Caps how often the rule may fire (see below). |
+| `approval_config` | Who approves, and for how long. Only meaningful with `require_approval`. See [Approvals](#approvals). |
+| `rate_limit` | Caps how often the rule may fire. See [Rate limits](#rate-limits). |
+| `budget` | Caps the LLM tokens the execution may spend. See [Token budgets](#token-budgets). |
 
 Every policy decision event (`step.allowed`, `step.denied`,
-`step.awaiting_approval`) carries the matched `rule_id` in its payload — that is
-the audit trail. `rule_id` is always the matched rule's own `id`; it is not
-settable from the bundle.
+`step.awaiting_approval`) carries the matched `rule_id` in its payload, which is
+what makes the log auditable. `rule_id` is the matched rule's own `id` and is
+not settable from the bundle. A decision that came from somewhere other than a
+rule gets a fixed id. The `default_action` fallthrough is `default`, an
+unmatched local step is `local`, an agent with no bundle is `permissive`, and a
+stored bundle that will not compile is `bundle-error`.
 
-### require_approval
+### Approvals
 
-When a rule returns `require_approval`, the kernel records `step.awaiting_approval`
-and `approval.requested`, creates an approval, and transitions the execution to
-`blocked`. A human resolves it via the approvals API (`grant` / `deny`), and the
-execution resumes. See [events.md](events.md) and
-[api.md](api.md#approvals).
+When a rule returns `require_approval`, the kernel records
+`step.awaiting_approval` and `approval.requested`, creates an approval, and
+moves the execution to `blocked`. A human grants or denies it through the
+approvals API and the execution resumes. See [Events](events.md) and
+[Approvals](api.md#approvals).
 
 ```yaml
   - id: approve-fs-writes
@@ -117,21 +130,21 @@ execution resumes. See [events.md](events.md) and
 
 | Field | Meaning |
 |-------|---------|
-| `approvers` | Who may grant or deny. A decision whose `decided_by` is not in the list is rejected with `403 forbidden`. Omit the field (or leave it empty) to let anyone decide — that is the default. **Not access control:** see below. |
+| `approvers` | Who may grant or deny. A decision whose `decided_by` is not in the list is rejected with `403 forbidden`. Omit the field, or leave it empty, to let anyone decide. That is the default. It is a guardrail, not access control. |
 | `timeout` | A Go duration (`30s`, `5m`, `1h30m`). The approval expires after it. Defaults to the kernel's configured timeout. |
 | `message` | Shown to whoever resolves the approval. |
 
-`approvers` is a guardrail, not access control. `decided_by` is a string in the
-request body and the bearer token is shared and carries no identity, so the
-check stops the wrong person deciding — not someone who types another person's
-name. Enforcing it properly requires `decided_by` to come from an authenticated
-principal. Do not rely on `approvers` to keep a decision away from a caller who
-already holds the API token.
+`approvers` is a guardrail rather than access control. `decided_by` is a string
+in the request body, and the bearer token is shared and carries no identity, so
+the check stops the wrong person deciding by accident but not someone willing to
+type another person's name. Enforcing it properly needs `decided_by` to come
+from an authenticated principal. Do not rely on `approvers` to keep a decision
+away from a caller who already holds the API token.
 
-### rate_limit
+### Rate limits
 
-A rule may cap how often it fires. The limit is keyed on the rule's `rule_id`
-and the scope in `per_what`, so two rules never share a bucket.
+A rule can cap how often it fires. The bucket is keyed on the rule's `rule_id`
+and the scope in `per_what`, so two rules never share one.
 
 ```yaml
   - id: limit-search
@@ -147,17 +160,18 @@ and the scope in `per_what`, so two rules never share a bucket.
         on_limiter_error: allow  # allow (default, fail-open) | deny (fail-closed)
 ```
 
-A step over the limit is refused with `rate_limited` rather than denied by
-policy. A hard ceiling belongs in a `deny` or `require_approval` rule instead.
+A step over the limit comes back as `rate_limited` rather than a policy denial.
+Put a hard ceiling in a `deny` or `require_approval` rule instead.
 
-With `max_wait` set, a limited step parks instead: the submit returns `blocked`
-and the kernel re-dispatches once the bucket refills, leaving the execution
-`running`. An execution parks once — a step still over the limit on the retry,
-or a wait longer than `max_wait`, is refused.
+With `max_wait` set, a limited step parks. The submit returns `blocked`, the
+execution stays `running`, and the kernel re-dispatches once the bucket refills.
+An execution parks only once. If the step is still over the limit on the retry,
+or the wait would run longer than `max_wait`, it is refused.
 
-### budget
+### Token budgets
 
-A rule may cap the LLM tokens an execution is allowed to spend.
+A rule can cap the LLM tokens an execution spends. The cap applies only to a
+rule that decides `allow`.
 
 ```yaml
   - id: cap-llm-spend
@@ -169,13 +183,15 @@ A rule may cap the LLM tokens an execution is allowed to spend.
         on_exceed: deny        # deny (default) | require_approval
 ```
 
-The meter sums the input and output tokens recorded on the execution's completed
-`llm_call` steps, so an effect counts once however many times it was attempted.
+The meter sums the input and output tokens recorded on the execution's steps, so
+an effect counts once however many times it was attempted. Only `llm_call` steps
+record usage, so nothing else moves the meter.
 
 The check runs before the call, so the step that crosses the limit still runs. A
-response with no parseable usage never advances the meter — most often an
-OpenAI-style stream requested without `stream_options.include_usage` — and
-`rebuno_llm_usage_missing_total` counts those.
+response with no parseable usage never advances the meter, most often an
+OpenAI-style stream requested without `stream_options.include_usage`, and
+`rebuno_llm_usage_missing_total` counts those. If the kernel cannot read the
+execution's usage at all, it lets the step through.
 
 ## Examples
 

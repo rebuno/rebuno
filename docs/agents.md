@@ -1,14 +1,15 @@
 # Agents
 
-An agent is a **stateless HTTP service** registered with the kernel by name. It
-exposes a webhook the kernel POSTs to, and it drives its effects (tool and LLM
-calls) back through the kernel's API.
+An agent is a stateless HTTP service. The kernel POSTs to its 
+webhook when there is work to do, and the agent sends its effects
+(tool and LLM calls) back through the kernel's API.
 
-## Registering an agent
+## Register an agent
 
-An agent needs a `webhook_url` and an HMAC `secret`. Register it via a
-provisioning manifest at kernel boot (`--config`), the REPL (`agent add`), or the
-admin API (`POST /v0/agents`). See [deployment.md](deployment.md#provisioning-agents).
+An agent needs a `webhook_url` and an HMAC `secret`. There are three ways to
+register one: a provisioning manifest at kernel boot (`--config`), the dev REPL's
+`agent add`, or the admin API (`POST /v0/agents`). See
+[Provisioning agents](deployment.md#provisioning-agents).
 
 ```yaml
 agents:
@@ -18,69 +19,75 @@ agents:
     policy_file: policies/research.yaml
 ```
 
-## The dispatch lifecycle
+## Dispatch lifecycle
 
-Each time the kernel has work for an execution it POSTs the agent's webhook. The
-agent performs the same sequence on the first dispatch and on every resume — this
-is what makes crashes and approvals transparent:
+The kernel POSTs to the webhook every time it has work for an execution. The
+agent runs the same sequence on the first dispatch and on every resume:
 
-1. **Dispatch.** The webhook arrives with `{execution_id, dispatch_id}`, signed
-   `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`. The agent verifies the
-   signature and acks with `200 OK` immediately. (Delivery is at-least-once, so the
-   handler must be safe under duplicate dispatch — key on `(execution_id, dispatch_id)`.)
-2. **Fetch input.** The agent reads the execution's original input
-   (`GET /v0/executions/{id}`).
-3. **Run.** The agent runs its own logic from the top with the original input.
-4. **Submit each effect.** For every tool or LLM call, the agent submits a step
-   (`POST /v0/executions/{id}/steps`, carrying the dispatch id) and acts on the
-   decision:
-   - `replay` → the recorded result is returned; **the effect does not run**.
-   - `proceed` → the agent performs the effect, then reports the outcome
+1. **Dispatch.** The webhook arrives with `{execution_id, dispatch_id}` and a
+   signature header, `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`. The
+   agent checks the signature and acks with `200 OK` right away. The kernel
+   delivers at least once, so the same dispatch can arrive twice. Key the handler
+   on `(execution_id, dispatch_id)`.
+2. **Fetch input.** The agent reads the execution's original input with
+   `GET /v0/executions/{id}`.
+3. **Run.** The agent runs its own logic from the top, with that input.
+4. **Submit each effect.** Before every tool or LLM call, the agent submits a step
+   (`POST /v0/executions/{id}/steps`, carrying the dispatch id). The kernel answers
+   with a decision:
+   - `replay` → the recorded result comes back. The effect does not run.
+   - `proceed` → the agent runs the effect, then reports how it went
      (`.../complete` or `.../fail`).
-   - `denied` → policy rejected it; surface it as an error.
-   - `rate_limited` → a rule's rate limit refused it; surface it as an error.
-   - `blocked` → stop and exit (see below).
-   - `execution_terminal` → the execution is cancelled/done; exit cleanly.
-5. **Block.** On a `blocked` decision the agent stops and exits the dispatch
-   cleanly. Either a human approval is pending — `approval_id` is returned and
-   the execution is `blocked` — or a rate limit parked the step and the
-   execution stays `running`. **The process may die here** — no state is held
-   in memory.
-6. **Resume.** When the approval resolves, or the rate limit's wait elapses, the
-   kernel re-dispatches. The agent runs from the top again; every prior effect
-   returns `replay`, and the previously-blocked step is decided afresh.
-7. **Complete.** When the agent's logic finishes, it reports the result
-   (`POST /v0/executions/{id}/complete`), and the kernel records
+   - `denied` → policy rejected the call. The agent surfaces it as an error.
+   - `rate_limited` → a rule's rate limit refused the call. The agent surfaces it
+     as an error.
+   - `blocked` → the agent stops and exits the dispatch.
+   - `execution_blocked` → an earlier step is awaiting approval, so no new effect
+     can start. The agent stops and exits, same as `blocked`.
+   - `execution_terminal` → the execution is already cancelled or finished. The
+     agent exits cleanly.
+5. **Block.** `blocked` has two causes. A human approval is pending, and the
+   response carries an `approval_id` while the execution moves to `blocked`. Or a
+   rate limit parked the step, and the execution stays `running`. Either way the
+   agent holds nothing in memory, so the process can exit here, or crash, without
+   losing anything.
+6. **Resume.** The kernel dispatches again once the approval resolves or the rate
+   limit's wait is up. The agent runs from the top, every effect it already did
+   comes back as `replay`, and the step that blocked gets a fresh decision.
+7. **Complete.** When the agent's logic finishes, it reports the result with
+   `POST /v0/executions/{id}/complete`, and the kernel records
    `execution.completed`.
 
 See the [HTTP API](api.md) for the exact request and response shapes, and
-[architecture.md](architecture.md) for how step identity makes replay work.
+[Architecture](architecture.md) for how step identity makes replay work.
 
-Tool calls are explicit in agent code, but LLM calls are HTTP requests buried
-inside a provider SDK, so they must be **intercepted** at the HTTP layer before
-step 4 can record them. That mechanism — and how to implement it against your own
-LLM gateway — has its own page: [LLM calls](llm-calls.md).
+Tool calls are written into the agent's own code, so submitting a step for one is
+easy. LLM calls are HTTP requests buried inside a provider SDK, so something has
+to intercept them at the HTTP layer before step 4 can record them.
+[LLM calls](llm-calls.md) explains how that works, and also how to wire it up to your
+own gateway.
 
 ## What an agent must guarantee
 
-Replay only short-circuits correctly if the agent reaches the **same sequence of
-effects** given the same input and the same prior results:
+Replay only lines up if the agent makes the same calls in the same order when it
+sees the same input and the same earlier results.
 
-- The order of tool and LLM calls must be a function of the input and prior effect
-  results — not of wall-clock time, random numbers, or other local non-determinism.
-- Non-deterministic work that changes *which* effects fire must itself be expressed
-  as a recorded effect (a tool call), so it replays to the same value.
+- The agent can pick its calls and their order from the input and from earlier
+  results. It must not branch on the clock, a random number, or anything else
+  local to the process.
+- If something non-deterministic decides which effects fire, record it as a
+  `local` step. It lands in the log and replays to the same value. Both SDKs
+  expose this as `step(name, fn)`. See [Local steps](tools.md#local-steps).
 
-Rebuno records **effects, not conversations**. It does not reconstruct framework or
-conversation state — the agent reloads whatever context it needs from its own store
-at the start of each dispatch.
+Replay only covers steps recorded under the execution being dispatched. The agent
+loads any other context from its own store.
 
 ## Idempotency and at-least-once delivery
 
-Webhook delivery is at-least-once, and two kernel replicas can race the same
-execution. This is safe: every effect the agent re-issues short-circuits on its
-step ID, so duplicate or concurrent dispatches converge rather than double-run.
+Webhooks are delivered at least once, so the same dispatch can arrive twice. A
+redelivery re-submits the same step IDs and short-circuits on the recorded
+results.
 
-When a crash orphans an effect (a step started but never recorded a result), how
-the kernel recovers depends on the step's declared idempotency mode. See
-[tools.md](tools.md#idempotency-modes).
+A crash can still orphan an effect, where a step started but never recorded a
+result. What the kernel does then depends on the idempotency mode the step
+declared. See [Idempotency modes](tools.md#idempotency-modes).
