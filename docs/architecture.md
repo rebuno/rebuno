@@ -8,7 +8,8 @@ re-run skips whatever already has a result.
 ```mermaid
 flowchart LR
     client -->|create| kernel
-    kernel <-->|"webhook / submit_step<br>(each tool/LLM call)"| agent
+    kernel -->|webhook| agent
+    agent -->|submit_step| kernel
     kernel --> db[("Postgres<br>events + steps")]
 ```
 
@@ -47,14 +48,15 @@ A step moves through these states:
 ```mermaid
 stateDiagram-v2
     [*] --> proposed
-    proposed --> allowed
-    proposed --> denied
-    proposed --> awaiting_approval
-    allowed --> executing
-    awaiting_approval --> executing: approved
+    proposed --> denied: deny
+    proposed --> awaiting_approval: require_approval
+    proposed --> executing: allow
     awaiting_approval --> denied: denied or expired
+    awaiting_approval --> allowed: approved
+    allowed --> executing
     executing --> succeeded
     executing --> failed
+    executing --> cancelled
 ```
 
 ## Determinism and replay
