@@ -22,6 +22,13 @@ type DenyApprovalRequest struct {
 	Rationale string `json:"rationale,omitempty"`
 }
 
+func requireAwaitingApproval(step domain.Step) error {
+	if step.Status != domain.StepAwaitingApproval {
+		return fmt.Errorf("%w: approval step is in status %s", domain.ErrConflict, step.Status)
+	}
+	return nil
+}
+
 func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantApprovalRequest) error {
 	approval, err := k.d.Approvals.GetApproval(ctx, id)
 	if err != nil {
@@ -49,6 +56,9 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 		step, err := tx.GetStep(ctx, approval.StepID)
 		if err != nil {
+			return err
+		}
+		if err := requireAwaitingApproval(step); err != nil {
 			return err
 		}
 		evts := []store.EventRecord{
@@ -111,6 +121,9 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 		step, err := tx.GetStep(ctx, approval.StepID)
 		if err != nil {
+			return err
+		}
+		if err := requireAwaitingApproval(step); err != nil {
 			return err
 		}
 		evts := []store.EventRecord{

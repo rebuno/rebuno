@@ -1424,3 +1424,33 @@ func TestRateLimitRefusesWaitOverMaxWait(t *testing.T) {
 		t.Fatalf("a 1h wait under a 1m max_wait should refuse, got %+v", dec)
 	}
 }
+
+// TestCompleteStepOnBlockedStepConflicts verifies that a step parked on a human
+// approval cannot be resolved by the agent that proposed it. Its originating
+// lease still checks out, so the status guard is the only thing standing
+// between a blocked effect and a recorded outcome.
+func TestCompleteStepOnBlockedStepConflicts(t *testing.T) {
+	ms := memstore.NewStore()
+	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	lease := leaseOf(t, k, exec.ID)
+	stepID, _ := submitLLMStep(t, k, ctx, exec)
+
+	if _, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"ok":true}`), Lease: lease}); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("expected conflict completing a blocked step, got %v", err)
+	}
+	if _, err := k.FailStep(ctx, stepID, kernel.FailStepRequest{Error: json.RawMessage(`{"reason":"boom"}`), Lease: lease}); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("expected conflict failing a blocked step, got %v", err)
+	}
+
+	step, err := k.GetStep(ctx, stepID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.Status != domain.StepAwaitingApproval {
+		t.Fatalf("blocked step was mutated, status %s", step.Status)
+	}
+}

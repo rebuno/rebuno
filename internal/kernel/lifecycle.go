@@ -75,6 +75,9 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 		if err != nil {
 			return err
 		}
+		if err := requireAwaitingApproval(step); err != nil {
+			return err
+		}
 		evts := []store.EventRecord{
 			{Type: domain.EventApprovalExpired, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
 			{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(approval.StepID, step.Kind, step.Target, "", errPayload)},

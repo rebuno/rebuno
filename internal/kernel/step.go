@@ -469,6 +469,13 @@ func (k *Kernel) writeStep(ctx context.Context, step domain.Step, evts []store.E
 	})
 }
 
+func requireExecuting(step domain.Step) error {
+	if step.Status != domain.StepExecuting {
+		return fmt.Errorf("%w: cannot record outcome for step in status %s", domain.ErrConflict, step.Status)
+	}
+	return nil
+}
+
 func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteStepRequest) (domain.StepDecision, error) {
 	if !req.Lease.Valid() {
 		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
@@ -498,6 +505,9 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 	}
 	if step.Status.IsTerminal() {
 		return domain.StepDecision{Decision: "replay", Result: step.Result}, nil
+	}
+	if err := requireExecuting(step); err != nil {
+		return domain.StepDecision{}, err
 	}
 	now := time.Now().UTC()
 	step.Status = domain.StepSucceeded
@@ -552,6 +562,9 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 	}
 	if step.Status.IsTerminal() {
 		return domain.StepDecision{Decision: "replay", Error: step.Error}, nil
+	}
+	if err := requireExecuting(step); err != nil {
+		return domain.StepDecision{}, err
 	}
 	now := time.Now().UTC()
 	step.Status = domain.StepFailed
