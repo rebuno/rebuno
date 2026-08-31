@@ -10,6 +10,7 @@ var (
 	ErrUnauthorized      = fmt.Errorf("unauthorized")
 	ErrForbidden         = fmt.Errorf("forbidden")
 	ErrRateLimited       = fmt.Errorf("rate limit exceeded")
+	ErrLeaseSuperseded   = fmt.Errorf("dispatch lease superseded")
 )
 
 const (

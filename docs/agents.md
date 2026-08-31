@@ -24,17 +24,18 @@ agents:
 The kernel POSTs to the webhook every time it has work for an execution. The
 agent runs the same sequence on the first dispatch and on every resume:
 
-1. **Dispatch.** The webhook arrives with `{execution_id, dispatch_id}` and a
-   signature header, `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`. The
-   agent checks the signature and acks with `200 OK` right away. The kernel
-   delivers at least once, so the same dispatch can arrive twice. Key the handler
-   on `(execution_id, dispatch_id)`.
+1. **Dispatch.** The webhook arrives with `{execution_id, dispatch_id,
+   dispatch_attempt}` and a signature header,
+   `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`. The agent checks the
+   signature and acks with `200 OK` right away. The kernel delivers at least
+   once, so the same dispatch can arrive twice. Key the handler on
+   `(execution_id, dispatch_id, dispatch_attempt)`.
 2. **Fetch input.** The agent reads the execution's original input with
    `GET /v0/executions/{id}`.
 3. **Run.** The agent runs its own logic from the top, with that input.
 4. **Submit each effect.** Before every tool or LLM call, the agent submits a step
-   (`POST /v0/executions/{id}/steps`, carrying the dispatch id). The kernel answers
-   with a decision:
+   (`POST /v0/executions/{id}/steps`, carrying the dispatch id and attempt). The
+   kernel answers with a decision:
    - `replay` → the recorded result comes back. The effect does not run.
    - `proceed` → the agent runs the effect, then reports how it went
      (`.../complete` or `.../fail`).
@@ -87,6 +88,10 @@ loads any other context from its own store.
 Webhooks are delivered at least once, so the same dispatch can arrive twice. A
 redelivery re-submits the same step IDs and short-circuits on the recorded
 results.
+
+A dispatch that goes quiet is reclaimed and delivered again under the next
+`dispatch_attempt`. Calls from the earlier attempt are refused with
+`409 lease_superseded`, and the agent stops without failing the execution.
 
 A crash can still orphan an effect, where a step started but never recorded a
 result. What the kernel does then depends on the idempotency mode the step

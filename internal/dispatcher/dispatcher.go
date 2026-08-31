@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/domain"
 )
 
 type Config struct {
@@ -35,8 +36,9 @@ func DefaultConfig() Config {
 }
 
 type WebhookPayload struct {
-	ExecutionID string `json:"execution_id"`
-	DispatchID  string `json:"dispatch_id"`
+	ExecutionID     string `json:"execution_id"`
+	DispatchID      string `json:"dispatch_id"`
+	DispatchAttempt int    `json:"dispatch_attempt"`
 }
 
 type Outcome int
@@ -70,10 +72,11 @@ func New(client *http.Client, cfg Config, logger *slog.Logger) *Dispatcher {
 }
 
 // Deliver makes a single delivery attempt and returns the result immediately.
-func (d *Dispatcher) Deliver(ctx context.Context, url, secret string, execID, dispatchID uuid.UUID) Result {
+func (d *Dispatcher) Deliver(ctx context.Context, url, secret string, execID uuid.UUID, lease domain.Lease) Result {
 	payload := WebhookPayload{
-		ExecutionID: execID.String(),
-		DispatchID:  dispatchID.String(),
+		ExecutionID:     execID.String(),
+		DispatchID:      lease.DispatchID.String(),
+		DispatchAttempt: lease.Attempt,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -18,9 +20,27 @@ type AgentKernel interface {
 	SubmitStep(ctx context.Context, execID uuid.UUID, req kernel.SubmitStepRequest) (domain.StepDecision, error)
 	CompleteStep(ctx context.Context, stepID string, req kernel.CompleteStepRequest) (domain.StepDecision, error)
 	FailStep(ctx context.Context, stepID string, req kernel.FailStepRequest) (domain.StepDecision, error)
-	Heartbeat(ctx context.Context, execID uuid.UUID) error
-	CompleteExecution(ctx context.Context, execID uuid.UUID, output json.RawMessage) error
-	FailExecution(ctx context.Context, execID uuid.UUID, reason string) error
+	Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.Lease) error
+	CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output json.RawMessage) error
+	FailExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error
+}
+
+// The lease the kernel issued in the webhook, which every mutation sends back.
+const (
+	headerDispatchID      = "Rebuno-Dispatch-Id"
+	headerDispatchAttempt = "Rebuno-Dispatch-Attempt"
+)
+
+func leaseFrom(r *http.Request) (domain.Lease, error) {
+	dispatchID, err := uuid.Parse(r.Header.Get(headerDispatchID))
+	if err != nil {
+		return domain.Lease{}, fmt.Errorf("%w: bad or missing %s", domain.ErrValidation, headerDispatchID)
+	}
+	attempt, err := strconv.Atoi(r.Header.Get(headerDispatchAttempt))
+	if err != nil || attempt <= 0 {
+		return domain.Lease{}, fmt.Errorf("%w: bad or missing %s", domain.ErrValidation, headerDispatchAttempt)
+	}
+	return domain.Lease{DispatchID: dispatchID, Attempt: attempt}, nil
 }
 
 type CompleteExecutionRequest struct {
@@ -76,13 +96,9 @@ func (rt *Router) submitStep(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	if raw := r.Header.Get("Rebuno-Dispatch-Id"); raw != "" {
-		dispatchID, perr := uuid.Parse(raw)
-		if perr != nil {
-			WriteError(w, domain.ErrValidation)
-			return
-		}
-		req.DispatchID = dispatchID
+	if req.Lease, err = leaseFrom(r); err != nil {
+		WriteError(w, err)
+		return
 	}
 	dec, err := rt.agent.SubmitStep(r.Context(), id, req)
 	if err != nil {
@@ -99,6 +115,12 @@ func (rt *Router) completeStep(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
+	lease, err := leaseFrom(r)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	req.Lease = lease
 	dec, err := rt.agent.CompleteStep(r.Context(), stepID, req)
 	if err != nil {
 		WriteError(w, err)
@@ -114,6 +136,12 @@ func (rt *Router) failStep(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
+	lease, err := leaseFrom(r)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	req.Lease = lease
 	dec, err := rt.agent.FailStep(r.Context(), stepID, req)
 	if err != nil {
 		WriteError(w, err)
@@ -128,7 +156,12 @@ func (rt *Router) heartbeat(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, domain.ErrValidation)
 		return
 	}
-	if err := rt.agent.Heartbeat(r.Context(), id); err != nil {
+	lease, err := leaseFrom(r)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	if err := rt.agent.Heartbeat(r.Context(), id, lease); err != nil {
 		WriteError(w, err)
 		return
 	}
@@ -146,7 +179,12 @@ func (rt *Router) agentCompleteExecution(w http.ResponseWriter, r *http.Request)
 		WriteError(w, err)
 		return
 	}
-	if err := rt.agent.CompleteExecution(r.Context(), id, req.Output); err != nil {
+	lease, err := leaseFrom(r)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	if err := rt.agent.CompleteExecution(r.Context(), id, lease, req.Output); err != nil {
 		WriteError(w, err)
 		return
 	}
@@ -164,7 +202,12 @@ func (rt *Router) agentFailExecution(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	if err := rt.agent.FailExecution(r.Context(), id, req.Error); err != nil {
+	lease, err := leaseFrom(r)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	if err := rt.agent.FailExecution(r.Context(), id, lease, req.Error); err != nil {
 		WriteError(w, err)
 		return
 	}

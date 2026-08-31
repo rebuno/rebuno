@@ -50,6 +50,8 @@ func MapError(err error) (string, int) {
 		return "forbidden", http.StatusForbidden
 	case errors.Is(err, domain.ErrExecutionTerminal):
 		return "execution_terminal", http.StatusConflict
+	case errors.Is(err, domain.ErrLeaseSuperseded):
+		return "lease_superseded", http.StatusConflict
 	default:
 		return "internal_error", http.StatusInternalServerError
 	}

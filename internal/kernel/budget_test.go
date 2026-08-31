@@ -51,10 +51,10 @@ func usageBody(in, out int) string {
 func llmCall(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UUID, body string) domain.StepDecision {
 	t.Helper()
 	dec, err := k.SubmitStep(ctx, execID, kernel.SubmitStepRequest{
-		Kind:       domain.StepKindLLM,
-		Target:     "claude-opus-5",
-		Args:       json.RawMessage(`{"model":"claude-opus-5"}`),
-		DispatchID: dispatchOf(t, k, execID),
+		Kind:   domain.StepKindLLM,
+		Target: "claude-opus-5",
+		Args:   json.RawMessage(`{"model":"claude-opus-5"}`),
+		Lease:  leaseOf(t, k, execID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func llmCall(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UU
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k.CompleteStep(ctx, dec.StepID, kernel.CompleteStepRequest{Result: result}); err != nil {
+	if _, err := k.CompleteStep(ctx, dec.StepID, kernel.CompleteStepRequest{Result: result, Lease: leaseOf(t, k, execID)}); err != nil {
 		t.Fatal(err)
 	}
 	return dec

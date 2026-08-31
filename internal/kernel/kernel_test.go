@@ -74,12 +74,34 @@ func setup(t *testing.T) (*kernel.Kernel, context.Context) {
 	return k, ctx
 }
 
-// dispatchOf returns the execution's live dispatch. Submits are scoped to it the
-// same way an agent scopes them: the id arrives in the dispatch webhook and is
-// forwarded back untouched. It also scopes occurrence counting, so tests that
-// want a fresh replay generation ask for a new dispatch rather than resetting
-// anything client-side.
-func dispatchOf(t *testing.T, k *kernel.Kernel, execID uuid.UUID) uuid.UUID {
+// leaseOf returns the lease for the execution's newest dispatch, claiming it
+// first when the test never ran the dispatcher, since an agent only holds a
+// lease for an attempt that was delivered. The dispatch also scopes occurrence
+// counting, so a test that wants a fresh replay generation asks for a new
+// dispatch rather than resetting anything itself.
+func leaseOf(t *testing.T, k *kernel.Kernel, execID uuid.UUID) domain.Lease {
+	t.Helper()
+	ctx := context.Background()
+	d := newestDispatch(t, k, execID)
+	if d.Status != domain.DispatchInFlight {
+		// A resume dispatch parked by a rate limit is only due later, so claim
+		// as of its due time.
+		at := time.Now().UTC()
+		if d.NextAttemptAt.After(at) {
+			at = d.NextAttemptAt
+		}
+		if _, err := k.Deps().Queue.Claim(ctx, "test", 1000, at); err != nil {
+			t.Fatalf("claim dispatches: %v", err)
+		}
+		d = newestDispatch(t, k, execID)
+	}
+	if d.Status != domain.DispatchInFlight {
+		t.Fatalf("execution %s has no deliverable dispatch (status %s)", execID, d.Status)
+	}
+	return domain.Lease{DispatchID: d.ID, Attempt: d.Attempt}
+}
+
+func newestDispatch(t *testing.T, k *kernel.Kernel, execID uuid.UUID) domain.Dispatch {
 	t.Helper()
 	ds, err := k.Deps().Queue.ListDispatchesByExecution(context.Background(), execID)
 	if err != nil {
@@ -88,7 +110,7 @@ func dispatchOf(t *testing.T, k *kernel.Kernel, execID uuid.UUID) uuid.UUID {
 	if len(ds) == 0 {
 		t.Fatal("execution has no dispatch")
 	}
-	return ds[len(ds)-1].ID
+	return ds[len(ds)-1]
 }
 
 func TestCreateExecution(t *testing.T) {
@@ -125,7 +147,7 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", argsHash, 0)
 
 	// First submit -> proceed
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +156,7 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 	}
 
 	result := json.RawMessage(`{"ok":true}`)
-	if _, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: result}); err != nil {
+	if _, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: result, Lease: leaseOf(t, k, exec.ID)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -143,7 +165,7 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
 		t.Fatal(err)
 	}
-	dec2, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec2, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,17 +187,17 @@ func TestSubmitRejectsForeignDispatch(t *testing.T) {
 	args := json.RawMessage(`{"path":"/tmp"}`)
 
 	_, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
-		Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, other.ID),
+		Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, other.ID),
 	})
-	if !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("expected validation error for foreign dispatch, got %v", err)
+	if !errors.Is(err, domain.ErrLeaseSuperseded) {
+		t.Fatalf("expected superseded lease for foreign dispatch, got %v", err)
 	}
 
 	_, err = k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
-		Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: uuid.New(),
+		Kind: domain.StepKindTool, Target: "read", Args: args, Lease: domain.Lease{DispatchID: uuid.New(), Attempt: 1},
 	})
-	if !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("expected validation error for unknown dispatch, got %v", err)
+	if !errors.Is(err, domain.ErrLeaseSuperseded) {
+		t.Fatalf("expected superseded lease for unknown dispatch, got %v", err)
 	}
 
 	_, err = k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
@@ -192,13 +214,13 @@ func TestOccurrenceIsScopedToDispatch(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)}
+	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, exec.ID)}
 
 	first, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k.CompleteStep(ctx, first.StepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"n":1}`)}); err != nil {
+	if _, err := k.CompleteStep(ctx, first.StepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"n":1}`), Lease: leaseOf(t, k, exec.ID)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -218,7 +240,7 @@ func TestOccurrenceIsScopedToDispatch(t *testing.T) {
 	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
 		t.Fatal(err)
 	}
-	req.DispatchID = dispatchOf(t, k, exec.ID)
+	req.Lease = leaseOf(t, k, exec.ID)
 	resumed, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +274,7 @@ func TestPolicyDeny(t *testing.T) {
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
-	dec, err := k2.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k2.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +315,7 @@ func TestApprovalFlow(t *testing.T) {
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +330,7 @@ func TestApprovalFlow(t *testing.T) {
 	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
 		t.Fatal(err)
 	}
-	dec2, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec2, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if dec2.Decision != "blocked" {
 		t.Fatalf("expected still blocked, got %s", dec2.Decision)
 	}
@@ -321,7 +343,7 @@ func TestApprovalFlow(t *testing.T) {
 	}
 
 	// Now submit returns proceed.
-	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +372,7 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID), Idempotency: "at_most_once"}
+	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID), Idempotency: "at_most_once"}
 
 	dec, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
@@ -365,7 +387,7 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 
 	// The grant enqueues a fresh dispatch; the resumed run reaches the approved
 	// step at occurrence 0 again and is told to proceed.
-	req.DispatchID = dispatchOf(t, k, exec.ID)
+	req.Lease = leaseOf(t, k, exec.ID)
 	dec2, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -394,7 +416,7 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if dec.Decision != "blocked" || dec.ApprovalID == nil {
 		t.Fatal("expected blocked")
 	}
@@ -428,7 +450,7 @@ func TestLLMCallFlow(t *testing.T) {
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindLLM, "gpt-4", argsHash, 0)
 
 	// An llm_call goes through the same submit_step write path as a tool call.
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +458,7 @@ func TestLLMCallFlow(t *testing.T) {
 		t.Fatalf("expected proceed, got %s", dec.Decision)
 	}
 	// Re-submitting the same step_id while still executing must be accepted (no divergence).
-	dec2, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec2, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,14 +467,14 @@ func TestLLMCallFlow(t *testing.T) {
 	}
 
 	resp := json.RawMessage(`{"choices":[{"message":{"content":"hello"}}]}`)
-	if _, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: resp}); err != nil {
+	if _, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: resp, Lease: leaseOf(t, k, exec.ID)}); err != nil {
 		t.Fatal(err)
 	}
 	// After completion, a re-dispatch replays the cached result.
 	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
 		t.Fatal(err)
 	}
-	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,10 +493,12 @@ func TestLLMCallFlow(t *testing.T) {
 func TestTerminalRejectsFurtherSteps(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	// The agent holds a delivered lease, then the execution is cancelled under it.
+	lease := leaseOf(t, k, exec.ID)
 	if err := k.CancelExecution(ctx, exec.ID); err != nil {
 		t.Fatal(err)
 	}
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`), DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`), Lease: lease})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +618,7 @@ func TestRateLimitDoubleStep(t *testing.T) {
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +626,7 @@ func TestRateLimitDoubleStep(t *testing.T) {
 		t.Fatalf("first step expected proceed, got %s", dec.Decision)
 	}
 
-	dec, err = k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err = k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -905,7 +929,7 @@ func submitLLMStep(t *testing.T, k *kernel.Kernel, ctx context.Context, exec dom
 	req := json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
 	argsHash, _ := identity.ComputeArgsHash(req)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindLLM, "gpt-4", argsHash, 0)
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1035,7 +1059,7 @@ func TestApprovalDenyResumesExecution(t *testing.T) {
 
 	// The resumed handler re-proposes the effect and is told a human refused it.
 	req := json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1072,7 +1096,7 @@ func TestApprovalDenyRationaleReachesHandler(t *testing.T) {
 	}
 
 	req := json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindLLM, Target: "gpt-4", Args: req, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1127,7 +1151,8 @@ func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
-	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)}); err != nil {
+	lease := leaseOf(t, k, exec.ID)
+	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: lease}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1135,7 +1160,7 @@ func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dec, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"ok":true}`)})
+	dec, err := k.CompleteStep(ctx, stepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"ok":true}`), Lease: lease})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1172,7 +1197,8 @@ func TestFailStepAfterExecutionCancelled(t *testing.T) {
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
-	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: dispatchOf(t, k, exec.ID)}); err != nil {
+	lease := leaseOf(t, k, exec.ID)
+	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: lease}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1181,7 +1207,7 @@ func TestFailStepAfterExecutionCancelled(t *testing.T) {
 	}
 
 	errPayload := json.RawMessage(`{"reason":"boom"}`)
-	dec, err := k.FailStep(ctx, stepID, kernel.FailStepRequest{Error: errPayload})
+	dec, err := k.FailStep(ctx, stepID, kernel.FailStepRequest{Error: errPayload, Lease: lease})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1217,7 +1243,7 @@ func TestCancelExecutionCancelsInFlightSteps(t *testing.T) {
 
 	args := json.RawMessage(`{"cmd":"sleep 60"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "bash", mustHash(args), 0)
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "bash", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "bash", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1349,7 +1375,7 @@ rules:
 	args := json.RawMessage(`{"path":"/etc/passwd"}`)
 	before := time.Now().UTC()
 	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
-		Kind: domain.StepKindTool, Target: "fs_write", Args: args, DispatchID: dispatchOf(t, k, exec.ID),
+		Kind: domain.StepKindTool, Target: "fs_write", Args: args, Lease: leaseOf(t, k, exec.ID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1402,7 +1428,7 @@ rules:
 
 	args := json.RawMessage(`{"path":"/etc/passwd"}`)
 	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
-		Kind: domain.StepKindTool, Target: "fs_write", Args: args, DispatchID: dispatchOf(t, k, exec.ID),
+		Kind: domain.StepKindTool, Target: "fs_write", Args: args, Lease: leaseOf(t, k, exec.ID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1483,15 +1509,15 @@ func TestReclaimedDispatchReplaysFromZero(t *testing.T) {
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claim: %v (n=%d)", err, len(claimed))
 	}
-	did := claimed[0].ID
+	did := domain.Lease{DispatchID: claimed[0].ID, Attempt: claimed[0].Attempt}
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, DispatchID: did}
+	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: did}
 	first, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k.CompleteStep(ctx, first.StepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"n":1}`)}); err != nil {
+	if _, err := k.CompleteStep(ctx, first.StepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"n":1}`), Lease: did}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1503,10 +1529,11 @@ func TestReclaimedDispatchReplaysFromZero(t *testing.T) {
 	if err != nil || len(reclaimed) != 1 {
 		t.Fatalf("reclaim-claim: %v (n=%d)", err, len(reclaimed))
 	}
-	if reclaimed[0].ID != did {
+	if reclaimed[0].ID != did.DispatchID {
 		t.Fatalf("expected the same dispatch id on redelivery, got %s", reclaimed[0].ID)
 	}
 
+	req.Lease = domain.Lease{DispatchID: reclaimed[0].ID, Attempt: reclaimed[0].Attempt}
 	resumed, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -1627,7 +1654,7 @@ func TestReleasedDispatchRecordsNoEvent(t *testing.T) {
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.CompleteExecution(ctx, exec.ID, json.RawMessage(`{"ok":true}`)); err != nil {
+	if err := k.CompleteExecution(ctx, exec.ID, leaseOf(t, k, exec.ID), json.RawMessage(`{"ok":true}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1664,14 +1691,14 @@ func TestIndeterminateRetryIsDenied(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 
-	submit := func(did uuid.UUID, args string) domain.StepDecision {
+	submit := func(did domain.Lease, args string) domain.StepDecision {
 		t.Helper()
 		dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
 			Kind:        domain.StepKindTool,
 			Target:      "send_email",
 			Args:        json.RawMessage(args),
 			Idempotency: "at_most_once",
-			DispatchID:  did,
+			Lease:       did,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1680,7 +1707,7 @@ func TestIndeterminateRetryIsDenied(t *testing.T) {
 	}
 
 	const emailA = `{"to":"a@example.com"}`
-	if dec := submit(dispatchOf(t, k, exec.ID), emailA); dec.Decision != "proceed" {
+	if dec := submit(leaseOf(t, k, exec.ID), emailA); dec.Decision != "proceed" {
 		t.Fatalf("first call must proceed, got %s", dec.Decision)
 	}
 
@@ -1689,7 +1716,7 @@ func TestIndeterminateRetryIsDenied(t *testing.T) {
 	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
 		t.Fatal(err)
 	}
-	did := dispatchOf(t, k, exec.ID)
+	did := leaseOf(t, k, exec.ID)
 	dec := submit(did, emailA)
 	if dec.Decision != "replay" || !bytes.Contains(dec.Error, []byte("indeterminate")) {
 		t.Fatalf("replayed step must resolve indeterminate, got %s %s", dec.Decision, dec.Error)
@@ -1718,7 +1745,7 @@ func TestIndeterminateRetryIsDenied(t *testing.T) {
 	if err := k.EnqueueReDrive(ctx, exec.ID); err != nil {
 		t.Fatal(err)
 	}
-	did = dispatchOf(t, k, exec.ID)
+	did = leaseOf(t, k, exec.ID)
 	submit(did, emailA)
 	if dec := submit(did, emailA); dec.Reason != refusal {
 		t.Fatalf("replayed denial reason = %q, want %q", dec.Reason, refusal)
@@ -1748,7 +1775,7 @@ func TestDenyReasonMatchesOnReplay(t *testing.T) {
 	}
 
 	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`)}
-	req.DispatchID = dispatchOf(t, k, exec.ID)
+	req.Lease = leaseOf(t, k, exec.ID)
 	first, err := k.SubmitStep(ctx, exec.ID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -1794,10 +1821,10 @@ func rateLimitedKernel(t *testing.T, cfg domain.RateLimitConfig) (*kernel.Kernel
 func submitRead(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UUID) domain.StepDecision {
 	t.Helper()
 	dec, err := k.SubmitStep(ctx, execID, kernel.SubmitStepRequest{
-		Kind:       domain.StepKindTool,
-		Target:     "read",
-		Args:       json.RawMessage(`{"path":"/tmp"}`),
-		DispatchID: dispatchOf(t, k, execID),
+		Kind:   domain.StepKindTool,
+		Target: "read",
+		Args:   json.RawMessage(`{"path":"/tmp"}`),
+		Lease:  leaseOf(t, k, execID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1878,14 +1905,14 @@ func TestRateLimitParksOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := 0
+	live := 0
 	for _, d := range dispatches {
-		if d.Status == domain.DispatchPending {
-			pending++
+		if d.Status != domain.DispatchExhausted {
+			live++
 		}
 	}
-	if pending != 1 {
-		t.Fatalf("a refusal queues no dispatch, got %d pending", pending)
+	if live != 1 {
+		t.Fatalf("a refusal queues no dispatch, got %d live", live)
 	}
 }
 

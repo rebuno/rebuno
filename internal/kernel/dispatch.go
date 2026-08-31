@@ -3,6 +3,8 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +17,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, output json.RawMessage) error {
+func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output json.RawMessage) error {
+	if !lease.Valid() {
+		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
+	}
 	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
 	if err != nil {
 		return err
@@ -30,6 +35,9 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, output
 		return domain.ErrExecutionTerminal
 	}
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		if err := tx.RenewLease(ctx, execID, lease, time.Now().UTC()); err != nil {
+			return err
+		}
 		if _, err := tx.Append(ctx, execID, domain.EventExecutionCompleted, projector.ExecutionPayload(execID, domain.ExecutionCompleted, output, "")); err != nil {
 			return err
 		}
@@ -44,7 +52,14 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, output
 	return nil
 }
 
-func (k *Kernel) FailExecution(ctx context.Context, execID uuid.UUID, reason string) error {
+func (k *Kernel) FailExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error {
+	if !lease.Valid() {
+		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
+	}
+	return k.failExecution(ctx, execID, lease, reason)
+}
+
+func (k *Kernel) failExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error {
 	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
 	if err != nil {
 		return err
@@ -59,6 +74,9 @@ func (k *Kernel) FailExecution(ctx context.Context, execID uuid.UUID, reason str
 		return domain.ErrExecutionTerminal
 	}
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		if err := tx.RenewLease(ctx, execID, lease, time.Now().UTC()); err != nil {
+			return err
+		}
 		if _, err := tx.Append(ctx, execID, domain.EventExecutionFailed, projector.ExecutionPayload(execID, domain.ExecutionFailed, nil, reason)); err != nil {
 			return err
 		}
@@ -77,8 +95,11 @@ func (k *Kernel) EnqueueReDrive(ctx context.Context, execID uuid.UUID) error {
 	return k.enqueueDispatch(ctx, execID)
 }
 
-func (k *Kernel) Heartbeat(ctx context.Context, execID uuid.UUID) error {
-	return k.d.Queue.TouchDispatch(ctx, execID, time.Now().UTC())
+func (k *Kernel) Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.Lease) error {
+	if !lease.Valid() {
+		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
+	}
+	return k.d.Queue.RenewLease(ctx, execID, lease, time.Now().UTC())
 }
 
 const (
@@ -239,6 +260,7 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		attribute.Int("dispatch.attempt", d.Attempt),
 	)
 
+	lease := domain.Lease{DispatchID: d.ID, Attempt: d.Attempt}
 	exec, err := k.d.Executions.GetExecution(ctx, d.ExecutionID)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
@@ -248,18 +270,18 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchDiscarded, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchExhausted, d.Attempt)); err != nil {
 			return err
 		}
-		return k.d.Queue.Ack(ctx, d.ID, domain.DispatchExhausted, nil)
+		return ignoreSuperseded(k.d.Queue.Ack(ctx, d.ID, d.Attempt, domain.DispatchExhausted, nil))
 	}
 
 	if d.Attempt > d.MaxAttempts {
-		return k.FailExecution(ctx, d.ExecutionID, domain.ReasonDispatchExhausted)
+		return ignoreSuperseded(k.failExecution(ctx, d.ExecutionID, lease, domain.ReasonDispatchExhausted))
 	}
 	agent, err := k.d.Agents.GetAgent(ctx, exec.AgentID)
 	if err != nil {
 		return err
 	}
 	start := time.Now()
-	res := k.d.Dispatcher.Deliver(ctx, agent.WebhookURL, agent.Secret, d.ExecutionID, d.ID)
+	res := k.d.Dispatcher.Deliver(ctx, agent.WebhookURL, agent.Secret, d.ExecutionID, lease)
 	k.d.Observer.RecordDispatchLatency(time.Since(start))
 	if res.Outcome != dispatcher.OutcomeSuccess || res.Err != nil {
 		k.log.Info("dispatch attempt", "dispatch_id", d.ID, "outcome", res.Outcome, "status", res.StatusCode, "err", res.Err)
@@ -283,11 +305,18 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 			return err
 		}
 		if d.Attempt >= d.MaxAttempts {
-			return k.FailExecution(ctx, d.ExecutionID, domain.ReasonDispatchExhausted)
+			return ignoreSuperseded(k.failExecution(ctx, d.ExecutionID, lease, domain.ReasonDispatchExhausted))
 		}
 		next := time.Now().UTC().Add(dispatcher.BackoffDelay(k.cfg.DispatchBaseDelay, k.cfg.DispatchMaxDelay, d.Attempt))
-		return k.d.Queue.Ack(ctx, d.ID, domain.DispatchFailed, &next)
+		return ignoreSuperseded(k.d.Queue.Ack(ctx, d.ID, d.Attempt, domain.DispatchFailed, &next))
 	}
+}
+
+func ignoreSuperseded(err error) error {
+	if errors.Is(err, domain.ErrLeaseSuperseded) {
+		return nil
+	}
+	return err
 }
 
 func outcomeName(o dispatcher.Outcome) string {

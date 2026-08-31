@@ -11,6 +11,10 @@ details}` envelope.
 - **Agent routes** use HMAC. The agent sends `Rebuno-Agent-Id` and
   `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`, computed over the raw
   request body with the agent's registered secret.
+- **Agent routes that write** also send `Rebuno-Dispatch-Id` and
+  `Rebuno-Dispatch-Attempt`, copied from the webhook that delivered the run. A
+  call from an attempt the kernel has already re-delivered gets
+  `409 lease_superseded`.
 - A few routes (fetching execution input and steps) take either one: bearer for
   clients, HMAC for the agent.
 - `/v0/health`, `/v0/ready`, and `/metrics` are unauthenticated.
@@ -78,9 +82,10 @@ further dispatch.
 
 ## Agent API
 
-The kernel dispatches a webhook carrying `{execution_id, dispatch_id}`. The agent
-acks `200 OK`, then pulls what it needs and drives its effects. These routes are
-HMAC-verified, except the reads, which also take a bearer token.
+The kernel dispatches a webhook carrying `{execution_id, dispatch_id,
+dispatch_attempt}`. The agent acks `200 OK`, then pulls what it needs and drives
+its effects. These routes are HMAC-verified, except the reads, which also take a
+bearer token.
 
 ### Read execution input and steps
 
@@ -95,19 +100,19 @@ it is not there.
 
 ### Submit a step
 
-`POST /v0/executions/{id}/steps` · HMAC · header `Rebuno-Dispatch-Id: <id>`
+`POST /v0/executions/{id}/steps` · HMAC · dispatch headers
 
 ```json
 { "kind": "tool_call", "target": "web_search", "args": {...}, "idempotency": "safe_to_retry" }
 ```
 
-`kind` is `tool_call`, `llm_call`, or `local`. `Rebuno-Dispatch-Id` is required, and the
-kernel rejects the request if it is missing, unknown, or belongs to another
-execution. It is the `dispatch_id` from the webhook that delivered this attempt,
-and it scopes the kernel's occurrence counter. The kernel derives the step ID,
-runs the [replay short-circuit and policy](architecture.md), and returns a
-decision. The `step_id` that comes back is what addresses the step's `complete`
-and `fail` routes:
+`kind` is `tool_call`, `llm_call`, or `local`. The dispatch headers are
+required, and the kernel rejects the request if either is missing, or if they
+name a dispatch that is not this execution's or an attempt that no longer owns
+it. The dispatch scopes the kernel's occurrence counter. The kernel derives the
+step ID, runs the [replay short-circuit and policy](architecture.md), and
+returns a decision. The `step_id` that comes back is what addresses the step's
+`complete` and `fail` routes:
 
 ```json
 { "decision": "proceed", "step_id": "9a3f…" }

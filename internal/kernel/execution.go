@@ -323,7 +323,7 @@ func releaseDispatchesLocked(ctx context.Context, tx store.TxStore, execID uuid.
 		if d.Status == domain.DispatchExhausted {
 			continue
 		}
-		if err := tx.Ack(ctx, d.ID, domain.DispatchExhausted, nil); err != nil {
+		if err := tx.Retire(ctx, d.ID); err != nil {
 			return err
 		}
 	}

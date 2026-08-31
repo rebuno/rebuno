@@ -21,26 +21,26 @@ type SubmitStepRequest struct {
 	Target      string          `json:"target"`
 	Args        json.RawMessage `json:"args"`
 	Idempotency string          `json:"idempotency,omitempty"`
-	DispatchID  uuid.UUID       `json:"-"`
+	Lease       domain.Lease    `json:"-"`
 }
 
 type CompleteStepRequest struct {
 	Result json.RawMessage `json:"result"`
+	Lease  domain.Lease    `json:"-"`
 }
 
 type FailStepRequest struct {
 	Error json.RawMessage `json:"error"`
+	Lease domain.Lease    `json:"-"`
 }
 
 func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitStepRequest) (domain.StepDecision, error) {
 	if req.Idempotency == "" {
 		req.Idempotency = "safe_to_retry"
 	}
-	if req.DispatchID == uuid.Nil {
-		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch_id", domain.ErrValidation)
+	if !req.Lease.Valid() {
+		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
 	}
-
-	_ = k.d.Queue.TouchDispatch(ctx, execID, time.Now().UTC())
 
 	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
 	if err != nil {
@@ -56,18 +56,10 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 		return domain.StepDecision{Decision: "execution_terminal"}, nil
 	}
 
-	// Fail closed on a dispatch that isn't this execution's: it would silently
-	// start a fresh occurrence namespace, and every replayed effect would execute
-	// for real a second time.
-	dispatch, err := k.d.Queue.GetDispatch(ctx, req.DispatchID)
-	if err != nil {
-		if err == domain.ErrNotFound {
-			return domain.StepDecision{}, fmt.Errorf("%w: unknown dispatch_id", domain.ErrValidation)
-		}
+	// Renewing is also the fence: it fails unless this attempt still owns the
+	// dispatch for this execution.
+	if err := k.d.Queue.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
 		return domain.StepDecision{}, err
-	}
-	if dispatch.ExecutionID != execID {
-		return domain.StepDecision{}, fmt.Errorf("%w: dispatch_id belongs to another execution", domain.ErrValidation)
 	}
 
 	argsHash, err := identity.ComputeArgsHash(req.Args)
@@ -75,7 +67,7 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 		return domain.StepDecision{}, fmt.Errorf("%w: invalid args: %v", domain.ErrValidation, err)
 	}
 
-	occurrence, err := k.d.Steps.DispatchOccurrence(ctx, req.DispatchID, req.Kind, req.Target, argsHash)
+	occurrence, err := k.d.Steps.DispatchOccurrence(ctx, req.Lease.DispatchID, req.Kind, req.Target, argsHash)
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
@@ -87,7 +79,7 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 	}
 
 	if recorded {
-		if err := k.d.Steps.AdvanceDispatchOccurrence(ctx, req.DispatchID, req.Kind, req.Target, argsHash, occurrence); err != nil {
+		if err := k.d.Steps.AdvanceDispatchOccurrence(ctx, execID, req.Lease, req.Kind, req.Target, argsHash, occurrence); err != nil {
 			return domain.StepDecision{}, err
 		}
 		dec.StepID = stepID
@@ -102,7 +94,7 @@ func (k *Kernel) decideStep(
 	existing, err := k.d.Steps.GetStep(ctx, stepID)
 	if err == nil {
 		k.d.Observer.RecordReplay(true)
-		dec, err := k.handleExistingStep(ctx, existing, req.Idempotency)
+		dec, err := k.handleExistingStep(ctx, existing, req.Lease, req.Idempotency)
 		return dec, err == nil, err
 	}
 	if err != domain.ErrNotFound {
@@ -175,7 +167,7 @@ func stepErrorReason(errPayload json.RawMessage) string {
 	return recorded.Reason
 }
 
-func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idempotency string) (domain.StepDecision, error) {
+func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, lease domain.Lease, idempotency string) (domain.StepDecision, error) {
 	switch step.Status {
 	case domain.StepSucceeded:
 		return domain.StepDecision{Decision: "replay", Result: step.Result}, nil
@@ -202,7 +194,7 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 		evts := []store.EventRecord{
 			{Type: domain.EventStepExecuting, Payload: projector.StepPayload(step.StepID, step.Kind, step.Target, "")},
 		}
-		if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
+		if err := k.writeStepLive(ctx, lease, step, evts); err != nil {
 			return domain.StepDecision{}, err
 		}
 		return domain.StepDecision{Decision: "proceed"}, nil
@@ -212,12 +204,12 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 				"reason":  domain.ReasonIndeterminate,
 				"message": "outcome unknown: this may already have taken effect. Check the state before continuing.",
 			})
-			if err := k.failStepInternal(ctx, step, errPayload); err != nil {
+			if err := k.failStepInternal(ctx, lease, step, errPayload); err != nil {
 				return domain.StepDecision{}, err
 			}
 			return domain.StepDecision{Decision: "replay", Error: errPayload}, nil
 		}
-		return domain.StepDecision{Decision: "proceed"}, nil
+		return k.proceedUnderLiveLease(ctx, step.ExecutionID, lease)
 	case domain.StepDenied:
 		// A resumed handler re-proposing a refused effect is told why it was
 		// refused, so it can distinguish a policy rule from a human decision.
@@ -227,8 +219,15 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, idemp
 		}
 		return domain.StepDecision{Decision: "denied", Reason: reason}, nil
 	default:
-		return domain.StepDecision{Decision: "proceed"}, nil
+		return k.proceedUnderLiveLease(ctx, step.ExecutionID, lease)
 	}
+}
+
+func (k *Kernel) proceedUnderLiveLease(ctx context.Context, execID uuid.UUID, lease domain.Lease) (domain.StepDecision, error) {
+	if err := k.d.Queue.RenewLease(ctx, execID, lease, time.Now().UTC()); err != nil {
+		return domain.StepDecision{}, err
+	}
+	return domain.StepDecision{Decision: "proceed"}, nil
 }
 
 // refuseRateLimited appends the refusal to the event log and returns the
@@ -238,8 +237,14 @@ func (k *Kernel) refuseRateLimited(
 	req SubmitStepRequest, ruleID, reason string,
 ) (domain.StepDecision, bool, error) {
 	errPayload, _ := json.Marshal(map[string]string{"reason": reason, "rule_id": ruleID})
-	if _, err := k.d.Events.Append(ctx, execID, domain.EventStepRateLimited,
-		projector.StepDeniedPayload(stepID, req.Kind, req.Target, ruleID, errPayload)); err != nil {
+	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		if err := tx.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
+			return err
+		}
+		_, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
+			projector.StepDeniedPayload(stepID, req.Kind, req.Target, ruleID, errPayload))
+		return err
+	}); err != nil {
 		return domain.StepDecision{}, false, err
 	}
 	return domain.StepDecision{Decision: "rate_limited", Reason: reason}, false, nil
@@ -282,6 +287,9 @@ func (k *Kernel) parkRateLimited(
 	errPayload, _ := json.Marshal(map[string]string{"reason": domain.ReasonRateLimited, "rule_id": ruleID})
 	at := time.Now().UTC().Add(wait)
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		if err := tx.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
+			return err
+		}
 		if _, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
 			projector.StepDeniedPayload(stepID, req.Kind, req.Target, ruleID, errPayload)); err != nil {
 			return err
@@ -362,7 +370,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 			store.EventRecord{Type: domain.EventStepAllowed, Payload: projector.StepPayload(stepID, req.Kind, req.Target, pol.RuleID)},
 			store.EventRecord{Type: domain.EventStepExecuting, Payload: projector.StepPayload(stepID, req.Kind, req.Target, "")},
 		)
-		if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
+		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
 			return domain.StepDecision{}, false, err
 		}
 		return domain.StepDecision{Decision: "proceed"}, true, nil
@@ -379,7 +387,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		evts = append(evts,
 			store.EventRecord{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(stepID, req.Kind, req.Target, pol.RuleID, errPayload)},
 		)
-		if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
+		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
 			return domain.StepDecision{}, false, err
 		}
 		return domain.StepDecision{Decision: "denied", Reason: reason}, true, nil
@@ -411,6 +419,9 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		evts = append(evts, store.EventRecord{Type: domain.EventExecutionBlocked, Payload: blockPayload})
 
 		if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			if err := tx.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
+				return err
+			}
 			if _, err := tx.AppendBatch(ctx, execID, evts); err != nil {
 				return err
 			}
@@ -434,8 +445,23 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 	return domain.StepDecision{}, false, fmt.Errorf("unknown policy decision: %s", pol.Decision)
 }
 
-func (k *Kernel) writeStepAndEvents(ctx context.Context, step domain.Step, evts []store.EventRecord) error {
+func (k *Kernel) writeStepLive(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord) error {
+	return k.writeStep(ctx, step, evts, func(tx store.TxStore) error {
+		return tx.RenewLease(ctx, step.ExecutionID, lease, time.Now().UTC())
+	})
+}
+
+func (k *Kernel) writeStepRecorded(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord) error {
+	return k.writeStep(ctx, step, evts, func(tx store.TxStore) error {
+		return tx.CheckLease(ctx, step.ExecutionID, lease)
+	})
+}
+
+func (k *Kernel) writeStep(ctx context.Context, step domain.Step, evts []store.EventRecord, fence func(store.TxStore) error) error {
 	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		if err := fence(tx); err != nil {
+			return err
+		}
 		if _, err := tx.AppendBatch(ctx, step.ExecutionID, evts); err != nil {
 			return err
 		}
@@ -444,6 +470,9 @@ func (k *Kernel) writeStepAndEvents(ctx context.Context, step domain.Step, evts 
 }
 
 func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteStepRequest) (domain.StepDecision, error) {
+	if !req.Lease.Valid() {
+		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
+	}
 	step, err := k.d.Steps.GetStep(ctx, stepID)
 	if err != nil {
 		return domain.StepDecision{}, err
@@ -488,13 +517,16 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 	evts := []store.EventRecord{
 		{Type: domain.EventStepSucceeded, Payload: projector.StepResultPayload(stepID, step.Kind, step.Target, tokens)},
 	}
-	if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
+	if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
 		return domain.StepDecision{}, err
 	}
 	return domain.StepDecision{Decision: "recorded"}, nil
 }
 
 func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepRequest) (domain.StepDecision, error) {
+	if !req.Lease.Valid() {
+		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
+	}
 	step, err := k.d.Steps.GetStep(ctx, stepID)
 	if err != nil {
 		return domain.StepDecision{}, err
@@ -528,13 +560,13 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 	evts := []store.EventRecord{
 		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(stepID, step.Kind, step.Target, req.Error)},
 	}
-	if err := k.writeStepAndEvents(ctx, step, evts); err != nil {
+	if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
 		return domain.StepDecision{}, err
 	}
 	return domain.StepDecision{Decision: "recorded"}, nil
 }
 
-func (k *Kernel) failStepInternal(ctx context.Context, step domain.Step, errPayload []byte) error {
+func (k *Kernel) failStepInternal(ctx context.Context, lease domain.Lease, step domain.Step, errPayload []byte) error {
 	now := time.Now().UTC()
 	step.Status = domain.StepFailed
 	step.Error = errPayload
@@ -542,7 +574,7 @@ func (k *Kernel) failStepInternal(ctx context.Context, step domain.Step, errPayl
 	evts := []store.EventRecord{
 		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(step.StepID, step.Kind, step.Target, errPayload)},
 	}
-	return k.writeStepAndEvents(ctx, step, evts)
+	return k.writeStepLive(ctx, lease, step, evts)
 }
 
 func (k *Kernel) GetStep(ctx context.Context, stepID string) (domain.Step, error) {

@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/api"
@@ -72,7 +74,7 @@ func TestAgentSubmitAndCompleteViaHTTP(t *testing.T) {
 	submit := map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(args)}
 	body, _ := json.Marshal(submit)
 	req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
-	req.Header.Set("Rebuno-Dispatch-Id", dispatchIDOf(t, k, exec.ID).String())
+	setLeaseHeaders(t, k, req, exec.ID)
 	signAgentRequest(req, body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -88,6 +90,7 @@ func TestAgentSubmitAndCompleteViaHTTP(t *testing.T) {
 	comp := map[string]any{"result": map[string]bool{"ok": true}}
 	body, _ = json.Marshal(comp)
 	req = httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps/"+stepID+"/complete", bytes.NewReader(body))
+	setLeaseHeaders(t, k, req, exec.ID)
 	signAgentRequest(req, body)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -118,7 +121,7 @@ func TestListStepsTerminalFilter(t *testing.T) {
 	doneArgs := json.RawMessage(`{"path":"/a"}`)
 	doneID := computeStepID(t, exec.ID, domain.StepKindTool, "read", doneArgs, 0)
 	submitStepHTTP(t, mux, k, exec.ID, "read", doneArgs)
-	completeStepHTTP(t, mux, exec.ID, doneID)
+	completeStepHTTP(t, mux, k, exec.ID, doneID)
 
 	// Step 2: submit only -> non-terminal (executing).
 	openArgs := json.RawMessage(`{"path":"/b"}`)
@@ -176,22 +179,35 @@ func TestStepsReachableViaBearerAuth(t *testing.T) {
 	}
 }
 
-// dispatchIDOf returns the execution's live dispatch id, which every submit must
-// carry: it scopes the kernel's occurrence counting.
-func dispatchIDOf(t *testing.T, k *kernel.Kernel, execID uuid.UUID) uuid.UUID {
+// setLeaseHeaders carries the dispatch lease every agent mutation must present.
+// It claims the execution's dispatch first, so the lease names an attempt that
+// was delivered, as a real agent's would.
+func setLeaseHeaders(t *testing.T, k *kernel.Kernel, req *http.Request, execID uuid.UUID) {
 	t.Helper()
-	ds, err := k.Deps().Queue.ListDispatchesByExecution(context.Background(), execID)
+	ctx := context.Background()
+	q := k.Deps().Queue
+	ds, err := q.ListDispatchesByExecution(ctx, execID)
 	if err != nil || len(ds) == 0 {
 		t.Fatalf("no dispatch for execution: %v", err)
 	}
-	return ds[len(ds)-1].ID
+	if ds[len(ds)-1].Status != domain.DispatchInFlight {
+		if _, err := q.Claim(ctx, "test", 1000, time.Now().UTC()); err != nil {
+			t.Fatalf("claim dispatches: %v", err)
+		}
+		if ds, err = q.ListDispatchesByExecution(ctx, execID); err != nil {
+			t.Fatalf("list dispatches: %v", err)
+		}
+	}
+	d := ds[len(ds)-1]
+	req.Header.Set("Rebuno-Dispatch-Id", d.ID.String())
+	req.Header.Set("Rebuno-Dispatch-Attempt", strconv.Itoa(d.Attempt))
 }
 
 func submitStepHTTP(t *testing.T, mux http.Handler, k *kernel.Kernel, execID uuid.UUID, target string, args json.RawMessage) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"kind": "tool_call", "target": target, "args": args})
 	req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+execID.String()+"/steps", bytes.NewReader(body))
-	req.Header.Set("Rebuno-Dispatch-Id", dispatchIDOf(t, k, execID).String())
+	setLeaseHeaders(t, k, req, execID)
 	signAgentRequest(req, body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -200,10 +216,11 @@ func submitStepHTTP(t *testing.T, mux http.Handler, k *kernel.Kernel, execID uui
 	}
 }
 
-func completeStepHTTP(t *testing.T, mux http.Handler, execID uuid.UUID, stepID string) {
+func completeStepHTTP(t *testing.T, mux http.Handler, k *kernel.Kernel, execID uuid.UUID, stepID string) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"result": map[string]bool{"ok": true}})
 	req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+execID.String()+"/steps/"+stepID+"/complete", bytes.NewReader(body))
+	setLeaseHeaders(t, k, req, execID)
 	signAgentRequest(req, body)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -297,7 +314,7 @@ default_action: deny
 	submit := map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(args)}
 	body, _ = json.Marshal(submit)
 	req = httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
-	req.Header.Set("Rebuno-Dispatch-Id", dispatchIDOf(t, k, exec.ID).String())
+	setLeaseHeaders(t, k, req, exec.ID)
 	signAgentRequest(req, body)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -315,7 +332,7 @@ default_action: deny
 	submit = map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(args)}
 	body, _ = json.Marshal(submit)
 	req = httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
-	req.Header.Set("Rebuno-Dispatch-Id", dispatchIDOf(t, k, exec.ID).String())
+	setLeaseHeaders(t, k, req, exec.ID)
 	signAgentRequest(req, body)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -335,4 +352,50 @@ func computeStepID(t *testing.T, execID uuid.UUID, kind domain.StepKind, target 
 		t.Fatal(err)
 	}
 	return identity.ComputeStepID(execID, kind, target, argsHash, occ)
+}
+
+// A superseded attempt gets a 409 naming the lease, not a 400 and not a silent
+// write alongside the attempt that replaced it.
+func TestSupersededLeaseIsRejectedWith409(t *testing.T) {
+	mux, k, ctx := setupRouter(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	body, _ := json.Marshal(map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(`{"path":"/tmp"}`)})
+	req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
+	setLeaseHeaders(t, k, req, exec.ID)
+	stalledAttempt := req.Header.Get("Rebuno-Dispatch-Attempt")
+
+	// The lease stalls, is reclaimed, and the dispatch is delivered again.
+	q := k.Deps().Queue
+	later := time.Now().UTC().Add(time.Hour)
+	if _, err := q.ReclaimStalled(ctx, later, time.Minute, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Claim(ctx, "replica-2", 10, later); err != nil {
+		t.Fatal(err)
+	}
+
+	signAgentRequest(req, body)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for the superseded attempt %s, got %d: %s", stalledAttempt, rr.Code, rr.Body.String())
+	}
+	var apiErr domain.APIError
+	if err := json.Unmarshal(rr.Body.Bytes(), &apiErr); err != nil {
+		t.Fatal(err)
+	}
+	if apiErr.Code != "lease_superseded" {
+		t.Fatalf("expected lease_superseded, got %q", apiErr.Code)
+	}
+
+	// The attempt that replaced it is served normally.
+	req = httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
+	setLeaseHeaders(t, k, req, exec.ID)
+	signAgentRequest(req, body)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("live attempt must be served, got %d: %s", rr.Code, rr.Body.String())
+	}
 }

@@ -30,7 +30,7 @@ func TestApprovalExpiry(t *testing.T) {
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
 	args := json.RawMessage(`{"path":"/tmp"}`)
-	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if dec.Decision != "blocked" {
 		t.Fatalf("expected blocked, got %s", dec.Decision)
 	}
@@ -44,7 +44,7 @@ func TestApprovalExpiry(t *testing.T) {
 		t.Fatalf("expected running after expiry, got %s %s", exec.Status, exec.FailureReason)
 	}
 	// The step carries the refusal; re-proposing it tells the handler why.
-	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, DispatchID: dispatchOf(t, k, exec.ID)})
+	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}

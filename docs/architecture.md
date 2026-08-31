@@ -121,19 +121,26 @@ webhook:
 ```http
 POST <webhook_url>
 Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>
-{ "execution_id": "…", "dispatch_id": "…" }
+{ "execution_id": "…", "dispatch_id": "…", "dispatch_attempt": 1 }
 ```
 
 The payload carries no history. The agent fetches what it needs from the API.
 Delivery is at-least-once, so the agent keys its handler on `(execution_id,
-dispatch_id)` and runs each dispatch once. Failed deliveries retry with
-exponential backoff. Once the attempts run out, the execution fails with
-`dispatch_exhausted`.
+dispatch_id, dispatch_attempt)` and runs each delivery once. Failed deliveries
+retry with exponential backoff. Once the attempts run out, the execution fails
+with `dispatch_exhausted`.
 
 A replica claims no more rows than it has idle delivery workers, so it never
 holds work another replica could deliver sooner. A claim leases the row for the
 length of the agent's run, renewed by heartbeat. A lease from a crashed replica
 expires, and any dispatch loop returns it to the queue.
+
+A reclaim cannot tell a crashed agent from a slow one, so the redelivery can run
+alongside an agent that is only stalled. Each claim takes the next
+`dispatch_attempt`, and every write an agent makes carries the attempt it was
+delivered under, checked in the same transaction as the write. Work from an
+attempt the kernel has replaced, or has returned to the queue, is refused with
+`409 lease_superseded`.
 
 ## Policy governance
 

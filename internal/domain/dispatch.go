@@ -20,6 +20,15 @@ type Dispatch struct {
 	UpdatedAt     time.Time
 }
 
+type Lease struct {
+	DispatchID uuid.UUID
+	Attempt    int
+}
+
+func (l Lease) Valid() bool {
+	return l.DispatchID != uuid.Nil && l.Attempt > 0
+}
+
 type DispatchStatus string
 
 const (

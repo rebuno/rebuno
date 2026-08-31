@@ -83,10 +83,10 @@ func (s *Store) dispatchOccurrenceLocked(dispatchID uuid.UUID, kind domain.StepK
 	return consumed + 1, nil
 }
 
-func (s *Store) AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
+func (s *Store) AdvanceDispatchOccurrence(ctx context.Context, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.advanceDispatchOccurrenceLocked(dispatchID, kind, target, argsHash, consumed)
+	return s.advanceDispatchOccurrenceLocked(execID, lease, kind, target, argsHash, consumed)
 }
 
 func (s *Store) clearCountersLocked(dispatchID uuid.UUID) {
@@ -97,8 +97,11 @@ func (s *Store) clearCountersLocked(dispatchID uuid.UUID) {
 	}
 }
 
-func (s *Store) advanceDispatchOccurrenceLocked(dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
-	key := counterKey{dispatchID, kind, target, argsHash}
+func (s *Store) advanceDispatchOccurrenceLocked(execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
+	if err := s.checkLeaseLocked(execID, lease); err != nil {
+		return err
+	}
+	key := counterKey{lease.DispatchID, kind, target, argsHash}
 	if prev, ok := s.counters[key]; ok && prev > consumed {
 		return nil // keep monotonic, mirroring the GREATEST upsert in postgres
 	}
@@ -152,8 +155,8 @@ func (tx *txStore) DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID,
 	return tx.dispatchOccurrenceLocked(dispatchID, kind, target, argsHash)
 }
 
-func (tx *txStore) AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
-	return tx.advanceDispatchOccurrenceLocked(dispatchID, kind, target, argsHash, consumed)
+func (tx *txStore) AdvanceDispatchOccurrence(ctx context.Context, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
+	return tx.advanceDispatchOccurrenceLocked(execID, lease, kind, target, argsHash, consumed)
 }
 
 func (tx *txStore) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {

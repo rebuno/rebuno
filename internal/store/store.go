@@ -21,7 +21,7 @@ type StepStore interface {
 	Upsert(ctx context.Context, step domain.Step) error
 	GetStep(ctx context.Context, stepID string) (domain.Step, error)
 	DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error)
-	AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error
+	AdvanceDispatchOccurrence(ctx context.Context, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error
 	ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error)
 	ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error)
 }
@@ -54,12 +54,12 @@ type ApprovalStore interface {
 type JobQueue interface {
 	Enqueue(ctx context.Context, d domain.Dispatch) error
 	Claim(ctx context.Context, replica string, batch int, now time.Time) ([]domain.Dispatch, error)
-	Ack(ctx context.Context, id uuid.UUID, status domain.DispatchStatus, nextAttemptAt *time.Time) error
+	Ack(ctx context.Context, id uuid.UUID, attempt int, status domain.DispatchStatus, nextAttemptAt *time.Time) error
+	Retire(ctx context.Context, id uuid.UUID) error
 	GetDispatch(ctx context.Context, id uuid.UUID) (domain.Dispatch, error)
 	ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error)
-	TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error
-	// ReclaimStalled resets in_flight dispatches whose lease has expired back to
-	// pending so another replica can claim them.
+	RenewLease(ctx context.Context, execID uuid.UUID, lease domain.Lease, now time.Time) error
+	CheckLease(ctx context.Context, execID uuid.UUID, lease domain.Lease) error
 	ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error)
 }
 

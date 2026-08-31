@@ -108,24 +108,33 @@ func dispatchOccurrence(ctx context.Context, q Querier, dispatchID uuid.UUID, ki
 	return consumed, nil
 }
 
-func (s *Store) AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
-	return advanceDispatchOccurrence(ctx, s.pool, dispatchID, kind, target, argsHash, consumed)
+func (s *Store) AdvanceDispatchOccurrence(ctx context.Context, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
+	return advanceDispatchOccurrence(ctx, s.pool, execID, lease, kind, target, argsHash, consumed)
 }
 
-func (q querier) AdvanceDispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
-	return advanceDispatchOccurrence(ctx, q.q, dispatchID, kind, target, argsHash, consumed)
+func (q querier) AdvanceDispatchOccurrence(ctx context.Context, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
+	return advanceDispatchOccurrence(ctx, q.q, execID, lease, kind, target, argsHash, consumed)
 }
 
-func advanceDispatchOccurrence(ctx context.Context, q Querier, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string, consumed int) error {
-	// GREATEST keeps the counter monotonic if a retry replays an older occurrence.
-	_, err := q.Exec(ctx, `
+func advanceDispatchOccurrence(ctx context.Context, q Querier, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
+	// Selecting the dispatch row makes the fence part of the write, and FOR
+	// UPDATE waits for a claim landing mid-statement rather than reading the row
+	// stale. GREATEST keeps the counter monotonic if a retry replays an older
+	// occurrence.
+	res, err := q.Exec(ctx, `
 		INSERT INTO dispatch_step_counters (dispatch_id, kind, target, args_hash, consumed)
-		VALUES ($1, $2, $3, $4, $5)
+		SELECT d.id, $2::text, $3::text, $4::text, $5::int
+		FROM dispatches d
+		WHERE d.id = $1::uuid AND d.execution_id = $6::uuid AND d.attempt = $7::int
+		FOR UPDATE
 		ON CONFLICT (dispatch_id, kind, target, args_hash)
 		DO UPDATE SET consumed = GREATEST(dispatch_step_counters.consumed, EXCLUDED.consumed)
-	`, dispatchID.String(), string(kind), target, argsHash, consumed)
+	`, lease.DispatchID.String(), string(kind), target, argsHash, consumed, execID.String(), lease.Attempt)
 	if err != nil {
 		return fmt.Errorf("advance dispatch occurrence: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return domain.ErrLeaseSuperseded
 	}
 	return nil
 }

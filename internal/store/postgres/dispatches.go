@@ -90,15 +90,15 @@ func claimDispatches(ctx context.Context, q Querier, replica string, batch int, 
 	return scanDispatches(rows)
 }
 
-func (s *Store) Ack(ctx context.Context, id uuid.UUID, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
-	return ackDispatch(ctx, s.pool, id, status, nextAttemptAt)
+func (s *Store) Ack(ctx context.Context, id uuid.UUID, attempt int, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
+	return ackDispatch(ctx, s.pool, id, attempt, status, nextAttemptAt)
 }
 
-func (q querier) Ack(ctx context.Context, id uuid.UUID, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
-	return ackDispatch(ctx, q.q, id, status, nextAttemptAt)
+func (q querier) Ack(ctx context.Context, id uuid.UUID, attempt int, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
+	return ackDispatch(ctx, q.q, id, attempt, status, nextAttemptAt)
 }
 
-func ackDispatch(ctx context.Context, q Querier, id uuid.UUID, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
+func ackDispatch(ctx context.Context, q Querier, id uuid.UUID, attempt int, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
 	now := time.Now().UTC()
 	res, err := q.Exec(ctx, `
 		UPDATE dispatches
@@ -107,10 +107,37 @@ func ackDispatch(ctx context.Context, q Querier, id uuid.UUID, status domain.Dis
 		    locked_at = NULL,
 		    next_attempt_at = COALESCE($3, next_attempt_at),
 		    updated_at = $4
-		WHERE id = $1
-	`, id.String(), string(status), timeArg(nextAttemptAt), now)
+		WHERE id = $1 AND attempt = $5 AND status = 'in_flight'
+	`, id.String(), string(status), timeArg(nextAttemptAt), now, attempt)
 	if err != nil {
 		return fmt.Errorf("ack dispatch: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return domain.ErrLeaseSuperseded
+	}
+	return nil
+}
+
+func (s *Store) Retire(ctx context.Context, id uuid.UUID) error {
+	return retireDispatch(ctx, s.pool, id)
+}
+
+func (q querier) Retire(ctx context.Context, id uuid.UUID) error {
+	return retireDispatch(ctx, q.q, id)
+}
+
+func retireDispatch(ctx context.Context, q Querier, id uuid.UUID) error {
+	now := time.Now().UTC()
+	res, err := q.Exec(ctx, `
+		UPDATE dispatches
+		SET status = 'exhausted',
+		    locked_by = NULL,
+		    locked_at = NULL,
+		    updated_at = $2
+		WHERE id = $1
+	`, id.String(), now)
+	if err != nil {
+		return fmt.Errorf("retire dispatch: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		return domain.ErrNotFound
@@ -166,24 +193,49 @@ func listDispatchesByExecution(ctx context.Context, q Querier, execID uuid.UUID)
 	return scanDispatches(rows)
 }
 
-func (s *Store) TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error {
-	return touchDispatch(ctx, s.pool, execID, now)
+func (s *Store) RenewLease(ctx context.Context, execID uuid.UUID, lease domain.Lease, now time.Time) error {
+	return renewLease(ctx, s.pool, execID, lease, now)
 }
 
-func (q querier) TouchDispatch(ctx context.Context, execID uuid.UUID, now time.Time) error {
-	return touchDispatch(ctx, q.q, execID, now)
+func (q querier) RenewLease(ctx context.Context, execID uuid.UUID, lease domain.Lease, now time.Time) error {
+	return renewLease(ctx, q.q, execID, lease, now)
 }
 
-func touchDispatch(ctx context.Context, q Querier, execID uuid.UUID, now time.Time) error {
-	// No RowsAffected check: zero rows just means no live dispatch to renew
-	// (raced an ack/reclaim), which is a harmless no-op.
-	_, err := q.Exec(ctx, `
+func renewLease(ctx context.Context, q Querier, execID uuid.UUID, lease domain.Lease, now time.Time) error {
+	res, err := q.Exec(ctx, `
 		UPDATE dispatches
-		SET locked_at = $2, updated_at = $2
-		WHERE execution_id = $1 AND status = 'in_flight'
-	`, execID.String(), now)
+		SET locked_at = $4, updated_at = $4
+		WHERE id = $1 AND execution_id = $2 AND attempt = $3 AND status = 'in_flight'
+	`, lease.DispatchID.String(), execID.String(), lease.Attempt, now)
 	if err != nil {
-		return fmt.Errorf("touch dispatch: %w", err)
+		return fmt.Errorf("renew lease: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return domain.ErrLeaseSuperseded
+	}
+	return nil
+}
+
+func (s *Store) CheckLease(ctx context.Context, execID uuid.UUID, lease domain.Lease) error {
+	return checkLease(ctx, s.pool, execID, lease)
+}
+
+func (q querier) CheckLease(ctx context.Context, execID uuid.UUID, lease domain.Lease) error {
+	return checkLease(ctx, q.q, execID, lease)
+}
+
+func checkLease(ctx context.Context, q Querier, execID uuid.UUID, lease domain.Lease) error {
+	var ok bool
+	err := q.QueryRow(ctx, `
+		SELECT true FROM dispatches
+		WHERE id = $1 AND execution_id = $2 AND attempt = $3
+		FOR UPDATE
+	`, lease.DispatchID.String(), execID.String(), lease.Attempt).Scan(&ok)
+	if err == pgx.ErrNoRows {
+		return domain.ErrLeaseSuperseded
+	}
+	if err != nil {
+		return fmt.Errorf("check lease: %w", err)
 	}
 	return nil
 }
