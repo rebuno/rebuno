@@ -24,7 +24,8 @@ RebunoError
 │  ├─ UnauthorizedError    401  authentication failed
 │  ├─ ForbiddenError       403  the caller is not permitted
 │  ├─ NotFoundError        404  resource not found
-│  └─ PolicyError          403  denied by policy (carries .rule_id)
+│  ├─ PolicyError          403  denied by policy (carries .rule_id)
+│  └─ LeaseSuperseded      409  internal: a newer attempt owns this dispatch
 ├─ ToolError               a tool's effect body failed (carries .tool_id, .step_id)
 ├─ RateLimited             a step was rejected by a policy rate limit
 ├─ Blocked                 internal: a step is awaiting approval
@@ -49,7 +50,7 @@ when it reaches the handler boundary.
 
 A step was rejected because a policy rate limit was exceeded. Carries `.reason`.
 
-### `Blocked` and `Terminated`
+### `Blocked`, `Terminated`, and `LeaseSuperseded`
 
 You normally won't see these. They are control-flow signals the SDK raises to
 unwind a dispatch cleanly.
@@ -59,16 +60,19 @@ unwind a dispatch cleanly.
   kernel re-dispatches once the approval is resolved.
 - `Terminated` means the execution went terminal partway through the dispatch,
   usually a cancel.
+- `LeaseSuperseded` means a newer delivery attempt owns the dispatch. The kernel
+  refuses every mutation from the attempt this handler was sent under, so it
+  stops where it stands and leaves the execution to its replacement.
 
-`Agent` catches both. Don't catch them yourself without a reason, and re-raise
-if you do. See [Dispatch and resume](agents.md#dispatch-and-resume) for the
-backstops that cover a handler which swallows one.
+`Agent` catches all three. Don't catch them yourself without a reason, and
+re-raise if you do. See [Dispatch and resume](agents.md#dispatch-and-resume)
+for the backstops that cover a handler which swallows one.
 
 ## Helpers
 
 - `raise_for_refusal(exc)` re-raises a Rebuno refusal a provider SDK wrapped in
-  its own error type. You get back `Blocked`, `PolicyError`, `RateLimited`, or
-  `Terminated`. Any other exception is left alone. See
+  its own error type. You get back `Blocked`, `PolicyError`, `RateLimited`,
+  `Terminated`, or `LeaseSuperseded`. Any other exception is left alone. See
   [LLM calls](llm-calls.md#refused-calls).
 - `failure_reason(exc)` is the text the agent records in an execution's
   `failure_reason`. Everything before the first colon is a stable token, either
@@ -79,5 +83,5 @@ backstops that cover a handler which swallows one.
 
 `RebunoError`, `APIError`, `ValidationError`, `UnauthorizedError`,
 `ForbiddenError`, `NotFoundError`, `PolicyError`, `ToolError`, `RateLimited`,
-`Blocked`, `Terminated`, `NetworkError`, `raise_for_refusal`, and
-`failure_reason` are all importable from `rebuno`.
+`Blocked`, `Terminated`, `LeaseSuperseded`, `NetworkError`, `raise_for_refusal`,
+and `failure_reason` are all importable from `rebuno`.

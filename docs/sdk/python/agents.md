@@ -65,16 +65,18 @@ does the equivalent cleanup itself.
 
 ## Dispatch and resume
 
-Each webhook POST carries an `execution_id` and a `dispatch_id`. The agent:
+Each webhook POST carries an `execution_id`, a `dispatch_id`, and a
+`dispatch_attempt`. The agent:
 
 1. Verifies the `Rebuno-Signature` header (see [Signing](internals.md#signing)).
-   A bad or missing signature gets a `401`, and a body missing either id gets a
-   `400`.
+   A bad or missing signature gets a `401`, and a body missing any of the three
+   gets a `400`.
 2. Acknowledges immediately. The handler runs in a background task and the
    webhook returns `200` right away, so delivery isn't held open for the whole
    execution.
-3. Cancels any handler still running for that execution, so a re-delivery
-   doesn't leave two copies racing.
+3. Cancels the handler still running for that execution when the webhook
+   supersedes it, so a re-delivery doesn't leave two copies racing. A repeat of
+   the attempt already running, or of one the kernel has moved past, is ignored.
 4. Skips terminal executions. Nothing to do if it is already `completed`,
    `failed`, or `cancelled`.
 5. Runs. It fetches the execution's input, binds it, and calls your handler under
