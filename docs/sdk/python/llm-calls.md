@@ -1,7 +1,6 @@
 # LLM calls
 
-LLM calls are the most expensive and least deterministic thing an agent does, so
-Rebuno records them too — as `llm_call` steps — without you rewriting how you call
+Rebuno records LLM calls as `llm_call` steps without you rewriting how you call
 the model. `rebuno.http_client()` returns an `httpx.AsyncClient` you hand to your
 provider's async client:
 
@@ -12,43 +11,61 @@ import rebuno
 llm = AsyncOpenAI(http_client=rebuno.http_client())
 ```
 
-Any provider SDK built on `httpx` and accepting a custom client works the same
-way (e.g. Anthropic's `AsyncAnthropic(http_client=...)`).
+Any provider SDK built on `httpx` that accepts a custom client works the same
+way, such as Anthropic's `AsyncAnthropic(http_client=...)`.
 
 ## How it works
 
-`http_client()` installs `RebunoTransport` under the provider SDK. `httpx` routes
-every request through the transport, which sits between the provider client and
-the network:
+`http_client()` installs `RebunoTransport` under the provider SDK, so `httpx`
+routes every request through it on the way to the network.
 
-1. If there is **no active execution**, it's a plain passthrough — the request
-   goes straight to the provider. (So the same client is safe to use outside a
-   handler; it just isn't durable there.)
-2. Inside an execution, it reads the model id from the request body and records
-   the call as an `llm_call` step (the same identity/replay machinery as tool
-   calls — see [How it works](internals.md)):
-   - **First run:** it forwards the request to the provider, reads the full
-     response, and records `{status, headers, body}` as the step result.
-   - **Resume:** it returns the *recorded* response and rebuilds an
-     `httpx.Response` from it — the provider is never called again, so a replayed
-     dispatch doesn't re-pay for the model.
+With no active execution the transport is a plain passthrough. The same client
+is safe to use outside a handler, it just isn't durable there.
 
-The provider SDK parses the rebuilt response exactly as if it came off the wire,
-so your `llm.chat.completions.create(...)` call site is unchanged.
+Inside an execution it reads the model id from the request body and records the
+call as an `llm_call` step, on the same identity and replay machinery as tool
+calls (see [How it works](internals.md)).
+
+- On the first run it forwards the request, reads the response, and records
+  `{status, headers, body}` as the step result. An error status is recorded like
+  any other, so a recorded `500` replays as that same `500`. The provider SDK's
+  own retry of a `500` is a fresh request, and records a separate step.
+- On resume it rebuilds an `httpx.Response` from the recorded one. The provider
+  is never called again, so a replay doesn't pay for the model twice.
+
+The provider SDK parses the rebuilt response as if it came off the wire, so your
+call site is unchanged. Only the status, content-type, and body are
+reconstructed. Length and encoding headers are dropped so a replayed body is
+never mismatched against a stale `content-length`.
+
+Only JSON request bodies are recognized as LLM calls. A non-JSON body such as a
+file upload or a form post passes through untouched.
+
+## Streamed responses
+
+A `text/event-stream` response is teed. The transport passes the provider's
+bytes to your code as they arrive, accumulates the whole, and records it as the
+step result when the stream ends. Deltas also go to the kernel's live side
+channel as they arrive, so observers can watch the call run. See
+[live streaming](../../streaming.md).
+
+A replayed streamed call is delivered as a stream too, so the provider SDK
+iterates it the same way. A stream that errors mid-flight fails the step instead
+of recording a truncated response.
 
 ## Refused calls
 
-A step the kernel doesn't allow to proceed — denied by policy, rate limited, or
-parked awaiting approval — comes back as an HTTP `403`/`429` rather than an
-exception, because an exception raised inside the transport would unwind through
-the provider SDK, which retries unknown exceptions and rewraps them as
-`APIConnectionError`. The status becomes the provider SDK's own error
-(`openai.PermissionDeniedError`, `RateLimitError`), which every framework
-propagates untouched.
+A step the kernel doesn't allow to proceed comes back as an HTTP `403` or `429`
+rather than an exception. An exception raised inside the transport would unwind
+through the provider SDK, which retries unknown exceptions and rewraps them as
+`APIConnectionError`. A status instead becomes the SDK's own error, such as
+`openai.PermissionDeniedError`, which every framework propagates untouched.
 
-That failure is already correct for a denial. To handle a *blocked* call — where
-the execution should park for the approval, not fail — pass the provider's error
-to `rebuno.raise_for_refusal()` at whatever boundary your code owns:
+`Agent` recovers the refusal at the handler boundary even if your code never
+looks at the error. A denial fails the execution with the kernel's reason. A
+blocked call leaves the execution parked. Call `rebuno.raise_for_refusal()`
+yourself to unwind at your own boundary instead of running the rest of the
+handler first:
 
 ```python
 try:
@@ -58,8 +75,6 @@ except Exception as e:
     raise
 ```
 
-`Blocked` unwinds the handler and leaves the execution parked; granting the
-approval dispatches it again, and every step recorded so far replays from the log.
 Any error without the `rebuno_refusal` marker is left alone. An upstream
 Rebuno-aware LLM gateway emits the same marker, so the same call covers it.
 
@@ -73,8 +88,8 @@ rebuno.http_client(
 
 The request body's `model` names the step `target`.
 
-You can also construct the transport directly and wrap an existing transport
-(e.g. to keep a custom proxy or retry config):
+You can also construct the transport directly, wrapping an existing one to keep
+a custom proxy or retry config:
 
 ```python
 import httpx
@@ -83,16 +98,3 @@ from rebuno import RebunoTransport
 transport = RebunoTransport(httpx.AsyncHTTPTransport())
 llm = AsyncOpenAI(http_client=httpx.AsyncClient(transport=transport))
 ```
-
-## Current limits
-
-- **Streaming durability** is provided by the kernel's live side channel — the
-  interceptor tees the provider stream, records the assembled whole via
-  `.../complete`, and republishes live deltas to `.../stream`. See
-  [live streaming](../../streaming.md).
-- **Only JSON request bodies are recognized** as LLM calls. Non-JSON bodies
-  (file uploads, form posts) pass through untouched.
-
-When a response is replayed, only status, content-type, and body are
-reconstructed — hop-by-hop and length/encoding headers are dropped so a replayed
-body is never mismatched against a stale `content-length` or `content-encoding`.

@@ -1,7 +1,7 @@
 # Errors
 
 Every SDK exception subclasses `rebuno.RebunoError`, so you can catch that one
-type as a backstop. `RebunoError` carries an optional `.details` dict.
+type as a backstop.
 
 ```python
 from rebuno import RebunoError, PolicyError, NotFoundError
@@ -18,54 +18,66 @@ except RebunoError as e:
 
 ```
 RebunoError
-├─ NetworkError            connection refused, timeout — no HTTP response
-├─ APIError               the kernel returned an error envelope {code, message}
-│  ├─ ValidationError     400  request validation failed
-│  ├─ UnauthorizedError   401  authentication failed
-│  ├─ NotFoundError       404  resource not found
-│  └─ PolicyError         403  denied by policy (carries .rule_id)
-├─ ToolError              a tool's effect body failed (carries .tool_id, .step_id)
-├─ RateLimited            a step was rejected by a policy rate limit
-├─ Blocked                internal: a step is awaiting approval
-└─ Terminated             internal: the execution is terminal (e.g. cancelled)
+├─ NetworkError            connection refused or timeout, no HTTP response
+├─ APIError                the kernel returned an error envelope {code, message}
+│  ├─ ValidationError      400  request validation failed
+│  ├─ UnauthorizedError    401  authentication failed
+│  ├─ ForbiddenError       403  the caller is not permitted
+│  ├─ NotFoundError        404  resource not found
+│  └─ PolicyError          403  denied by policy (carries .rule_id)
+├─ ToolError               a tool's effect body failed (carries .tool_id, .step_id)
+├─ RateLimited             a step was rejected by a policy rate limit
+├─ Blocked                 internal: a step is awaiting approval
+└─ Terminated              internal: the execution is terminal (e.g. cancelled)
 ```
 
 ### `APIError` and its subclasses
 
-Raised when the kernel returns a `>= 400` response. Carry `.code` (the kernel
-error code), `.status_code` (HTTP status), and `.details`. The SDK maps error
-codes to these subclasses so `Client` and the agent's kernel client can't
-disagree on which exception a code means.
+Raised when the kernel returns a `>= 400` response. They carry `.code` (the
+kernel's error code) and `.status_code`. An unmapped code raises a plain
+`APIError`.
 
-- **`PolicyError`** — an action was denied by policy. Also has `.rule_id` naming
-  the rule that denied it.
+`PolicyError` also carries `.rule_id`, naming the rule that denied the call.
 
 ### `ToolError`
 
-Raised when a tool's effect body throws. Carries `.tool_id`, `.step_id`, and a
-`.retryable` flag. When raised inside a handler, the agent fails the execution.
+Raised when a tool's effect body throws, and when an `at_most_once` step comes
+back `indeterminate`. Carries `.tool_id` and `.step_id`, and fails the execution
+when it reaches the handler boundary.
 
 ### `RateLimited`
 
-A step was rejected because a policy rate limit was exceeded. Has `.reason`.
+A step was rejected because a policy rate limit was exceeded. Carries `.reason`.
 
-### `Blocked` and `Terminated` — internal control flow
+### `Blocked` and `Terminated`
 
-You normally won't see these. They're control-flow signals the SDK raises to
-unwind a dispatch cleanly:
+You normally won't see these. They are control-flow signals the SDK raises to
+unwind a dispatch cleanly.
 
-- **`Blocked`** — a tool call hit a step that's awaiting human approval. The
-  agent's webhook handler catches it and returns `200`; the execution is already
-  `blocked` in the kernel and will be re-dispatched when the approval is
-  resolved.
-- **`Terminated`** — the execution became terminal (e.g. cancelled) mid-dispatch.
-  The dispatch unwinds and returns `200`.
+- `Blocked` means a step is waiting on a human approval, either the one your
+  code just submitted or an earlier one that already parked the execution. The
+  kernel re-dispatches once the approval is resolved.
+- `Terminated` means the execution went terminal partway through the dispatch,
+  usually a cancel.
 
-Both are caught by the agent runtime; don't catch them in your handler unless you
-have a specific reason (and re-raise if you do).
+`Agent` catches both. Don't catch them yourself without a reason, and re-raise
+if you do. See [Dispatch and resume](agents.md#dispatch-and-resume) for the
+backstops that cover a handler which swallows one.
+
+## Helpers
+
+- `raise_for_refusal(exc)` re-raises a Rebuno refusal a provider SDK wrapped in
+  its own error type. You get back `Blocked`, `PolicyError`, `RateLimited`, or
+  `Terminated`. Any other exception is left alone. See
+  [LLM calls](llm-calls.md#refused-calls).
+- `failure_reason(exc)` is the text the agent records in an execution's
+  `failure_reason`. Everything before the first colon is a stable token, either
+  a kernel reason such as `policy_denied` or one of `tool_error`, `agent_error`,
+  `input_invalid`.
 
 ## What's exported
 
 `RebunoError`, `APIError`, `ValidationError`, `UnauthorizedError`,
-`NotFoundError`, `PolicyError`, `ToolError`, `RateLimited`,
-`Blocked`, `Terminated`, and `NetworkError` are all importable from `rebuno`.
+`ForbiddenError`, `NotFoundError`, `PolicyError`, `ToolError`, `RateLimited`,
+`Blocked`, `Terminated`, `NetworkError`, `raise_for_refusal`, and
+`failure_reason` are all importable from `rebuno`.

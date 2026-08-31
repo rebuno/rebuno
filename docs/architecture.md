@@ -1,71 +1,76 @@
 # Architecture
 
-Rebuno is a **kernel-authoritative** runtime. A stateless Go kernel owns an
-append-only event log in Postgres and is the sole writer of state. Agents are
-stateless HTTP services the kernel dispatches to over signed webhooks. Every
-effect an agent performs — a tool call or an LLM call — becomes a durably
-recorded *step*, and re-running an agent short-circuits any step that already
-has a recorded result.
+The kernel is the sole writer of state, which it keeps as an append-only event
+log in Postgres. Agents are stateless HTTP services it reaches over signed
+webhooks. Every effect an agent performs becomes a durably recorded step, so a
+re-run skips whatever already has a result.
 
-```
-client ──create──▶ kernel ──webhook──▶ agent
-                     │                    │
-                     │◀── submit_step ────┘   (each tool/LLM call)
-                     ▼
-                  Postgres
-              (events + steps)
+```mermaid
+flowchart LR
+    client -->|create| kernel
+    kernel -->|webhook| agent
+    agent -->|submit_step| kernel
+    kernel --> db[("Postgres<br>events + steps")]
 ```
 
-## The six entities
+## Domain model
 
 | Entity | What it is |
 |--------|-----------|
-| **Execution** | One run of an agent against an input. Identified by a UUIDv7. Holds a status and, when terminal, an output. |
-| **Step** | A single effect within an execution — a `tool_call` or an `llm_call`. Identified by a deterministic content hash. |
-| **Event** | An immutable record of something that happened. Ordered by `(execution_id, event_seq)`. The event log is the system of record; everything else is a projection. |
+| **Execution** | One run of an agent against an input. Identified by a UUIDv7. Holds a status, plus an output once it reaches a terminal state. |
+| **Step** | A single effect within an execution: a `tool_call`, an `llm_call`, or a `local` step. Identified by a deterministic content hash. |
+| **Event** | An immutable record of one state change. Identified by `(execution_id, event_seq)`, which also orders the log. |
+| **Dispatch** | One queued delivery of an execution to its agent. Tracks attempts, the retry schedule, and the lease held by the delivering replica. |
 | **Approval** | A pending human decision that gates a step. Has a timeout and a resolution. |
-| **Agent** | A stateless HTTP service registered by name, with a webhook URL and an HMAC secret. |
-| **Policy** | A per-agent YAML rule bundle, evaluated when a step is submitted. |
+| **Agent** | A stateless HTTP service with a webhook URL, an HMAC secret, and a policy rule bundle. |
 
 ## State machines
 
-**Execution:**
+An execution moves through these states:
 
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> running
+    running --> blocked
+    blocked --> running
+    running --> completed
+    running --> failed
+    running --> cancelled
 ```
-pending → running ↔ blocked → completed
-                            ↘ failed
-                            ↘ cancelled
-```
 
-`blocked` means the execution is paused waiting on a human approval; it re-enters
-`running` when the approval resolves.
+`blocked` means the execution is paused waiting on a human approval. It re-enters
+`running` when the approval resolves. A step parked by a rate limit leaves the
+execution `running`.
 
-**Step:**
+A step moves through these states:
 
-```
-proposed → allowed → executing → succeeded
-        ↘ denied                ↘ failed
-        ↘ awaiting_approval → (approved) → executing → …
+```mermaid
+stateDiagram-v2
+    [*] --> proposed
+    proposed --> denied: deny
+    proposed --> awaiting_approval: require_approval
+    proposed --> executing: allow
+    awaiting_approval --> denied: denied or expired
+    awaiting_approval --> allowed: approved
+    allowed --> executing
+    executing --> succeeded
+    executing --> failed
+    executing --> cancelled
 ```
 
 ## Determinism and replay
 
-When an execution resumes — after a crash, an approval, or any pause — the kernel
-re-dispatches the agent. The agent runs again from its entry point with the same
-input. Every effect is intercepted before it runs:
+When an execution resumes, the kernel re-dispatches the agent. It runs again from
+its entry point with the same input. Every effect is intercepted before it runs:
 
-1. A deterministic **step ID** is computed from the call's content.
-2. It is looked up against the kernel's `steps` projection (a point query).
-3. If a result is recorded, it is returned and **the effect does not run**.
+1. A deterministic step ID is computed from the call's content.
+2. It is looked up against the kernel's `steps` projection, as a point query.
+3. If a result is recorded, it is returned and the effect does not run.
 4. If not, the effect runs and its outcome is recorded against that same ID.
 
-Replay cost is **one indexed lookup per effect**, independent of how many events
-the execution has accumulated. Replay never re-invokes an LLM, re-runs a tool, or
-re-calls an external service.
-
-Rebuno records *effects*, not *conversations*. It does not reconstruct framework
-state or conversation history — the agent author reloads those from wherever they
-store them.
+Replay costs one indexed lookup per effect, no matter how many events the
+execution has accumulated, and never re-invokes the external effect.
 
 ### Step identity
 
@@ -73,44 +78,38 @@ store them.
 step_id = hash(execution_id, kind, target, args_hash, occurrence)
 ```
 
-- `kind` — `tool_call` or `llm_call`.
-- `target` — the tool name or model id.
-- `args_hash` — a stable hash of the canonicalized arguments.
-- `occurrence` — the count of prior identical calls in this delivery attempt, so
+- `kind` is `tool_call`, `llm_call`, or `local`.
+- `target` is the tool name or model id.
+- `args_hash` is a stable hash of the canonicalized arguments.
+- `occurrence` is the count of prior identical calls in this delivery attempt, so
   calling `read_file("foo")` twice yields two distinct step IDs.
 
 The kernel assigns the ID. The agent submits `{kind, target, args}` along with the
-`dispatch_id` from its webhook and gets the ID back in the decision — it computes
-nothing and holds no step state, so an agent, a sidecar, and an LLM gateway all
-submit identically.
+`dispatch_id` from its webhook and gets the ID back in the decision.
 
-Occurrence is counted per delivery attempt, under the execution lock, and the
-counter is cleared when a dispatch is claimed. Every attempt therefore starts from
-zero and recomputes the same IDs for the same effect sequence, which is what makes
-a resumed run short-circuit on steps the previous attempt already recorded. Because
-IDs are content-derived, they are stable under reordering and parallel dispatch:
-two attempts that issue the same set of effects produce the same set of IDs
-regardless of order.
+Occurrence is counted per delivery attempt, under the execution lock. Claiming a
+dispatch clears the count. Every attempt starts from zero, so the same effect
+sequence recomputes the same IDs and short-circuits on what the last attempt
+recorded.
 
 ## Durability and failure
 
-Every effect is a three-act sequence: `step.executing` is written **before** the
-external call; the terminal event (`step.succeeded` / `step.failed`) is written
-**after**. This ordering lets the kernel detect orphaned effects on recovery.
+`step.executing` is written before the external call, and the terminal event
+(`step.succeeded` or `step.failed`) after. That ordering is what lets the kernel
+spot orphaned effects on recovery.
 
 On re-dispatch the kernel finds each step in one of three states:
 
 - **Absent** → run it.
-- **Terminal** → replay the recorded outcome; never re-invoke.
+- **Terminal** → replay the recorded outcome, and never re-invoke.
 - **Started only (orphan)** → resolve by the step's declared idempotency:
-  - `safe_to_retry` (default) — re-invoke with a step-ID-derived idempotency key.
-  - `at_most_once` — mark the step failed with `indeterminate`; the agent's loop
-    decides how to reconcile.
+  - `safe_to_retry` (the default) re-invokes.
+  - `at_most_once` marks the step failed with `indeterminate`, and the agent's
+    loop decides how to reconcile.
 
-The kernel guarantees: `step.executing` before any external effect, the terminal
-event as the source of truth (never overridden), and state transitions atomic with
-the event that caused them. It does **not** guarantee exactly-once external side
-effects — that is delegated to provider idempotency keys.
+The kernel also guarantees a terminal event is never overridden, and that every
+state transition is atomic with the event that caused it. It does not guarantee
+exactly-once side effects.
 
 ## Dispatch and delivery
 
@@ -119,42 +118,53 @@ transaction as the event that triggers it. A background loop on every replica
 claims due work with `SELECT … FOR UPDATE SKIP LOCKED` and POSTs to the agent's
 webhook:
 
-```
+```http
 POST <webhook_url>
 Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>
 { "execution_id": "…", "dispatch_id": "…" }
 ```
 
-The payload carries no history — the agent fetches what it needs from the API.
-Delivery is **at-least-once**; the agent's handler must be safe under duplicate
-dispatch, and step identity makes re-issued effects converge rather than
-duplicate. Failed dispatches retry with exponential backoff; after exhaustion the
-execution fails with `dispatch_exhausted`.
+The payload carries no history. The agent fetches what it needs from the API.
+Delivery is at-least-once, so the agent keys its handler on `(execution_id,
+dispatch_id)` and runs each dispatch once. Failed deliveries retry with
+exponential backoff. Once the attempts run out, the execution fails with
+`dispatch_exhausted`.
 
-A replica claims no more rows than it has idle delivery workers, so a claim never
-withholds work from a replica that could deliver it sooner. Claiming leases the
-row for the length of the agent's run, renewed by heartbeat; a lease left behind
-by a crashed replica expires and is returned to the queue by any replica's
-dispatch loop.
+A replica claims no more rows than it has idle delivery workers, so it never
+holds work another replica could deliver sooner. A claim leases the row for the
+length of the agent's run, renewed by heartbeat. A lease from a crashed replica
+expires, and any dispatch loop returns it to the queue.
 
-## Governance (policy)
+## Policy governance
 
-Policy is evaluated once per effect, at step submission, for both tool and LLM
-calls. A rule returns `allow`, `deny(reason)`, or `require_approval(config)`.
-Policy is gate-keeping only — it never rewrites a request. See [policy.md](policy.md).
+Policy is evaluated when a step is first submitted, and skipped on a replay. A
+rule returns `allow`, `deny`, or `require_approval`.
 
-## Storage and HA
+A rule can also carry two limits. A rate limit parks the step for a later retry
+or refuses it outright, depending on the rule's `max_wait`. A token budget turns
+an `allow` into a `deny` or a `require_approval` once the execution has spent its
+`max_tokens`.
 
-Postgres is the system of record. The `steps` table is a projection of the event
-log, written **synchronously in the same transaction** as its events, so replay
-lookups are read-after-write consistent and the projection never lags. Dev mode
-substitutes an in-memory store with the same interfaces.
+Policy only gates a call. It never rewrites the request. See
+[Policy](policy.md).
 
-The HTTP API is stateless — any replica serves any request, and any replica
-dispatches any execution (no connection registry, no sticky routing). Singleton
-background work (approval-expiry, execution deadlines, cleanup) runs under
-Postgres advisory-lock leadership.
+## Storage and high availability
 
-For the full mechanics — the write path, canonicalization rules, and per-failure
-recovery behavior — see the rest of the docs: [agents](agents.md),
-[tools](tools.md), [policy](policy.md), and [events](events.md).
+The `steps` table is a projection of the event log, written in the same
+transaction as its events. Replay lookups are therefore read-after-write
+consistent, and the projection never lags.
+
+The HTTP API is stateless. Any replica serves any request and dispatches any
+execution, with no connection registry or sticky routing. Two replicas can
+therefore touch one execution at once. Every path that mutates an execution takes
+a Postgres advisory lock on its id first, so those writes serialize.
+
+An SSE subscriber stays on the replica that accepted it. Deltas are broadcast to
+every replica, so nothing needs routing. See [Live streaming](streaming.md).
+
+Singleton background work (approval expiry, execution deadlines, cleanup) uses a
+second advisory lock, taken on one fixed key rather than per execution. A replica
+that fails to take it skips the tick instead of waiting for it.
+
+See [Agents](agents.md), [Tools and effects](tools.md), [Policy](policy.md), and
+[Events](events.md) for the details behind each of these.

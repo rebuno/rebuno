@@ -1,8 +1,8 @@
 # Tools
 
-A tool is an action your agent takes. Defining a tool routes every call through
-the kernel, so it's recorded as a `tool_call` step — subject to policy, replayed
-on resume, and visible in the execution's audit trail.
+A tool is an action your agent takes. Wrapping a function as a tool routes every
+call through the kernel, where it's recorded as a `tool_call` step. Policy
+applies to it, it replays on resume, and it shows up in the audit trail.
 
 ## `defineTool`
 
@@ -10,57 +10,36 @@ on resume, and visible in the execution's audit trail.
 import { defineTool } from "rebuno";
 
 const search = defineTool({
-  name: "search",                                 // tool id the LLM and kernel see
+  name: "search",
+  description: "Search the corpus",     // shown to the LLM
+  inputSchema: mySchema,                // optional; whatever your framework reads
+  idempotency: "safe_to_retry",         // default
   execute: async ({ query, limit = 10 }: { query: string; limit?: number }) => {
-    // ... do the work
-    return [`result for ${query}`];
+    // ...
   },
 });
 ```
 
-`defineTool` returns an async function that routes through the kernel. Call it
-inside a handler:
+The returned value is callable and carries `name`, `description`, `inputSchema`,
+`idempotency`, and `execute`, so frameworks that introspect a tool object bind it
+unchanged. Hand tools to a framework as a plain array:
 
 ```ts
-const hits = await search({ query: "hello" });
+const agent = createAgent(llm, [search, ...]);
 ```
-
-Because the SDK is framework-agnostic, it doesn't register tools with a model for
-you. Every TypeScript agent framework takes a description and a schema alongside
-the function it calls, so declare those where the framework wants them and hand
-it `search` as the function:
-
-```ts
-import { tool } from "ai";
-import { z } from "zod";
-
-const searchTool = tool({
-  description: "Search the corpus",
-  inputSchema: z.object({ query: z.string(), limit: z.number().default(10) }),
-  execute: search,
-});
-```
-
-The same shape works for Mastra (`createTool({ id: search.name, ..., execute:
-search })`) and LangChain (`tool(search, { name: search.name, ..., schema })`).
-`search.name` is the tool id the kernel records, so using it as the framework's
-id keeps policy rules and framework config in sync. See the
-[TypeScript examples](../../../examples/typescript).
-
-`description` and `inputSchema` may also be passed to `defineTool`, which stores
-them on the returned function. The SDK never reads them — only frameworks that
-introspect a tool object do.
 
 ### Idempotency
 
-`idempotency` controls whether a tool may re-run when a dispatch replays:
+`idempotency` controls whether a tool may run again when a dispatch replays.
 
-- **`safe_to_retry`** (default) — reads and other operations that are fine to
-  execute again. On resume, the recorded result replays; if the step never
-  completed, it can run again.
-- **`at_most_once`** — destructive or non-idempotent operations that must not be
-  repeated (sending an email, charging a card). The kernel guarantees the effect
-  body runs at most once even across crashes.
+- `safe_to_retry` (default) is for reads and anything else fine to execute
+  again. On resume the recorded result replays, and a step that never completed
+  runs again.
+- `at_most_once` is for destructive operations such as sending an email or
+  charging a card. If a resumed dispatch finds the step already executing, the
+  kernel fails it with reason `indeterminate` and the SDK throws `ToolError`, so
+  your handler decides how to reconcile. A step recorded but never started is
+  still safe, so it runs.
 
 ```ts
 const sendEmail = defineTool({
@@ -70,75 +49,85 @@ const sendEmail = defineTool({
 });
 ```
 
+### Denied calls
+
+A tool denied by policy does not throw. `defineTool` and `wrapTool` catch the
+`PolicyError` and return a string instead:
+
+```
+search not allowed. reason: <the rule's reason>
+```
+
+The LLM sees that as the tool's result and can pick a different path, rather
+than the denial crashing the run. A denied `step()` throws `PolicyError`
+normally, since nothing reads its result as a tool response.
+
 ### Blocking work
 
-The event loop must stay responsive — the kernel lease is renewed by a background
-heartbeat that only fires if the effect body yields (see
-[How it works](internals.md)). Offload blocking or CPU-bound work (e.g. to a
-worker thread) so the loop stays live; an `async` body that awaits I/O is already
-fine.
+The event loop has to stay responsive. The kernel lease is renewed by a
+background timer that only fires while the handler yields (see
+[How it works](internals.md#heartbeats-and-leases)). Offload CPU-bound work to a
+worker thread so the loop stays live.
 
 ### Calling context
 
 A tool records against the current execution. Calling one outside an active
-dispatch (i.e. not inside a handler running under `agent.serve()`/`agent.fetch`,
-or a test context) throws an `Error`.
+dispatch throws an `Error`. Active means inside a handler running under
+`agent.serve()` or `agent.fetch`, or inside a test context.
 
 ## `wrapTool`
 
-`defineTool` fits functions you write. `wrapTool` builds a Rebuno-routed tool
-from a `name` plus an `invoke(args)` seam, for tools that aren't plain functions
-— framework tool objects, or schema-only tools:
+`defineTool` fits functions you own. `wrapTool` builds a Rebuno-routed tool from
+a `name` plus an `invoke(args)` seam. Use it for tools that aren't plain
+callables, like framework tool objects or schema-only tools:
 
 ```ts
 import { wrapTool } from "rebuno";
 
 const search = wrapTool({
-  name: "search",                                 // tool id the LLM and kernel see
-  invoke: (args) => myClient.search(args),        // awaitable or plain return
+  name: "search",
+  invoke: (args) => myClient.search(args),   // awaitable or plain return
   description: "Search the corpus",
-  inputSchema: {                                  // exposed for framework introspection
-    type: "object",
-    properties: { query: { type: "string" } },
-    required: ["query"],
-  },
+  inputSchema: mySchema,
   idempotency: "safe_to_retry",
-  toResult: (raw) => raw,                          // map invoke's return to a JSON-serializable value
-  transformArgs: (args) => args,                  // map the caller's arg object before recording/invoking
+  toResult: undefined,      // map invoke's return to a JSON-serializable value
+  transformArgs: undefined, // map the caller's arg object before recording/invoking
 });
 ```
 
-- `name` is the tool id both the LLM and the kernel see — put any namespace
+- `name` is the tool id the LLM sees and the kernel sees, so put any namespace
   prefix directly in it.
-- `toResult` maps the raw return before it's recorded (default: identity).
+- `inputSchema` is passed through to the returned tool for frameworks that read
+  it.
+- `toResult` maps the raw return before it's recorded. Defaults to identity.
 - `transformArgs` maps the argument object before it's recorded and passed to
-  `invoke` (default: a shallow copy) — e.g. null-stripping.
+  `invoke`, for something like null-stripping. Defaults to a shallow copy.
 
 ## MCP tools
 
-`wrapMcpTools` wraps [Model Context Protocol](https://modelcontextprotocol.io)
-tool descriptors, so tools served over MCP get the same durability and policy as
-native ones.
+`wrapMcpTool` and `wrapMcpTools` wrap
+[Model Context Protocol](https://modelcontextprotocol.io) tool descriptors, so
+MCP tools get the same treatment as native ones.
 
 ```ts
 import { wrapMcpTools } from "rebuno";
 
-const listed = await client.listTools();          // { tools: [...] } from the MCP client
-const tools = wrapMcpTools(listed.tools, {
-  call: (name, args) => client.callTool({ name, arguments: args }),  // call(name, args) → result
-  prefix: "docs",                                  // tool id becomes `${prefix}_${name}`
+const tools = wrapMcpTools(await session.listTools(), {
+  call: session.callTool,   // call(toolName, args) → result
+  prefix: "docs",           // tool id becomes `${prefix}_${name}`
 });
+const agent = createAgent(llm, tools);
 ```
 
-- Descriptors can be attribute-style (the official `@modelcontextprotocol/sdk`
-  `Tool`) or plain objects with `name` / `description` / `inputSchema` — both
-  work.
-- `prefix` namespaces the tool id: the LLM and kernel see `${prefix}_${name}`,
-  while the MCP server (via `call`) sees the bare `name`. Empty prefix uses the
-  name as-is.
-- By default the result is flattened from a standard MCP `CallToolResult`
-  (`structuredContent` if present, otherwise joined text blocks), and `null`
-  arguments are stripped (LLMs often fill optional fields with `null`, which
-  typed MCP parameters reject). Override with `toResult` / by wrapping yourself.
+- Descriptors carry `name`, `description`, and `inputSchema`, the spec field
+  names.
+- `prefix` namespaces the tool id. The LLM and the kernel see
+  `` `${prefix}_${name}` ``, while the MCP server (via `call`) sees the bare
+  `name`. An empty prefix uses the name as-is.
+- The result is flattened from a standard MCP `CallToolResult` by default,
+  preferring structured content and otherwise joining text blocks. Override it
+  with `toResult`.
+- Null arguments are stripped by default, since LLMs often fill optional fields
+  with `null` and typed MCP parameters reject it.
 
 `wrapMcpTool` does one descriptor; `wrapMcpTools` maps over a list.

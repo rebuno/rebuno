@@ -6,22 +6,19 @@
 npm install rebuno
 ```
 
-Requires Node 18+. The SDK is ESM-only and has no runtime dependencies — it uses
-the platform's `fetch`, Web Crypto, `AsyncLocalStorage`, and `node:http` to both
-host an agent and act as a client. Bring your own LLM framework (e.g. the Vercel
-AI SDK) when you need one.
+Requires Node 22 or later. The SDK is ESM-only and has no runtime dependencies.
+It uses the platform's `fetch`, Web Crypto, `AsyncLocalStorage`, and
+`node:http`.
 
 ## Configuration
 
-Every entry point reads from constructor options first and falls back to
-environment variables, so the same code runs locally and in production without
-edits:
+Every entry point takes constructor options first, then environment variables.
 
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `REBUNO_URL` | `Agent`, `Client` | kernel base URL |
 | `REBUNO_AGENT_SECRET` | `Agent` | HMAC secret shared with the kernel; signs every request and verifies inbound webhooks |
-| `REBUNO_API_KEY` | `Client` | Bearer token for client/admin routes |
+| `REBUNO_API_KEY` | `Client` | Bearer token for client routes |
 
 ```ts
 // explicit
@@ -33,33 +30,26 @@ const agent = new Agent("dev-agent");
 
 ## The loop
 
-There are two processes, and they talk to each other only through the kernel.
+Your backend and your agent communicate through the kernel.
 
-```
-  your backend                 kernel                    your agent process
- ┌────────────┐          ┌──────────────┐              ┌──────────────────┐
- │  Client    │  create  │              │   webhook    │  agent.serve()   │
- │  .create() │ ───────► │  executions  │ ───────────► │  → your handler  │
- │            │          │  + steps     │ ◄─────────── │  → defineTool /   │
- │  .get()    │ ◄─────── │  (durable)   │  submit_step │    rebunoFetch /  │
- └────────────┘  status  └──────────────┘   complete   │    step()        │
-                                                        └──────────────────┘
+```mermaid
+flowchart LR
+    c["Client<br>your backend"] -->|"create, get"| k[kernel]
+    k -->|webhook| a["Agent<br>your handler"]
+    a -->|"submit_step, complete"| k
 ```
 
-1. A **client** calls `client.create(agentId, input)`. The kernel records a new
-   execution and dispatches it by POSTing a signed webhook to your agent.
-2. Your **agent** verifies the signature, looks up the execution, and runs your
-   handler. Each effect the handler performs is submitted to the kernel as a
-   step *before* it runs — the kernel decides whether it proceeds, replays a
-   recorded result, is denied by policy, or must wait for approval.
+1. A client calls `client.create(agentId, input)`. The kernel records the
+   execution and POSTs a signed webhook to your agent.
+2. Your agent verifies the signature, looks up the execution, and runs your
+   handler. Each effect goes to the kernel as a step before it runs. The kernel
+   decides whether it proceeds, replays a recorded result, is denied by policy,
+   or waits for approval.
 3. When the handler returns, the agent reports the output and the execution
-   completes. If the handler blocked on an approval or crashed, the kernel
-   re-dispatches later and the handler **replays** its recorded steps to get
-   back to where it left off.
+   completes. If it blocked on an approval or crashed, the kernel re-dispatches
+   later and the recorded steps replay.
 
 ## A complete example
-
-The agent process — hosts the handler and records its effects:
 
 ```ts
 // agent.ts
@@ -79,8 +69,6 @@ const agent = new Agent("dev-agent", { secret: "dev-secret", baseUrl: "http://lo
 await agent.serve({ port: 5000 }, process); // blocks, serving the webhook
 ```
 
-A client that kicks off an execution and reads the result:
-
 ```ts
 // client.ts
 import { Client } from "rebuno";
@@ -92,13 +80,10 @@ console.log(await client.get(ex.id));
 
 ## Running locally
 
-Run the agent in one terminal (it blocks, serving the webhook), then create an
-execution from another:
-
 ```bash
 tsx agent.ts      # terminal 1
 tsx client.ts     # terminal 2
 ```
 
-The kernel itself is a separate service — point `REBUNO_URL` / `baseUrl` at
-wherever it runs. Next: [Agents](agents.md).
+The kernel is a separate service. Point `REBUNO_URL` or `baseUrl` at it.
+Next: [Agents](agents.md).

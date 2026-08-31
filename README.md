@@ -23,7 +23,7 @@ It records every tool call and LLM call as a durable step. Interrupted runs resu
 
 **Prerequisites:** Go 1.26+, Python 3.10+ / Node 22+
 
-Start the dev kernel (in-memory, no dependencies). With a terminal attached it drops you into a REPL:
+Start the dev kernel. With a terminal attached it drops you into a REPL:
 
 ```bash
 go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
@@ -54,23 +54,23 @@ rebuno> exec events <id>
 
 Start here:
 
-- [Getting Started](docs/getting-started.md) — run the kernel and your first agent.
-- [Architecture](docs/architecture.md) — the domain model, state machines, and how durability works.
+- [Getting Started](docs/getting-started.md): run the kernel and your first agent.
+- [Architecture](docs/architecture.md): the domain model, state machines, and how durability works.
 
 Reference:
 
-- [Agents](docs/agents.md) — how an agent process receives work and drives its effects.
-- [Tools](docs/tools.md) — tools, step identity, and idempotency.
-- [LLM calls](docs/llm-calls.md) — intercepting LLM requests so they replay durably.
-- [Streaming](docs/streaming.md) — view streamed LLM outputs through clients.
-- [Policy](docs/policy.md) — the YAML rule language for allow / deny / require-approval.
-- [Events](docs/events.md) — the event taxonomy and payloads.
-- [HTTP API](docs/api.md) — the `/v0` client, agent, and admin endpoints.
-- [CLI](docs/cli.md) — the built-in `rebuno` REPL.
-- [Deployment](docs/deployment.md) — running the production kernel, config, and Docker.
-- [Python SDK](docs/sdk/python) — building with Python
-- [TypeScript SDK](docs/sdk/typescript) — building with TypeScript
-- [Dashboard](https://github.com/rebuno/dashboard) — web UI to view executions, steps, events, and agent activity.
+- [Agents](docs/agents.md): how an agent process receives work and drives its effects.
+- [Tools](docs/tools.md): effects, step identity, and idempotency.
+- [LLM calls](docs/llm-calls.md): intercepting LLM requests so they replay durably.
+- [Streaming](docs/streaming.md): live token deltas while a step is running.
+- [Policy](docs/policy.md): the YAML rule language for allow / deny / require-approval.
+- [Events](docs/events.md): the event types and their payloads.
+- [HTTP API](docs/api.md): the `/v0` client, agent, and admin endpoints.
+- [CLI](docs/cli.md): the `rebuno` binary and its dev REPL.
+- [Deployment](docs/deployment.md): running the production kernel, config, and Docker.
+- [Python SDK](docs/sdk/python): building with Python
+- [TypeScript SDK](docs/sdk/typescript): building with TypeScript
+- [Dashboard](https://github.com/rebuno/dashboard): web UI to view executions, steps, events, and agent activity.
 
 ## License
 

@@ -3,20 +3,24 @@
 The `rebuno` binary is the kernel. It has three commands:
 
 ```bash
-rebuno dev [--config manifest.yaml]     # in-memory dev kernel (no auth, no deps)
-rebuno server --db-url … --bearer-token …   # production kernel (Postgres)
+rebuno dev
+rebuno server --db-url DB_URL --bearer-token TOKEN
 rebuno version
 ```
 
-Build it with `make build` (outputs `bin/rebuno`), or run from source with
+Replace `DB_URL` with a Postgres connection string and `TOKEN` with the bearer
+token clients and admins present.
+
+Both `dev` and `server` take `--config <config.yaml>` to register agents and
+policies at boot, plus `--listen-addr`, `--log-level`, and `--log-format`. See
+[Deployment](deployment.md) for the rest of the server's flags.
+
+Build it with `make build`, which writes `bin/rebuno`, or run from source with
 `go run ./cmd/rebuno …`.
 
-## The REPL
+## The dev REPL
 
-When `rebuno dev` (or `server`) runs with a terminal on stdin, it starts an
-interactive REPL that drives the kernel in-process — it shares the same store as
-the running HTTP server, so executions created here are dispatched normally. With
-no TTY (piped input, CI, Docker without `-t`) the kernel just serves HTTP.
+`rebuno dev` starts an interactive REPL when stdin is a terminal.
 
 ```
 rebuno> help
@@ -26,7 +30,7 @@ rebuno> help
 |---------|-------------|
 | `agent ls` | List registered agents. |
 | `agent get <id>` | Show an agent and its policy bundle. |
-| `agent add <config.yaml>` | Register agent(s) from a provisioning manifest. |
+| `agent add <config.yaml>` | Register one or more agents from a provisioning manifest. |
 | `agent rm <id>` | Delete an agent. |
 | `exec ls` | List executions, newest first. |
 | `exec create <agent> [json]` | Start an execution (input defaults to `{}`). |
@@ -36,8 +40,8 @@ rebuno> help
 | `exec cancel <id>` | Cancel a running execution. |
 | `quit` | Stop the kernel and exit. |
 
-IDs accept a unique short-id prefix (the 8-char form shown by `exec ls`), so you
-can type back the IDs you see.
+IDs accept a unique short-id prefix, so you can type back the 8-character form
+that `exec ls` prints.
 
 ```
 rebuno> exec create hello {"query": "hello world"}

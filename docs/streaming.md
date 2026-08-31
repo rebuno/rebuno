@@ -1,47 +1,69 @@
 # Live streaming
 
-The event ledger (`GET /v0/executions/{id}/events`) is completion-granular: a
-polling client sees an `llm_call` step's whole output only when its
-`step.succeeded` event lands. That is the right behavior for durability and
-replay — the ledger records completed facts, and replaying a finished step has
-nothing to stream.
+The event log (`GET /v0/executions/{id}/events`) carries no step output. A
+polling client learns an `llm_call` finished when `step.succeeded` lands, then
+reads the result from `GET /v0/executions/{id}/steps/{step_id}`.
 
-Streaming only has meaning **live**, while a step is executing. For that,
-Rebuno offers an ephemeral side channel that is entirely separate from the
-ledger. Deltas on it are best-effort and never persisted; `step.succeeded`
-remains the single source of truth.
+To watch a step while it runs, Rebuno publishes deltas on a side channel that is
+never persisted.
 
 ## Endpoints
 
-**Producer (agent → kernel), HMAC auth:**
+Producer (agent to kernel), HMAC auth:
 
-    POST /v0/executions/{id}/steps/{step_id}/stream
-    body: {"seq": <int64>, "data": "<opaque provider chunk text>"}
+```http
+POST /v0/executions/{id}/steps/{step_id}/stream
+{"seq": <int64>, "data": "<opaque provider chunk text>"}
+```
 
-The agent, while teeing the provider's stream during `proceed`, batches output
-(~50ms) and POSTs each batch. `data` is opaque — the kernel never parses it.
-`seq` is a per-step counter the agent assigns. A batch's `data` must stay under
-7000 bytes (Postgres NOTIFY payload limit); keep batches small.
+The agent tees the provider's stream while it handles a `proceed` and POSTs each
+batch. `data` is opaque and the kernel never parses it. `seq` is a per-step
+counter the agent assigns, starting at 0. A `data` field over 7000 bytes is
+rejected with `400` and nothing is truncated for you, so the agent has to do the
+slicing. The cap leaves headroom under Postgres's 8000-byte NOTIFY limit for the
+envelope the kernel wraps around the delta.
 
-**Consumer (client → kernel), Bearer auth:**
+The kernel returns `204` whether or not the delta reached anyone, so an agent
+cannot tell from the response that a client is listening.
 
-    GET /v0/executions/{id}/stream        (Server-Sent Events)
-    frames: data: {"step_id":"...","seq":3,"data":"..."}\n\n
-            : keep-alive\n\n   (every 15s)
+Consumer (client to kernel), Bearer auth:
 
-## How it fans out
+```
+GET /v0/executions/{id}/stream        (Server-Sent Events)
 
-The producing replica republishes each delta on one Postgres `LISTEN/NOTIFY`
-channel (`rebuno_stream`); every replica runs a single listener that delivers
-to its locally-connected SSE subscribers. No new tables, no migration.
+frames: data: {"step_id":"...","seq":3,"data":"..."}\n\n
+        : keep-alive\n\n   (every 15s)
+```
+
+### SDK batching behavior
+
+The Python and TypeScript SDKs flush after 2000 characters or 50ms, whichever
+comes first. Each flush is sliced into 1750-character deltas so a run of 4-byte
+UTF-8 characters stays under the kernel's 7000-byte cap. Every delta gets its own
+`seq`.
+
+A replayed step publishes nothing. The SDK streams the recorded body to the
+caller without touching the side channel.
+
+## Fan-out across replicas
+
+Under `rebuno server`, the replica that took the delta republishes it on one
+Postgres `LISTEN/NOTIFY` channel (`rebuno_stream`). Every replica runs a single
+listener and delivers to the subscribers connected to it. `rebuno dev` uses an
+in-process bus, since there is nothing to fan out to.
+
+Each subscriber gets a 64-delta buffer, and the hub sends without blocking. A
+consumer that falls behind drops deltas instead of stalling the producer.
+`pg_notify` does not buffer either, so a delta published while no replica is
+listening is gone.
 
 ## Client contract
 
-- Treat the SSE stream as a live **tail** and `/events` as **truth**. On the
-  terminal `step.succeeded`, read the whole result from `/events`.
-- Use `seq` to detect a gap (a dropped delta or a slow consumer). On a gap,
-  stop rendering deltas and fall back to `/events`.
-- A client connecting mid-stream sees only deltas from connect-time onward
-  (there is no replay buffer). Earlier output comes from `/events` on
-  completion.
-
+- Treat the SSE stream as a live tail and the recorded step result as truth.
+  Read it from `GET /v0/executions/{id}/steps/{step_id}` once `step.succeeded`
+  lands.
+- One execution stream carries every step's deltas, so track `seq` per
+  `step_id`. A gap means a delta was dropped. Stop rendering and wait for the
+  recorded result.
+- A client connecting mid-stream sees only deltas from connect time onward.
+  There is no replay buffer.
