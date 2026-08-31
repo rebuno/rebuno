@@ -1,16 +1,21 @@
 package kernel_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
@@ -858,5 +863,502 @@ func TestLostAckOnTheFinalAttemptCannotFailAParkedExecution(t *testing.T) {
 	}
 	if len(pending) != 1 {
 		t.Fatalf("the approval must still be pending, got %d", len(pending))
+	}
+}
+
+func TestDispatcherDeliveryAndRetry(t *testing.T) {
+	ms := memstore.NewStore()
+	called := 0
+	var lastBody []byte
+	var lastSig string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called++
+		lastBody, _ = io.ReadAll(r.Body)
+		lastSig = r.Header.Get("Rebuno-Signature")
+		// Verify HMAC over raw body.
+		expected := dispatcher.SignPayload("secret", lastBody)
+		if lastSig != "sha256="+expected {
+			t.Errorf("signature mismatch: got %s want sha256=%s", lastSig, expected)
+		}
+		if called < 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Wait for queue-level exponential backoff.
+	time.Sleep(5 * time.Millisecond)
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if called < 2 {
+		t.Fatalf("expected retries, called %d", called)
+	}
+	if lastSig == "" {
+		t.Fatal("missing signature")
+	}
+	// Confirm the transmitted body does not contain a signature field.
+	if bytes.Contains(lastBody, []byte(`"signature"`)) {
+		t.Fatal("signature must not be part of the request body")
+	}
+	exec, _ = k.GetExecution(ctx, exec.ID)
+	if exec.Status != domain.ExecutionRunning {
+		t.Fatalf("expected running after ack, got %s", exec.Status)
+	}
+}
+
+// TestDispatchRejectionExhaustsAndFails guards the regression where an agent
+// 4xx acked the dispatch 'failed' with a NULL next_attempt_at, stranding it:
+// never retried, never exhausted, execution never failed. A persistent 4xx must
+// retry with backoff up to max attempts, then fail the execution.
+func TestDispatchRejectionExhaustsAndFails(t *testing.T) {
+	ms := memstore.NewStore()
+	called := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called++
+		w.WriteHeader(http.StatusBadRequest) // persistent 4xx
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 2, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	// Attempt 1 (fails, schedules retry), then attempt 2 (hits max, exhausts).
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if called < 2 {
+		t.Fatalf("expected 4xx to be retried, called %d", called)
+	}
+	exec, _ = k.GetExecution(ctx, exec.ID)
+	if exec.Status != domain.ExecutionFailed {
+		t.Fatalf("expected execution failed after exhaustion, got %s", exec.Status)
+	}
+	if exec.FailureReason != "dispatch_exhausted" {
+		t.Fatalf("expected dispatch_exhausted reason, got %q", exec.FailureReason)
+	}
+}
+
+// TestDispatchTimeoutBoundsHungAgent verifies a non-responsive agent webhook is
+// bounded by DispatchTimeout rather than blocking a delivery slot indefinitely.
+func TestDispatchTimeoutBoundsHungAgent(t *testing.T) {
+	ms := memstore.NewStore()
+	release := make(chan struct{})
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release // hold the request open until the test releases it
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hung.Close()
+	defer close(release)
+
+	cfg := kernel.Config{
+		ReplicaID:           "test",
+		DispatchMaxAttempts: 1,
+		DispatchBaseDelay:   1 * time.Millisecond,
+		DispatchTimeout:     50 * time.Millisecond,
+	}
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: hung.URL, Secret: "secret"})
+	_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	start := time.Now()
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("delivery was not bounded by DispatchTimeout, took %v", elapsed)
+	}
+}
+
+// TestDispatchConcurrency verifies a batch of slow deliveries runs concurrently:
+// wall-clock time stays far below the serial sum of per-delivery latencies.
+func TestDispatchConcurrency(t *testing.T) {
+	ms := memstore.NewStore()
+	const perCall = 80 * time.Millisecond
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(perCall)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer slow.Close()
+
+	const n = 6
+	cfg := kernel.Config{
+		ReplicaID:           "test",
+		DispatchMaxAttempts: 3,
+		DispatchBaseDelay:   1 * time.Millisecond,
+		DispatchTimeout:     2 * time.Second,
+		DispatchConcurrency: n,
+	}
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: slow.URL, Secret: "secret"})
+	for i := 0; i < n; i++ {
+		_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	}
+
+	start := time.Now()
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	// Serial delivery would take >= n*perCall (480ms). Concurrent delivery should
+	// finish in roughly one perCall window; allow generous slack for CI jitter.
+	if elapsed >= n*perCall/2 {
+		t.Fatalf("deliveries did not run concurrently: took %v for %d jobs of %v each", elapsed, n, perCall)
+	}
+}
+
+func TestDispatchNeverExceedsConcurrency(t *testing.T) {
+	ms := memstore.NewStore()
+	const concurrency = 4
+	var live, peak atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := live.Add(1)
+		for {
+			old := peak.Load()
+			if n <= old || peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+		live.Add(-1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	k := kernel.New(kernel.Config{
+		ReplicaID:            "test",
+		DispatchMaxAttempts:  3,
+		DispatchBaseDelay:    1 * time.Millisecond,
+		DispatchTimeout:      5 * time.Second,
+		DispatchLeaseTimeout: time.Minute,
+		DispatchConcurrency:  concurrency,
+	}, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: srv.URL, Secret: "secret"})
+	for i := 0; i < concurrency*10; i++ {
+		if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := peak.Load(); got > concurrency {
+		t.Fatalf("%d deliveries ran at once with a pool of %d", got, concurrency)
+	}
+}
+
+func TestDispatchLoopClaimsWhileBusy(t *testing.T) {
+	ms := memstore.NewStore()
+	var mu sync.Mutex
+	var slowSeen bool
+	var delivered atomic.Int64
+	slowStarted := make(chan struct{})
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		isSlow := !slowSeen
+		slowSeen = true
+		mu.Unlock()
+		if isSlow {
+			close(slowStarted)
+			<-release
+		}
+		delivered.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	k := kernel.New(kernel.Config{
+		ReplicaID:            "test",
+		DispatchMaxAttempts:  3,
+		DispatchBaseDelay:    1 * time.Millisecond,
+		DispatchTimeout:      5 * time.Second,
+		DispatchLeaseTimeout: time.Minute,
+		DispatchConcurrency:  4,
+	}, memDeps(ms, kernel.Deps{}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: srv.URL, Secret: "secret"})
+	if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- k.RunDispatcher(ctx) }()
+
+	<-slowStarted
+	const later = 5
+	for i := 0; i < later; i++ {
+		if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for delivered.Load() < later && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	got := delivered.Load()
+	close(release)
+	cancel()
+	<-done
+	if got != later {
+		t.Fatalf("delivered %d of %d dispatches enqueued while a worker was busy", got, later)
+	}
+}
+
+func TestReclaimDrainsStalledBacklog(t *testing.T) {
+	ms := memstore.NewStore()
+	var delivered atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		delivered.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	k := kernel.New(kernel.Config{
+		ReplicaID:            "test",
+		DispatchMaxAttempts:  5,
+		DispatchBaseDelay:    1 * time.Millisecond,
+		DispatchTimeout:      5 * time.Second,
+		DispatchLeaseTimeout: time.Minute,
+		DispatchConcurrency:  4,
+	}, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: srv.URL, Secret: "secret"})
+
+	// Must exceed the reclaim query's page size for the drain to matter.
+	const stranded = 250
+	dead, expired := "dead-replica", time.Now().UTC().Add(-time.Hour)
+	for i := 0; i < stranded; i++ {
+		exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ds, err := ms.ListDispatchesByExecution(ctx, exec.ID)
+		if err != nil || len(ds) != 1 {
+			t.Fatalf("dispatches for %s: %v, %v", exec.ID, ds, err)
+		}
+		d := ds[0]
+		d.Status, d.LockedBy, d.LockedAt = domain.DispatchInFlight, &dead, &expired
+		if err := ms.Enqueue(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := delivered.Load(); got != stranded {
+		t.Fatalf("recovered %d of %d stranded dispatches in one pass", got, stranded)
+	}
+}
+
+// A dispatch reclaimed after a crashed attempt is redelivered under the SAME id
+// (ReclaimStalled updates the row in place). The resumed agent replays from the
+// top, so its occurrence counting has to restart too.
+func TestReclaimedDispatchReplaysFromZero(t *testing.T) {
+	k, ctx := setup(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	q := k.Deps().Queue
+	now := time.Now().UTC()
+
+	claimed, err := q.Claim(ctx, "replica-1", 10, now)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %v (n=%d)", err, len(claimed))
+	}
+	did := domain.Lease{DispatchID: claimed[0].ID, Attempt: claimed[0].Attempt}
+
+	args := json.RawMessage(`{"path":"/tmp"}`)
+	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: did}
+	first, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.CompleteStep(ctx, first.StepID, kernel.CompleteStepRequest{Result: json.RawMessage(`{"n":1}`), Lease: did}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Agent crashes; the lease expires and the dispatch is reclaimed and redelivered.
+	if _, err := q.ReclaimStalled(ctx, now.Add(time.Hour), time.Minute, 10); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := q.Claim(ctx, "replica-2", 10, now.Add(time.Hour))
+	if err != nil || len(reclaimed) != 1 {
+		t.Fatalf("reclaim-claim: %v (n=%d)", err, len(reclaimed))
+	}
+	if reclaimed[0].ID != did.DispatchID {
+		t.Fatalf("expected the same dispatch id on redelivery, got %s", reclaimed[0].ID)
+	}
+
+	req.Lease = domain.Lease{DispatchID: reclaimed[0].ID, Attempt: reclaimed[0].Attempt}
+	resumed, err := k.SubmitStep(ctx, exec.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Decision != "replay" {
+		t.Fatalf("redelivered dispatch must replay, got %s (would re-run the effect)", resumed.Decision)
+	}
+}
+
+// dispatchEvents returns the events of the given type, oldest first.
+func dispatchEvents(t *testing.T, k *kernel.Kernel, execID uuid.UUID, typ string) []map[string]any {
+	t.Helper()
+	events, err := k.GetEvents(context.Background(), execID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, ev := range events {
+		if ev.Type != typ {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal %s payload: %v", ev.Type, err)
+		}
+		out = append(out, payload)
+	}
+	return out
+}
+
+// dispatch.acked must report the dispatch row's own attempt.
+func TestDispatchAckedRecordsRealAttempt(t *testing.T) {
+	ms := memstore.NewStore()
+	called := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called++
+		if called < 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	acked := dispatchEvents(t, k, exec.ID, domain.EventDispatchAcked)
+	if len(acked) != 1 {
+		t.Fatalf("expected one dispatch.acked, got %d", len(acked))
+	}
+	if got := acked[0]["attempt"]; got != float64(2) {
+		t.Fatalf("dispatch.acked must report the second attempt, got %v", got)
+	}
+	queued := dispatchEvents(t, k, exec.ID, domain.EventDispatchQueued)
+	if len(queued) != 1 || queued[0]["attempt"] != float64(0) {
+		t.Fatalf("dispatch.queued must report attempt 0, got %v", queued)
+	}
+}
+
+// Every delivery attempt is recorded, including the one that reaches
+// max_attempts and fails the execution.
+func TestFinalDispatchFailureIsRecorded(t *testing.T) {
+	ms := memstore.NewStore()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+
+	for i := 0; i < cfg.DispatchMaxAttempts; i++ {
+		if err := k.DrainDispatches(ctx); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	failed := dispatchEvents(t, k, exec.ID, domain.EventDispatchFailed)
+	if len(failed) != cfg.DispatchMaxAttempts {
+		t.Fatalf("expected %d dispatch.failed events, got %d", cfg.DispatchMaxAttempts, len(failed))
+	}
+	for i, p := range failed {
+		if got := p["attempt"]; got != float64(i+1) {
+			t.Fatalf("dispatch.failed %d reports attempt %v", i, got)
+		}
+	}
+	got, _ := k.GetExecution(ctx, exec.ID)
+	if got.Status != domain.ExecutionFailed || got.FailureReason != "dispatch_exhausted" {
+		t.Fatalf("expected dispatch_exhausted failure, got %s %q", got.Status, got.FailureReason)
+	}
+}
+
+func TestReleasedDispatchRecordsNoEvent(t *testing.T) {
+	ms := memstore.NewStore()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	cfg := kernel.Config{ReplicaID: "test", DispatchMaxAttempts: 3, DispatchBaseDelay: 1 * time.Millisecond, DispatchTimeout: 1 * time.Second}
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
+	ctx := context.Background()
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	if err := k.DrainDispatches(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.CompleteExecution(ctx, exec.ID, leaseOf(t, k, exec.ID), json.RawMessage(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := dispatchEvents(t, k, exec.ID, domain.EventDispatchDiscarded); len(got) != 0 {
+		t.Fatalf("completing an execution must not record a dispatch event, got %v", got)
+	}
+	events, err := k.GetEvents(ctx, exec.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := events[len(events)-1]
+	if last.Type != domain.EventExecutionCompleted {
+		t.Fatalf("execution.completed must be the final event, got %s", last.Type)
+	}
+
+	// The rows are still retired, so the drain loop cannot re-deliver them.
+	dispatches, err := ms.ListDispatchesByExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatches) == 0 {
+		t.Fatal("expected at least one dispatch row")
+	}
+	for _, d := range dispatches {
+		if d.Status != domain.DispatchExhausted {
+			t.Fatalf("dispatch %s must be retired, got %s", d.ID, d.Status)
+		}
 	}
 }
