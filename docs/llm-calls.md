@@ -50,11 +50,12 @@ The contract is HTTP, so your own gateway can implement it without the SDK. For
 each request:
 
 1. Submit the step to `POST /v0/executions/{id}/steps` as `{kind: "llm_call",
-   target: <model>, args: <request body>}`, with the caller's dispatch id in
-   `Rebuno-Dispatch-Id`. The decision carries the `step_id`.
+   target: <model>, args: <request body>}`, with the caller's dispatch lease in
+   `Rebuno-Dispatch-Id` and `Rebuno-Dispatch-Attempt`. The decision carries the
+   `step_id`.
 2. On `replay`, return the recorded response and skip the provider. On `proceed`,
    forward to the provider and record the response via `.../complete` (or
-   `.../fail`).
+   `.../fail`), under the same lease.
 3. On any other decision, refuse the request with `403`, or `429` for
    `rate_limited`, and a body of `{"error": {"type": "rebuno_refusal", "message":
    "rebuno_refusal: <decision>[ reason=<why>]"}}`. Provider SDKs only ever surface
@@ -62,8 +63,8 @@ each request:
    reads back to turn a `blocked` call into a parked execution rather than a failed
    one.
 
-A gateway needs the dispatch id to reach it, so the agent passes it through on
-each request. A header on the call into the gateway is enough. See
+A gateway needs the dispatch lease to reach it, so the agent passes it through on
+each request. Headers on the call into the gateway are enough. See
 [`examples/gateway/litellm_proxy.py`](../examples/gateway/litellm_proxy.py) for a
 LiteLLM gateway example, and the [HTTP API](api.md#agent-api) for the exact
 request and response shapes.

@@ -7,12 +7,13 @@ Streamed and whole responses are both recorded, and either replays as either. A
 streamed call's chunks are also republished on the kernel's live side channel, so
 clients can render the answer as it is produced — see docs/streaming.md.
 
-The agent forwards four headers per request:
+The agent forwards five headers per request:
 
-    rebuno-execution-id   the execution the call belongs to
-    rebuno-dispatch-id    the dispatch the agent is handling
-    rebuno-agent-id       which agent this is
-    rebuno-agent-secret   its signing secret
+    rebuno-execution-id      the execution the call belongs to
+    rebuno-dispatch-id       the dispatch the agent is handling
+    rebuno-dispatch-attempt  the delivery attempt it arrived under
+    rebuno-agent-id          which agent this is
+    rebuno-agent-secret      its signing secret
 """
 
 import hashlib
@@ -51,6 +52,15 @@ async def _post(
     return resp.json() if resp.content else {}
 
 
+def _lease_headers(headers: dict) -> dict:
+    """The dispatch lease the agent forwarded. The kernel fences every step
+    mutation on it, so a call from a superseded dispatch is refused."""
+    return {
+        "Rebuno-Dispatch-Id": headers["rebuno-dispatch-id"],
+        "Rebuno-Dispatch-Attempt": headers["rebuno-dispatch-attempt"],
+    }
+
+
 def _record_result(body: dict) -> dict:
     """A step result in the envelope the Rebuno SDKs record: the provider response
     as a JSON string under ``body``, alongside the status and content type."""
@@ -73,13 +83,15 @@ class RebunoInterceptor(CustomLogger):
 
         agent_id = headers.get("rebuno-agent-id")
         dispatch_id = headers.get("rebuno-dispatch-id")
+        dispatch_attempt = headers.get("rebuno-dispatch-attempt")
         secret = headers.get("rebuno-agent-secret")
 
-        if not (agent_id and secret and dispatch_id):
+        if not (agent_id and secret and dispatch_id and dispatch_attempt):
             raise HTTPException(
                 status_code=400,
                 detail={
-                    "error": "rebuno gateway: missing rebuno-agent-id / -agent-secret / -dispatch-id"
+                    "error": "rebuno gateway: missing rebuno-agent-id /"
+                    " -agent-secret / -dispatch-id / -dispatch-attempt"
                 },
             )
 
@@ -97,7 +109,7 @@ class RebunoInterceptor(CustomLogger):
             },
             agent_id=agent_id,
             secret=secret,
-            extra={"Rebuno-Dispatch-Id": dispatch_id},
+            extra=_lease_headers(headers),
         )
         if dec["decision"] not in ("proceed", "replay"):
             message = f"rebuno_refusal: {dec['decision']}"
@@ -224,7 +236,7 @@ class RebunoInterceptor(CustomLogger):
             body=body,
             agent_id=headers["rebuno-agent-id"],
             secret=headers["rebuno-agent-secret"],
-            extra={"Rebuno-Dispatch-Id": headers["rebuno-dispatch-id"]},
+            extra=_lease_headers(headers),
         )
 
 
