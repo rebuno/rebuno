@@ -81,6 +81,12 @@ handler is still running. Handlers routinely outlive a fixed lease, so the
 context wraps the whole handler in a `setInterval` that calls `heartbeat` every
 30 seconds.
 
+The lease is the `(dispatch_id, dispatch_attempt)` pair the webhook arrived
+with, and every mutation sends it back. A handler whose dispatch was reclaimed
+and re-delivered is therefore refused rather than writing alongside the attempt
+that replaced it. Its next heartbeat throws `LeaseSuperseded`, which aborts the
+handler's kernel client.
+
 The heartbeat only fires if the handler yields to the event loop. Everything
 naturally long in a handler (provider calls, MCP tools, kernel round-trips) is
 I/O-bound and async, so this holds. A fully synchronous, blocking body starves
