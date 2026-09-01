@@ -70,7 +70,7 @@ Reference:
 - [Deployment](docs/deployment.md): running the production kernel, config, and Docker.
 - [Python SDK](docs/sdk/python): building with Python
 - [TypeScript SDK](docs/sdk/typescript): building with TypeScript
-- [Dashboard](https://github.com/rebuno/dashboard): web UI to view executions, steps, events, and agent activity.
+- [Dashboard](docs/dashboard.md): web UI to view executions, steps, events, and agent activity.
 
 ## License
 
