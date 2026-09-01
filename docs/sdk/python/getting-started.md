@@ -6,7 +6,7 @@
 pip install rebuno
 ```
 
-Requires Python 3.11 or later. The SDK pulls in `httpx`, `pydantic` (v2),
+Requires Python 3.11 or later. The SDK pulls in `httpx2`, `pydantic` (v2),
 `fastapi`, and `uvicorn`.
 
 ## Configuration

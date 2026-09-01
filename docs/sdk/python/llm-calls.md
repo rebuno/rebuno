@@ -1,7 +1,7 @@
 # LLM calls
 
 Rebuno records LLM calls as `llm_call` steps without you rewriting how you call
-the model. `rebuno.http_client()` returns an `httpx.AsyncClient` you hand to your
+the model. `rebuno.http_client()` returns an `httpx2.AsyncClient` you hand to your
 provider's async client:
 
 ```python
@@ -11,12 +11,30 @@ import rebuno
 llm = AsyncOpenAI(http_client=rebuno.http_client())
 ```
 
-Any provider SDK built on `httpx` that accepts a custom client works the same
+Any provider SDK built on `httpx2` that accepts a custom client works the same
 way, such as Anthropic's `AsyncAnthropic(http_client=...)`.
+
+`httpx2` is a separate package from `httpx`, and the two client types are not
+interchangeable. A provider SDK still on `httpx` rejects the client. For the
+OpenAI SDK that means version 3.0 or later, or 2.48 and later installed as
+`openai[httpx2]`.
+
+For an SDK with no `httpx2` support, `httpx2.alias_httpx()` makes `import httpx`
+resolve to `httpx2` for the whole process, so the client passes the SDK's type
+check. Call it from your entrypoint before anything imports `httpx`:
+
+```python
+import httpx2
+
+httpx2.alias_httpx()
+```
+
+It rebinds `httpx` for every dependency in the process, so anything relying on
+an `httpx` API that `httpx2` dropped breaks with it.
 
 ## How it works
 
-`http_client()` installs `RebunoTransport` under the provider SDK, so `httpx`
+`http_client()` installs `RebunoTransport` under the provider SDK, so `httpx2`
 routes every request through it on the way to the network.
 
 With no active execution the transport is a plain passthrough. The same client
@@ -30,7 +48,7 @@ calls (see [How it works](internals.md)).
   `{status, headers, body}` as the step result. An error status is recorded like
   any other, so a recorded `500` replays as that same `500`. The provider SDK's
   own retry of a `500` is a fresh request, and records a separate step.
-- On resume it rebuilds an `httpx.Response` from the recorded one. The provider
+- On resume it rebuilds an `httpx2.Response` from the recorded one. The provider
   is never called again, so a replay doesn't pay for the model twice.
 
 The provider SDK parses the rebuilt response as if it came off the wire, so your
@@ -82,7 +100,7 @@ Rebuno-aware LLM gateway emits the same marker, so the same call covers it.
 
 ```python
 rebuno.http_client(
-    timeout=30.0,          # any extra kwargs are forwarded to httpx.AsyncClient
+    timeout=30.0,          # any extra kwargs are forwarded to httpx2.AsyncClient
 )
 ```
 
@@ -92,9 +110,9 @@ You can also construct the transport directly, wrapping an existing one to keep
 a custom proxy or retry config:
 
 ```python
-import httpx
+import httpx2
 from rebuno import RebunoTransport
 
-transport = RebunoTransport(httpx.AsyncHTTPTransport())
-llm = AsyncOpenAI(http_client=httpx.AsyncClient(transport=transport))
+transport = RebunoTransport(httpx2.AsyncHTTPTransport())
+llm = AsyncOpenAI(http_client=httpx2.AsyncClient(transport=transport))
 ```
