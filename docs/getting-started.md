@@ -43,17 +43,17 @@ npx tsx examples/typescript/hello.ts
 
 ## Create an execution
 
-The kernel opens a REPL at the `rebuno>` prompt. Run these commands there:
+In a third terminal:
 
-```
-rebuno> exec create hello {"query": "hello world"}
-  created a1b2c3d4 (pending) — 'exec watch a1b2c3d4' to follow
-rebuno> exec watch a1b2c3d4
-rebuno> exec events a1b2c3d4
+```bash
+rebuno exec create hello '{"query": "hello world"}'
+  created 01a05eb7-e102-78e9 (pending); follow with 'rebuno exec watch 01a05eb7-e102-78e9'
+rebuno exec watch 01a05eb7-e102-78e9
+rebuno exec events 01a05eb7-e102-78e9
 ```
 
 `exec watch` tails events until the run finishes. `exec events` prints the whole
-log with payloads.
+log with payloads. See [CLI](cli.md).
 
 ## Where to go next
 

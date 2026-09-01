@@ -231,7 +231,8 @@ printing its decision and rule.
 A finished execution is the other source of cases. Replaying one feeds its
 recorded steps back through a bundle and fails the steps a change would now
 decide differently. The steps come from a running kernel, so replay names an
-agent and reads `REBUNO_URL` and `REBUNO_API_KEY`, or calls
+agent with `--agent-id` and reaches a kernel the way every command does
+([CLI](cli.md)), or calls
 [`POST /v0/policies/{agent_id}/test`](api.md#policy) directly.
 
 ```bash

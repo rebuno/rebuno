@@ -32,7 +32,7 @@ func devCmd() *cobra.Command {
 	var configPath string
 	cmd := &cobra.Command{
 		Use:   "dev",
-		Short: "Start a development kernel (in-memory, no auth, no dependencies)",
+		Short: "Start a development kernel",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg.AgentBearerToken = "" // auth disabled in dev
 			return runDev(cfg, configPath)
@@ -67,7 +67,7 @@ func runDev(cfg config.Config, configPath string) error {
 	replicaID := "dev-" + time.Now().Format("20060102-150405")
 	k := kernel.New(kernel.Config{ReplicaID: replicaID}, deps)
 
-	agentsDesc := "none (use --config <file> or the REPL to register agents)"
+	agentsDesc := "none (register with --config <file> or 'rebuno agent add')"
 	if configPath != "" {
 		agents, err := loadAgentConfig(configPath)
 		if err != nil {
@@ -79,14 +79,10 @@ func runDev(cfg config.Config, configPath string) error {
 		agentsDesc = fmt.Sprintf("%d provisioned from %s", len(agents), configPath)
 	}
 
-	fmt.Printf("\nrebuno dev — development mode\n\n")
+	fmt.Printf("\nrebuno dev (development mode)\n\n")
 	fmt.Printf("  kernel    http://%s\n", cfg.ListenAddr)
 	fmt.Printf("  agents    %s\n", agentsDesc)
 	fmt.Printf("  storage   in-memory (data lost on restart)\n\n")
-
-	if isInteractive() {
-		go runREPL(ctx, k, cancel)
-	}
 
 	hub := stream.NewHub(stream.NewMemoryBus())
 	return serve(ctx, cfg, deps, logger, replicaID, nil, hub)

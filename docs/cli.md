@@ -1,11 +1,8 @@
 # CLI
 
-The `rebuno` binary is the kernel. It has four commands:
-
 ```bash
 rebuno dev
 rebuno server --db-url DB_URL --bearer-token TOKEN
-rebuno policy test BUNDLE
 rebuno version
 ```
 
@@ -19,43 +16,101 @@ policies at boot, plus `--listen-addr`, `--log-level`, and `--log-format`. See
 Build it with `make build`, which writes `bin/rebuno`, or run from source with
 `go run ./cmd/rebuno …`.
 
-## Testing a policy bundle
+## Reaching a kernel
 
-`rebuno policy test <bundle.yaml>` evaluates a bundle against the cases beside
-it and exits non-zero if any expectation goes unmet. It needs no running kernel
-unless `--execution` replays a past execution. `--target` probes a single input
-instead. See
-[Testing a bundle](policy.md#testing-a-bundle).
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REBUNO_URL` | `http://localhost:8080` | Kernel base URL. Override per command with `--url`. |
+| `REBUNO_API_KEY` | none | Bearer token. Required against a kernel started with `rebuno server`. |
 
-## The dev REPL
-
-`rebuno dev` starts an interactive REPL when stdin is a terminal.
-
+```bash
+export REBUNO_URL=https://rebuno.internal
+export REBUNO_API_KEY=…
+rebuno exec ls
 ```
-rebuno> help
-```
+
+## Agents
 
 | Command | Description |
 |---------|-------------|
-| `agent ls` | List registered agents. |
-| `agent get <id>` | Show an agent and its policy bundle. |
-| `agent add <config.yaml>` | Register one or more agents from a provisioning manifest. |
-| `agent rm <id>` | Delete an agent. |
-| `exec ls` | List executions, newest first. |
-| `exec create <agent> [json]` | Start an execution (input defaults to `{}`). |
-| `exec get <id>` | Show an execution's status and output. |
-| `exec watch <id>` | Tail an execution's events until it finishes. |
-| `exec events <id>` | Print the full event log with expanded payloads. |
-| `exec cancel <id>` | Cancel a running execution. |
-| `quit` | Stop the kernel and exit. |
+| `rebuno agent ls` | List registered agents. |
+| `rebuno agent get <id>` | Show an agent and its policy bundle. |
+| `rebuno agent add <config.yaml>` | Register one or more agents from a provisioning manifest. |
+| `rebuno agent rm <id>` | Delete an agent. |
 
-IDs accept a unique short-id prefix, so you can type back the 8-character form
-that `exec ls` prints.
+## Executions
 
+| Command | Description |
+|---------|-------------|
+| `rebuno exec ls` | List executions, newest first. |
+| `rebuno exec create <agent> [json]` | Start an execution (input defaults to `{}`). |
+| `rebuno exec get <id>` | Show an execution's status and output. |
+| `rebuno exec watch <id>` | Tail an execution's events until it finishes. |
+| `rebuno exec events <id>` | Print the full event log with expanded payloads. |
+| `rebuno exec cancel <id>` | Cancel a running execution. |
+
+`exec ls` narrows with `--agent`, `--status`, and `--limit`.
+
+```bash
+rebuno exec create hello '{"query": "hello world"}'
+  created 01a05eb7-e102-78e9 (pending); follow with 'rebuno exec watch 01a05eb7-e102-78e9'
+rebuno exec watch 01a05eb7-e102-78e9
 ```
-rebuno> exec create hello {"query": "hello world"}
-  created a1b2c3d4 (pending) — 'exec watch a1b2c3d4' to follow
-rebuno> exec watch a1b2c3d4
+
+Quote the input so your shell keeps it in one piece. `exec watch` exits non-zero
+if the execution failed or was cancelled, so it can gate a script.
+
+## Approvals
+
+| Command | Description |
+|---------|-------------|
+| `rebuno approval ls` | List approvals still pending. |
+| `rebuno approval get <id>` | Show one approval. |
+| `rebuno approval grant <id>` | Let the gated step proceed. |
+| `rebuno approval deny <id>` | Refuse the gated step. |
+
+Both decisions record who made them: `--by` names the approver and defaults to
+`$USER`, and `--reason` records a rationale alongside it.
+
+```bash
+rebuno approval deny 01a05eb8-1c74-7f1e --reason "change freeze"
 ```
 
-Command history persists to `~/.rebuno_repl_history`.
+See [Policy](policy.md) for what puts a step in front of you.
+
+## Policy
+
+| Command | Description |
+|---------|-------------|
+| `rebuno policy test <bundle.yaml>` | Evaluate a bundle against test cases. |
+| `rebuno policy set <agent-id> <bundle.yaml>` | Load or replace an agent's bundle. |
+
+Both compile the bundle locally first, so one that does not parse is refused
+before it reaches the kernel.
+
+`policy test` runs the cases in the `.policytest.yaml` beside the bundle, and
+exits non-zero if any expectation goes unmet.
+
+| Flag | Description |
+|------|-------------|
+| `--cases <file>` | Take the cases from this file instead. |
+| `--target <name>` | Probe one input rather than running cases, with `--args` and `--kind`. |
+| `--execution <id>` | Replay a past execution's recorded steps, with `--agent-id`. Needs a running kernel. |
+
+See [Testing a bundle](policy.md#testing-a-bundle).
+
+## Ids
+
+Listings print a shortened id. Any command taking an id accepts that, or any
+other prefix of the full one.
+
+```bash
+rebuno exec ls
+  ID                 AGENT   STATUS   AGE
+  01a05eb6-cb55-7889 hello   running  4s
+
+rebuno exec get 01a05eb6-cb55-7889
+rebuno exec get 01a05eb6-cb55
+```
+
+A prefix that matches more than one execution is refused.

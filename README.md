@@ -23,7 +23,7 @@ It records every tool call and LLM call as a durable step. Interrupted runs resu
 
 **Prerequisites:** Go 1.26+, Python 3.10+ / Node 22+
 
-Start the dev kernel. With a terminal attached it drops you into a REPL:
+Start the dev kernel:
 
 ```bash
 go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
@@ -43,11 +43,11 @@ npm install rebuno
 npx tsx examples/typescript/hello.ts
 ```
 
-Create an execution from the REPL and follow its event log:
+Create an execution and follow its event log:
 
-```
-rebuno> exec create hello {"query": "hello world"}
-rebuno> exec events <id>
+```bash
+rebuno exec create hello '{"query": "hello world"}'
+rebuno exec watch <id>
 ```
 
 ## Documentation
@@ -66,7 +66,7 @@ Reference:
 - [Policy](docs/policy.md): the YAML rule language for allow / deny / require-approval.
 - [Events](docs/events.md): the event types and their payloads.
 - [HTTP API](docs/api.md): the `/v0` client, agent, and admin endpoints.
-- [CLI](docs/cli.md): the `rebuno` binary and its dev REPL.
+- [CLI](docs/cli.md): the `rebuno` binary and its commands.
 - [Deployment](docs/deployment.md): running the production kernel, config, and Docker.
 - [Python SDK](docs/sdk/python): building with Python
 - [TypeScript SDK](docs/sdk/typescript): building with TypeScript

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,20 +9,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/rebuno/rebuno/internal/api"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
 )
 
-const (
-	maxLabelWidth  = 56
-	defaultTimeout = 30 * time.Second
-)
+const maxLabelWidth = 56
 
 type policyTestOpts struct {
 	casesPath string
@@ -32,7 +28,6 @@ type policyTestOpts struct {
 	args      string
 	kind      string
 	execution string
-	kernelURL string
 }
 
 func policyCmd() *cobra.Command {
@@ -40,8 +35,36 @@ func policyCmd() *cobra.Command {
 		Use:   "policy",
 		Short: "Work with policy bundles",
 	}
-	cmd.AddCommand(policyTestCmd())
+	cmd.AddCommand(policyTestCmd(), policySetCmd())
 	return cmd
+}
+
+func policySetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set <agent-id> <bundle.yaml>",
+		Short: "Load or replace an agent's policy bundle",
+		Long: "Load or replace an agent's policy bundle. The bundle is compiled locally\n" +
+			"first, so one that does not parse is refused before it can reach the\n" +
+			"kernel and weaken enforcement.",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bundle, err := os.ReadFile(args[1])
+			if err != nil {
+				return err
+			}
+			if _, err := policy.NewRuleEngineFromBundle(string(bundle)); err != nil {
+				return fmt.Errorf("%s: %w", args[1], err)
+			}
+			path := "/v0/policies/" + url.PathEscape(args[0])
+			req := api.LoadPolicyRequest{Bundle: string(bundle)}
+			if err := kernelClient().do(cmd.Context(), http.MethodPost, path, req, nil); err != nil {
+				return err
+			}
+			fmt.Printf("  loaded %d bytes onto %s\n", len(bundle), args[0])
+			return nil
+		},
+	}
 }
 
 func policyTestCmd() *cobra.Command {
@@ -54,8 +77,7 @@ func policyTestCmd() *cobra.Command {
 			"<bundle>.policytest.yaml beside the bundle.\n\n" +
 			"With --target the bundle is probed with a single input instead, printing\n" +
 			"the decision and the rule behind it. With --execution the cases come from\n" +
-			"a past execution's recorded steps, which a running kernel serves; set\n" +
-			"REBUNO_API_KEY when that kernel enforces auth.",
+			"a past execution's recorded steps, which a running kernel serves.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,7 +91,6 @@ func policyTestCmd() *cobra.Command {
 	f.StringVar(&opts.args, "args", "", "JSON arguments for --target")
 	f.StringVar(&opts.kind, "kind", "", "Step kind for --target (tool_call, llm_call, local; default tool_call)")
 	f.StringVar(&opts.execution, "execution", "", "Replay this execution's recorded steps, with --agent-id")
-	f.StringVar(&opts.kernelURL, "url", kernelURL(), "Kernel base URL ($REBUNO_URL)")
 	return cmd
 }
 
@@ -122,45 +143,13 @@ func replayPolicy(ctx context.Context, bundle string, opts policyTestOpts) (poli
 	if err != nil {
 		return policy.Report{}, fmt.Errorf("--execution: %q is not a full execution id", opts.execution)
 	}
-	body, err := json.Marshal(kernel.PolicyTestRequest{Bundle: bundle, ExecutionID: &execID})
-	if err != nil {
-		return policy.Report{}, err
-	}
-
-	endpoint := strings.TrimSuffix(opts.kernelURL, "/") + "/v0/policies/" + url.PathEscape(opts.agentID) + "/test"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return policy.Report{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if key := os.Getenv("REBUNO_API_KEY"); key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
-	resp, err := (&http.Client{Timeout: defaultTimeout}).Do(req)
-	if err != nil {
-		return policy.Report{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		var apiErr domain.APIError
-		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err == nil && apiErr.Message != "" {
-			return policy.Report{}, fmt.Errorf("%s: %s", resp.Status, apiErr.Message)
-		}
-		return policy.Report{}, fmt.Errorf("%s", resp.Status)
-	}
+	req := kernel.PolicyTestRequest{Bundle: bundle, ExecutionID: &execID}
+	path := "/v0/policies/" + url.PathEscape(opts.agentID) + "/test"
 	var report policy.Report
-	if err := json.NewDecoder(resp.Body).Decode(&report); err != nil {
+	if err := kernelClient().do(ctx, http.MethodPost, path, req, &report); err != nil {
 		return policy.Report{}, err
 	}
 	return report, nil
-}
-
-func kernelURL() string {
-	if v := os.Getenv("REBUNO_URL"); v != "" {
-		return v
-	}
-	return "http://localhost:8080"
 }
 
 func policyTestCases(bundlePath string, opts policyTestOpts) ([]policy.Case, error) {

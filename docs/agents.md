@@ -7,8 +7,8 @@ webhook when there is work to do, and the agent sends its effects
 ## Register an agent
 
 An agent needs a `webhook_url` and an HMAC `secret`. There are three ways to
-register one: a provisioning manifest at kernel boot (`--config`), the dev REPL's
-`agent add`, or the admin API (`POST /v0/agents`). See
+register one: a provisioning manifest at kernel boot (`--config`), 
+`rebuno agent add`, or the admin API (`POST /v0/agents`). See
 [Provisioning agents](deployment.md#provisioning-agents).
 
 ```yaml
