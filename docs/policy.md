@@ -77,7 +77,7 @@ when:
   target: shell_exec
   arguments:
     command:
-      regex: '^\s*(ls|cat|pwd|echo|whoami|date)(\s|$)'
+      regex: '^\s*(ls|cat|pwd|echo|whoami|date)(\s+[^;&|<>$`()\\]*)?\s*$'
 ```
 
 | Constraint | Passes when the value… |
@@ -193,6 +193,51 @@ OpenAI-style stream requested without `stream_options.include_usage`, and
 `rebuno_llm_usage_missing_total` counts those. If the kernel cannot read the
 execution's usage at all, it lets the step through.
 
+## Testing a bundle
+
+`rebuno policy test` evaluates a bundle against cases and exits non-zero when a
+decision does not match what the case expects.
+
+```bash
+rebuno policy test examples/policies/shell.yaml
+```
+
+Cases live beside the bundle, `shell.yaml` with `shell.policytest.yaml`, or
+wherever `--cases` points.
+
+```yaml
+agent_id: shell             # inherited by cases that do not name one
+cases:
+  - name: read-only command
+    target: shell_exec
+    args: { command: "ls -la /tmp" }
+    expect: allow
+    expect_rule: allow-safe-shell
+  - name: chained command
+    target: shell_exec
+    args: { command: "ls /tmp; rm -rf /" }
+    expect: require_approval
+```
+
+`target` is required and `kind` defaults to `tool_call`. `expect` is the
+decision the case must produce and `expect_rule` the rule that must make it,
+which catches a case still decided correctly but by the wrong rule. Omit both to
+assert nothing. Unknown keys are rejected. A run also lists the rules no case
+reached, which is how a rule shadowed by a broader one above it shows up.
+
+`--target <name> --args '{...}'` probes a single input instead of running cases,
+printing its decision and rule.
+
+A finished execution is the other source of cases. Replaying one feeds its
+recorded steps back through a bundle and fails the steps a change would now
+decide differently. The steps come from a running kernel, so replay names an
+agent and reads `REBUNO_URL` and `REBUNO_API_KEY`, or calls
+[`POST /v0/policies/{agent_id}/test`](api.md#policy) directly.
+
+```bash
+rebuno policy test shell.yaml --execution <id> --agent-id shell
+```
+
 ## Examples
 
 **Deny by default, allow only known tools:**
@@ -221,7 +266,7 @@ rules:
       target: shell_exec
       arguments:
         command:
-          regex: '^\s*(ls|cat|pwd|echo|whoami|date|uname|df|head|tail|wc)(\s|$)'
+          regex: '^\s*(ls|cat|pwd|echo|whoami|date|uname|df|head|tail|wc)(\s+[^;&|<>$`()\\]*)?\s*$'
     then:
       decision: allow
       reason: safe read-only command

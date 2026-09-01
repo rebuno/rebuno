@@ -1,10 +1,11 @@
 # CLI
 
-The `rebuno` binary is the kernel. It has three commands:
+The `rebuno` binary is the kernel. It has four commands:
 
 ```bash
 rebuno dev
 rebuno server --db-url DB_URL --bearer-token TOKEN
+rebuno policy test BUNDLE
 rebuno version
 ```
 
@@ -17,6 +18,14 @@ policies at boot, plus `--listen-addr`, `--log-level`, and `--log-format`. See
 
 Build it with `make build`, which writes `bin/rebuno`, or run from source with
 `go run ./cmd/rebuno …`.
+
+## Testing a policy bundle
+
+`rebuno policy test <bundle.yaml>` evaluates a bundle against the cases beside
+it and exits non-zero if any expectation goes unmet. It needs no running kernel
+unless `--execution` replays a past execution. `--target` probes a single input
+instead. See
+[Testing a bundle](policy.md#testing-a-bundle).
 
 ## The dev REPL
 

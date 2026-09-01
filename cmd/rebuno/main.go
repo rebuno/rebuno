@@ -14,7 +14,7 @@ func main() {
 		Use:   "rebuno",
 		Short: "Rebuno — kernel-authoritative execution runtime for AI agents",
 	}
-	root.AddCommand(versionCmd(), serverCmd(), devCmd())
+	root.AddCommand(versionCmd(), serverCmd(), devCmd(), policyCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

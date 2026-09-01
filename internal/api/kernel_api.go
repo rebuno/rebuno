@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
+	"github.com/rebuno/rebuno/internal/policy"
 )
 
 type KernelAPI struct {
@@ -87,6 +88,10 @@ func (k *KernelAPI) DeleteAgent(ctx context.Context, id string) error {
 
 func (k *KernelAPI) LoadPolicyBundle(ctx context.Context, agentID string, bundle string) error {
 	return k.Inner.LoadPolicyBundle(ctx, agentID, bundle)
+}
+
+func (k *KernelAPI) TestPolicy(ctx context.Context, agentID string, req kernel.PolicyTestRequest) (policy.Report, error) {
+	return k.Inner.TestPolicy(ctx, agentID, req)
 }
 
 func (k *KernelAPI) ListPendingApprovals(ctx context.Context) ([]domain.Approval, error) {

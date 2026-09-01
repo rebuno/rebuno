@@ -119,7 +119,7 @@ func (k *Kernel) decideStep(
 				domain.PolicyResult{
 					Decision: domain.DecisionDeny,
 					Reason:   "prior attempt outcome unknown; retry refused",
-					RuleID:   "__indeterminate_retry",
+					RuleID:   domain.RuleIndeterminateRetry,
 				})
 		}
 	}

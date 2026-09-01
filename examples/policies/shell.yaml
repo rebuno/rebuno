@@ -10,7 +10,7 @@ rules:
       target: shell_exec
       arguments:
         command:
-          regex: '^\s*(ls|cat|pwd|echo|whoami|date|uname|df|free|uptime|head|tail|wc)(\s|$)'
+          regex: '^\s*(ls|cat|pwd|echo|whoami|date|uname|df|free|uptime|head|tail|wc)(\s+[^;&|<>$`()\\]*)?\s*$'
     then:
       decision: allow
       reason: safe read-only command

@@ -98,6 +98,14 @@ func NewRuleEngineFromBundle(bundleYAML string) (*RuleEngine, error) {
 	return NewRuleEngine(cfg)
 }
 
+func (e *RuleEngine) RuleIDs() []string {
+	ids := make([]string, len(e.rules))
+	for i, r := range e.rules {
+		ids[i] = r.ID
+	}
+	return ids
+}
+
 func (e *RuleEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
 	for _, rule := range e.rules {
 		if matches(rule.When, input) {

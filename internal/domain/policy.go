@@ -19,6 +19,10 @@ const (
 	DecisionRequireApproval = "require_approval"
 )
 
+// RuleIndeterminateRetry marks a denial no rule made: an at_most_once retry
+// refused after an indeterminate outcome.
+const RuleIndeterminateRetry = "__indeterminate_retry"
+
 type PolicyResult struct {
 	Decision       string               `json:"decision" yaml:"decision"`
 	Reason         string               `json:"reason,omitempty" yaml:"reason,omitempty"`

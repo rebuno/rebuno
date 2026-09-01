@@ -179,6 +179,12 @@ stalled.
 `POST /v0/policies/{agent_id}` · bearer loads or replaces the agent's bundle.
 Body `{ "bundle": "<raw YAML>" }` → `204`. See [Policy](policy.md).
 
+`POST /v0/policies/{agent_id}/test` · bearer evaluates a bundle without storing
+it. Body `{ "bundle?", "cases?", "execution_id?" }`. Omit `bundle` to test the
+agent's stored one; give `cases` to evaluate inputs, or `execution_id` to replay
+a past execution's steps. Returns each case's decision and a count of those that
+did not match. See [Testing a bundle](policy.md#testing-a-bundle).
+
 ### Approvals
 
 `GET /v0/approvals` · bearer lists pending approvals.

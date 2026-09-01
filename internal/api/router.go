@@ -77,6 +77,7 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(bearer).Get("/v0/agents/{id}", r.getAgent)
 	mux.With(bearer).Delete("/v0/agents/{id}", r.deleteAgent)
 	mux.With(bearer).Post("/v0/policies/{agent_id}", r.loadPolicy)
+	mux.With(bearer).Post("/v0/policies/{agent_id}/test", r.testPolicy)
 	mux.With(bearer).Get("/v0/approvals", r.listApprovals)
 	mux.With(bearer).Get("/v0/approvals/{id}", r.getApproval)
 	mux.With(bearer).Post("/v0/approvals/{id}/grant", r.grantApproval)

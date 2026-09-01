@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
+	"github.com/rebuno/rebuno/internal/policy"
 )
 
 type AdminKernel interface {
@@ -16,6 +17,7 @@ type AdminKernel interface {
 	ListAgents(ctx context.Context) ([]domain.Agent, error)
 	DeleteAgent(ctx context.Context, id string) error
 	LoadPolicyBundle(ctx context.Context, agentID string, bundle string) error
+	TestPolicy(ctx context.Context, agentID string, req kernel.PolicyTestRequest) (policy.Report, error)
 	ListPendingApprovals(ctx context.Context) ([]domain.Approval, error)
 	GetApproval(ctx context.Context, id uuid.UUID) (domain.Approval, error)
 	GrantApproval(ctx context.Context, id uuid.UUID, req kernel.GrantApprovalRequest) error
@@ -90,6 +92,21 @@ func (rt *Router) loadPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteNoContent(w)
+}
+
+func (rt *Router) testPolicy(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "agent_id")
+	var req kernel.PolicyTestRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteError(w, err)
+		return
+	}
+	report, err := rt.admin.TestPolicy(r.Context(), id, req)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteJSON(w, report, http.StatusOK)
 }
 
 func (rt *Router) listApprovals(w http.ResponseWriter, r *http.Request) {
