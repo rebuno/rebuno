@@ -33,7 +33,6 @@ Otherwise call `await client.close()` when you're done.
 execution = await client.create(
     "dev-agent",
     input={"prompt": "hello"},   # optional; shape matches the handler signature
-    agent_version="",            # optional; pin a specific agent version
 )
 
 execution = await client.get(execution.id)   # current state
@@ -87,7 +86,7 @@ all subclasses of `rebuno.RebunoError`. See [Errors](errors.md).
 `Client` returns pydantic models. They ignore unknown fields, so kernel
 additions won't break you.
 
-- `Execution`: `id`, `agent_id`, `agent_version`, `input`, `status`, `output`,
+- `Execution`: `id`, `agent_id`, `input`, `status`, `output`,
   `failure_reason`. `status` is an `ExecutionStatus`, one of `pending`,
   `running`, `blocked`, `completed`, `failed`, `cancelled`.
 - `Step`: `step_id`, `execution_id`, `kind`, `target`, `args_hash`,

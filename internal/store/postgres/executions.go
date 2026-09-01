@@ -29,9 +29,9 @@ func createExecution(ctx context.Context, q Querier, exec domain.Execution) erro
 	}
 
 	_, err := q.Exec(ctx, `
-		INSERT INTO executions (id, agent_id, agent_version, input, status, output, failure_reason, created_at, updated_at, deadline_at)
-		VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9, $10)
-	`, exec.ID.String(), exec.AgentID, exec.AgentVersion, rawArg(exec.Input), string(exec.Status),
+		INSERT INTO executions (id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at)
+		VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8, $9)
+	`, exec.ID.String(), exec.AgentID, rawArg(exec.Input), string(exec.Status),
 		rawArg(exec.Output), exec.FailureReason, createdAt, updatedAt, timeArg(exec.DeadlineAt),
 	)
 	if err != nil {
@@ -56,7 +56,7 @@ func (q querier) GetExecution(ctx context.Context, id uuid.UUID) (domain.Executi
 
 func getExecution(ctx context.Context, q Querier, id uuid.UUID) (domain.Execution, error) {
 	row := q.QueryRow(ctx, `
-		SELECT id, agent_id, agent_version, input, status, output, failure_reason, created_at, updated_at, deadline_at
+		SELECT id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at
 		FROM executions
 		WHERE id = $1
 	`, id.String())
@@ -87,7 +87,7 @@ func listExecutions(ctx context.Context, q Querier, filter domain.ExecutionFilte
 	// Fetch one extra row to detect whether a further page exists. Keyset
 	// pagination on id DESC; id is UUIDv7 so id order is creation order.
 	rows, err := q.Query(ctx, `
-		SELECT id, agent_id, agent_version, input, status, output, failure_reason, created_at, updated_at, deadline_at
+		SELECT id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at
 		FROM executions
 		WHERE ($1 = '' OR agent_id = $1)
 		  AND ($2 = '' OR status = $2)
@@ -165,7 +165,7 @@ func (q querier) ListExpiredExecutions(ctx context.Context, now time.Time) ([]do
 
 func listExpiredExecutions(ctx context.Context, q Querier, now time.Time) ([]domain.Execution, error) {
 	rows, err := q.Query(ctx, `
-		SELECT id, agent_id, agent_version, input, status, output, failure_reason, created_at, updated_at, deadline_at
+		SELECT id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at
 		FROM executions
 		WHERE status IN ('pending','running','blocked')
 		  AND deadline_at <= $1
@@ -209,7 +209,7 @@ func scanExecution(row pgx.Row) (domain.Execution, error) {
 	var input, output *string
 
 	if err := row.Scan(
-		&idStr, &exec.AgentID, &exec.AgentVersion, &input, &status,
+		&idStr, &exec.AgentID, &input, &status,
 		&output, &exec.FailureReason, &exec.CreatedAt, &exec.UpdatedAt, &exec.DeadlineAt,
 	); err != nil {
 		return domain.Execution{}, err

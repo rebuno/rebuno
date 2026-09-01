@@ -34,7 +34,7 @@ func setupStreamRouterFixtures(t *testing.T) (*api.KernelAPI, string) {
 		t.Fatal(err)
 	}
 	adapt := &api.KernelAPI{Inner: k}
-	exec, err := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`), "")
+	exec, err := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

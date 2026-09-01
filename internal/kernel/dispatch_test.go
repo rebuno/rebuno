@@ -58,7 +58,7 @@ func TestDispatchLeaseSurvivesAck(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	// First delivery: the webhook returns 200. The dispatch must stay
 	// in_flight (not be acked) so the lease can expire and be reclaimed.
@@ -146,7 +146,7 @@ func TestDispatchLeaseRenewedByHeartbeat(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestCompleteExecutionReleasesLease(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
@@ -232,7 +232,7 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalPolicy()}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	// Deliver, then submit a step that requires approval.
 	if err := k.DrainDispatches(ctx); err != nil {
@@ -310,7 +310,7 @@ func TestDispatchRedeliveryCapFailsExecution(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	// Attempt 1: deliver succeeds, dispatch stays in_flight.
 	if err := k.DrainDispatches(ctx); err != nil {
@@ -359,7 +359,7 @@ func TestSubmitStepRenewsLease(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
@@ -405,7 +405,7 @@ func TestApprovedAtMostOnceStepIsNotRerunAfterCrash(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalPolicy()}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	submit := func(did domain.Lease) domain.StepDecision {
 		t.Helper()
@@ -497,7 +497,7 @@ func toolStep(target, args string, lease domain.Lease) kernel.SubmitStepRequest 
 // where it is.
 func TestSupersededSubmitIsRefusedAndLeavesCounterAlone(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	stalled := leaseOf(t, k, exec.ID)
 
 	const args = `{"path":"/tmp"}`
@@ -547,7 +547,7 @@ func TestSupersededSubmitIsRefusedAndLeavesCounterAlone(t *testing.T) {
 
 func TestSupersededHeartbeatIsRefused(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	stalled := leaseOf(t, k, exec.ID)
 	live := supersede(t, k, exec.ID)
 
@@ -561,7 +561,7 @@ func TestSupersededHeartbeatIsRefused(t *testing.T) {
 
 func TestSupersededStepCompletionIsRefused(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	stalled := leaseOf(t, k, exec.ID)
 
 	dec, err := k.SubmitStep(ctx, exec.ID, toolStep("read", `{"path":"/tmp"}`, stalled))
@@ -592,7 +592,7 @@ func TestSupersededStepCompletionIsRefused(t *testing.T) {
 
 func TestSupersededExecutionTerminalsAreRefused(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	stalled := leaseOf(t, k, exec.ID)
 	live := supersede(t, k, exec.ID)
 
@@ -635,7 +635,7 @@ func TestCompletionAfterLeaseReleaseStillRecords(t *testing.T) {
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	lease := leaseOf(t, k, exec.ID)
 
 	// This target proceeds; the next one blocks on approval and releases the lease.
@@ -689,7 +689,7 @@ func reclaim(t *testing.T, k *kernel.Kernel, execID uuid.UUID) {
 
 func TestReclaimedDispatchCannotStartNewWork(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	stalled := leaseOf(t, k, exec.ID)
 	reclaim(t, k, exec.ID)
 
@@ -709,7 +709,7 @@ func TestReclaimedDispatchCannotStartNewWork(t *testing.T) {
 // answering proceed, so it needs its own check.
 func TestReclaimedDispatchCannotResumeAnExecutingStep(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	stalled := leaseOf(t, k, exec.ID)
 
 	req := toolStep("read", `{"path":"/tmp"}`, stalled)
@@ -778,7 +778,7 @@ func TestSubmitIsFencedAfterItsEntryCheck(t *testing.T) {
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	lease := leaseOf(t, k, exec.ID)
 
 	_, err := k.SubmitStep(ctx, exec.ID, toolStep("read", `{"path":"/tmp"}`, lease))
@@ -844,7 +844,7 @@ func TestLostAckOnTheFinalAttemptCannotFailAParkedExecution(t *testing.T) {
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
@@ -891,7 +891,7 @@ func TestDispatcherDeliveryAndRetry(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
@@ -933,7 +933,7 @@ func TestDispatchRejectionExhaustsAndFails(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	// Attempt 1 (fails, schedules retry), then attempt 2 (hits max, exhausts).
 	if err := k.DrainDispatches(ctx); err != nil {
@@ -976,7 +976,7 @@ func TestDispatchTimeoutBoundsHungAgent(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: hung.URL, Secret: "secret"})
-	_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	start := time.Now()
 	if err := k.DrainDispatches(ctx); err != nil {
@@ -1010,7 +1010,7 @@ func TestDispatchConcurrency(t *testing.T) {
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: slow.URL, Secret: "secret"})
 	for i := 0; i < n; i++ {
-		_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+		_, _ = k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	}
 
 	start := time.Now()
@@ -1054,7 +1054,7 @@ func TestDispatchNeverExceedsConcurrency(t *testing.T) {
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: srv.URL, Secret: "secret"})
 	for i := 0; i < concurrency*10; i++ {
-		if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+		if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1099,7 +1099,7 @@ func TestDispatchLoopClaimsWhileBusy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: srv.URL, Secret: "secret"})
-	if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+	if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1109,7 +1109,7 @@ func TestDispatchLoopClaimsWhileBusy(t *testing.T) {
 	<-slowStarted
 	const later = 5
 	for i := 0; i < later; i++ {
-		if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), ""); err != nil {
+		if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1151,7 +1151,7 @@ func TestReclaimDrainsStalledBacklog(t *testing.T) {
 	const stranded = 250
 	dead, expired := "dead-replica", time.Now().UTC().Add(-time.Hour)
 	for i := 0; i < stranded; i++ {
-		exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+		exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1179,7 +1179,7 @@ func TestReclaimDrainsStalledBacklog(t *testing.T) {
 // top, so its occurrence counting has to restart too.
 func TestReclaimedDispatchReplaysFromZero(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	q := k.Deps().Queue
 	now := time.Now().UTC()
 
@@ -1259,7 +1259,7 @@ func TestDispatchAckedRecordsRealAttempt(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
@@ -1294,7 +1294,7 @@ func TestFinalDispatchFailureIsRecorded(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	for i := 0; i < cfg.DispatchMaxAttempts; i++ {
 		if err := k.DrainDispatches(ctx); err != nil {
@@ -1328,7 +1328,7 @@ func TestReleasedDispatchRecordsNoEvent(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}

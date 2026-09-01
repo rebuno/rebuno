@@ -66,7 +66,7 @@ func TestCreateExecutionViaHTTP(t *testing.T) {
 
 func TestAgentSubmitAndCompleteViaHTTP(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := computeStepID(t, exec.ID, domain.StepKindTool, "read", args, 0)
@@ -115,7 +115,7 @@ func TestAgentSubmitAndCompleteViaHTTP(t *testing.T) {
 
 func TestListStepsTerminalFilter(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	// Step 1: submit + complete -> terminal (succeeded).
 	doneArgs := json.RawMessage(`{"path":"/a"}`)
@@ -155,7 +155,7 @@ func TestStepsReachableViaBearerAuth(t *testing.T) {
 	adapt := &api.KernelAPI{Inner: k}
 	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil)
 
-	exec, _ := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := computeStepID(t, exec.ID, domain.StepKindTool, "read", args, 0)
 	submitStepHTTP(t, mux, k, exec.ID, "read", args) // submitted as the agent, over HMAC
@@ -251,7 +251,7 @@ func listStepsHTTP(t *testing.T, mux http.Handler, execID uuid.UUID, status stri
 
 func TestAgentHMACRejectsBadSignature(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	body, _ := json.Marshal(map[string]any{"kind": "tool_call", "target": "read", "args": map[string]string{"path": "/tmp"}})
 	req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
@@ -285,7 +285,7 @@ func TestBearerAuth(t *testing.T) {
 
 func TestAdminLoadPolicyBundle(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
-	exec, _ := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
 
 	bundle := `
 rules:
@@ -358,7 +358,7 @@ func computeStepID(t *testing.T, execID uuid.UUID, kind domain.StepKind, target 
 // write alongside the attempt that replaced it.
 func TestSupersededLeaseIsRejectedWith409(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	body, _ := json.Marshal(map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(`{"path":"/tmp"}`)})
 	req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))

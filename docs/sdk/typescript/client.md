@@ -23,7 +23,6 @@ sent as `Authorization: Bearer ...` when present.
 const execution = await client.create(
   "dev-agent",
   { prompt: "hello" },         // optional; the object your handler receives
-  { agentVersion: "" },        // optional; pin a specific agent version
 );
 
 await client.get(execution.id);      // current state
@@ -76,7 +75,7 @@ all subclasses of `RebunoError`. See [Errors](errors.md).
 
 `Client` returns plain objects with camelCase fields.
 
-- `Execution`: `id`, `agentId`, `agentVersion`, `input`, `status`, `output`,
+- `Execution`: `id`, `agentId`, `input`, `status`, `output`,
   `failureReason`. `status` is an `ExecutionStatus`, one of `pending`,
   `running`, `blocked`, `completed`, `failed`, `cancelled`.
 - `Step`: `stepId`, `executionId`, `kind`, `target`, `argsHash`, `occurrence`,

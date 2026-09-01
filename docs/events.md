@@ -33,7 +33,7 @@ The `execution.*` types cover the lifecycle of the run itself. Payloads carry
 
 | Type | When |
 |------|------|
-| `execution.created` | Client created the execution. Records the input and `agent_version`. |
+| `execution.created` | Client created the execution. |
 | `execution.started` | First dispatch acked; the agent is making progress. |
 | `execution.blocked` | Paused on a human approval. |
 | `execution.resumed` | An approval was granted, denied, or expired, and work continues. |

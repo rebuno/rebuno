@@ -14,7 +14,7 @@ import (
 const maxEventsPageLimit = 1000
 
 type ClientKernel interface {
-	CreateExecution(ctx context.Context, agentID string, input json.RawMessage, version string) (domain.Execution, error)
+	CreateExecution(ctx context.Context, agentID string, input json.RawMessage) (domain.Execution, error)
 	GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error)
 	ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error)
 	GetEvents(ctx context.Context, id uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error)
@@ -22,9 +22,8 @@ type ClientKernel interface {
 }
 
 type CreateExecutionRequest struct {
-	AgentID      string          `json:"agent_id"`
-	Input        json.RawMessage `json:"input"`
-	AgentVersion string          `json:"agent_version,omitempty"`
+	AgentID string          `json:"agent_id"`
+	Input   json.RawMessage `json:"input"`
 }
 
 func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +32,7 @@ func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, req.AgentVersion)
+	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input)
 	if err != nil {
 		WriteError(w, err)
 		return

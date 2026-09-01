@@ -74,7 +74,7 @@ func llmCall(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UU
 
 func TestBudgetDeniesOnceSpendReachesLimit(t *testing.T) {
 	k, ctx := budgetKernel(t, 1000, "")
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	if dec := llmCall(t, k, ctx, exec.ID, usageBody(600, 300)); dec.Decision != "proceed" {
 		t.Fatalf("first call = %s, want proceed", dec.Decision)
@@ -94,7 +94,7 @@ func TestBudgetDeniesOnceSpendReachesLimit(t *testing.T) {
 
 func TestBudgetCanRequireApprovalInstead(t *testing.T) {
 	k, ctx := budgetKernel(t, 500, domain.DecisionRequireApproval)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	llmCall(t, k, ctx, exec.ID, usageBody(400, 200))
 
@@ -109,7 +109,7 @@ func TestBudgetCanRequireApprovalInstead(t *testing.T) {
 
 func TestBudgetIsBlindToUnmeasuredResponses(t *testing.T) {
 	k, ctx := budgetKernel(t, 10, "")
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	for i := range 3 {
 		dec := llmCall(t, k, ctx, exec.ID, `{"output":"hello"}`)

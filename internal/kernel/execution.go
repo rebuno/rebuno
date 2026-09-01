@@ -126,19 +126,18 @@ func New(cfg Config, d Deps) *Kernel {
 	return &Kernel{cfg: cfg, d: d, log: log}
 }
 
-func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json.RawMessage, agentVersion string) (domain.Execution, error) {
+func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json.RawMessage) (domain.Execution, error) {
 	if _, err := k.d.Agents.GetAgent(ctx, agentID); err != nil {
 		return domain.Execution{}, err
 	}
 	now := time.Now().UTC()
 	exec := domain.Execution{
-		ID:           uuid.Must(uuid.NewV7()),
-		AgentID:      agentID,
-		AgentVersion: agentVersion,
-		Input:        input,
-		Status:       domain.ExecutionPending,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:        uuid.Must(uuid.NewV7()),
+		AgentID:   agentID,
+		Input:     input,
+		Status:    domain.ExecutionPending,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if k.cfg.ExecutionDeadlineTimeout > 0 {
 		deadline := now.Add(k.cfg.ExecutionDeadlineTimeout)

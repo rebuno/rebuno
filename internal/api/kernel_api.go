@@ -18,8 +18,8 @@ var _ ClientKernel = (*KernelAPI)(nil)
 var _ AgentKernel = (*KernelAPI)(nil)
 var _ AdminKernel = (*KernelAPI)(nil)
 
-func (k *KernelAPI) CreateExecution(ctx context.Context, agentID string, input json.RawMessage, version string) (domain.Execution, error) {
-	return k.Inner.CreateExecution(ctx, agentID, input, version)
+func (k *KernelAPI) CreateExecution(ctx context.Context, agentID string, input json.RawMessage) (domain.Execution, error) {
+	return k.Inner.CreateExecution(ctx, agentID, input)
 }
 
 func (k *KernelAPI) GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error) {

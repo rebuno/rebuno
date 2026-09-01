@@ -109,7 +109,7 @@ func newestDispatch(t *testing.T, k *kernel.Kernel, execID uuid.UUID) domain.Dis
 
 func TestCreateExecution(t *testing.T) {
 	k, ctx := setup(t)
-	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{"msg":"hi"}`), "v1")
+	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{"msg":"hi"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestCreateExecution(t *testing.T) {
 
 func TestSubmitAndReplayToolStep(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	argsHash := mustHash(args)
@@ -176,8 +176,8 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 // effect miss its replay and run for real a second time.
 func TestSubmitRejectsForeignDispatch(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
-	other, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
+	other, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	args := json.RawMessage(`{"path":"/tmp"}`)
 
 	_, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
@@ -206,7 +206,7 @@ func TestSubmitRejectsForeignDispatch(t *testing.T) {
 // and replays, while identical calls *within* one dispatch get distinct steps.
 func TestOccurrenceIsScopedToDispatch(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, exec.ID)}
 
@@ -264,7 +264,7 @@ func TestPolicyDeny(t *testing.T) {
 		UnitOfWork: d.UnitOfWork,
 		Policy:     policy.DenyAllEngine{},
 	})
-	exec, _ := k2.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k2.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
@@ -306,7 +306,7 @@ func TestApprovalFlow(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
@@ -363,7 +363,7 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	req := kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID), Idempotency: "at_most_once"}
@@ -407,7 +407,7 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
@@ -438,7 +438,7 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 
 func TestLLMCallFlow(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	req := json.RawMessage(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
 	argsHash, _ := identity.ComputeArgsHash(req)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindLLM, "gpt-4", argsHash, 0)
@@ -486,7 +486,7 @@ func TestLLMCallFlow(t *testing.T) {
 
 func TestTerminalRejectsFurtherSteps(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	// The agent holds a delivered lease, then the execution is cancelled under it.
 	lease := leaseOf(t, k, exec.ID)
 	if err := k.CancelExecution(ctx, exec.ID); err != nil {
@@ -519,7 +519,7 @@ func TestRateLimitDoubleStep(t *testing.T) {
 	k := kernel.New(kernel.DefaultConfig(), memDeps(ms, kernel.Deps{Policy: pe, RateLimiter: ratelimit.NewMemoryLimiter()}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 
@@ -693,7 +693,7 @@ func TestApprovalGrantRecordsActualStepKind(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
 	if err := k.GrantApproval(ctx, approvalID, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
@@ -710,7 +710,7 @@ func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
 	if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob"}); err != nil {
@@ -732,7 +732,7 @@ func TestApprovalDenyResumesExecution(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
 	if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob"}); err != nil {
@@ -773,7 +773,7 @@ func TestApprovalDenyRationaleReachesHandler(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
 	rationale := "use the existing helper in utils.go instead"
@@ -797,7 +797,7 @@ func TestApprovalExpireRecordsActualStepKind(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, 1*time.Millisecond)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	submitLLMStep(t, k, ctx, exec)
 
 	time.Sleep(10 * time.Millisecond)
@@ -816,7 +816,7 @@ func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	submitLLMStep(t, k, ctx, exec)
 
 	if err := k.CancelExecution(ctx, exec.ID); err != nil {
@@ -833,7 +833,7 @@ func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
 // See https://github.com/rebuno/rebuno/issues/122.
 func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
@@ -879,7 +879,7 @@ func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 // execution is already terminal does not append a step.failed event.
 func TestFailStepAfterExecutionCancelled(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", mustHash(args), 0)
@@ -925,7 +925,7 @@ func TestFailStepAfterExecutionCancelled(t *testing.T) {
 // outcome was never reported back, so they are terminal with an unknown result.
 func TestCancelExecutionCancelsInFlightSteps(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"cmd":"sleep 60"}`)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "bash", mustHash(args), 0)
@@ -962,7 +962,7 @@ func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
 
 	if err := k.CancelExecution(ctx, exec.ID); err != nil {
@@ -1025,7 +1025,7 @@ func TestCancelExecutionPropagatesDispatchError(t *testing.T) {
 	})
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	err := k.CancelExecution(ctx, exec.ID)
 	if !errors.Is(err, dispatchErr) {
@@ -1056,7 +1056,7 @@ rules:
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/etc/passwd"}`)
 	before := time.Now().UTC()
@@ -1110,7 +1110,7 @@ rules:
 	k := kernel.New(kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	args := json.RawMessage(`{"path":"/etc/passwd"}`)
 	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
@@ -1186,7 +1186,7 @@ func TestApproversGateWhoMayDecide(t *testing.T) {
 // same execution, while a different effect on the same target still proceeds.
 func TestIndeterminateRetryIsDenied(t *testing.T) {
 	k, ctx := setup(t)
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
 	submit := func(did domain.Lease, args string) domain.StepDecision {
 		t.Helper()
@@ -1266,7 +1266,7 @@ func TestDenyReasonMatchesOnReplay(t *testing.T) {
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1308,7 +1308,7 @@ func rateLimitedKernel(t *testing.T, cfg domain.RateLimitConfig) (*kernel.Kernel
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1435,7 +1435,7 @@ func TestCompleteStepOnBlockedStepConflicts(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	lease := leaseOf(t, k, exec.ID)
 	stepID, _ := submitLLMStep(t, k, ctx, exec)
 

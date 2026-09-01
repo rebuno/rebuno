@@ -28,11 +28,11 @@ details}` envelope.
 `POST /v0/executions` · bearer
 
 ```json
-{ "agent_id": "researcher", "input": { "query": "hello" }, "agent_version": "abc123" }
+{ "agent_id": "researcher", "input": { "query": "hello" } }
 ```
 
 Returns `201` with the created execution. The kernel records `execution.created`
-and enqueues a dispatch. `agent_version` is optional and opaque to the kernel.
+and enqueues a dispatch.
 
 ### Get an execution
 

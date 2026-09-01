@@ -11,7 +11,7 @@ import (
 
 func TestTestPolicyReplaysRecordedSteps(t *testing.T) {
 	k, ctx := setup(t)
-	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

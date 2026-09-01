@@ -28,7 +28,7 @@ func TestApprovalExpiry(t *testing.T) {
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
 	ctx := context.Background()
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	dec, _ := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if dec.Decision != "blocked" {
@@ -64,7 +64,7 @@ func TestCancelExpiredExecutions(t *testing.T) {
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), "")
+	exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

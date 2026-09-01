@@ -29,7 +29,6 @@ func (s ExecutionStatus) IsTerminal() bool {
 type Execution struct {
 	ID            uuid.UUID       `json:"id"`
 	AgentID       string          `json:"agent_id"`
-	AgentVersion  string          `json:"agent_version,omitempty"`
 	Input         json.RawMessage `json:"input"`
 	Status        ExecutionStatus `json:"status"`
 	Output        json.RawMessage `json:"output,omitempty"`
