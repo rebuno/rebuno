@@ -399,3 +399,48 @@ func TestSupersededLeaseIsRejectedWith409(t *testing.T) {
 		t.Fatalf("live attempt must be served, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestAgentResponsesOmitSecret(t *testing.T) {
+	mux, _, _ := setupRouter(t)
+
+	body, _ := json.Marshal(map[string]string{"id": "agent-2", "webhook_url": "http://localhost", "secret": testAgentSecret})
+	for _, tc := range []struct {
+		path string
+		req  *http.Request
+		want int
+	}{
+		{"POST /v0/agents", httptest.NewRequest(http.MethodPost, "/v0/agents", bytes.NewReader(body)), http.StatusCreated},
+		{"GET /v0/agents", httptest.NewRequest(http.MethodGet, "/v0/agents", nil), http.StatusOK},
+		{"GET /v0/agents/{id}", httptest.NewRequest(http.MethodGet, "/v0/agents/"+testAgentID, nil), http.StatusOK},
+	} {
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, tc.req)
+		if rr.Code != tc.want {
+			t.Fatalf("%s: expected %d, got %d: %s", tc.path, tc.want, rr.Code, rr.Body.String())
+		}
+		if bytes.Contains(rr.Body.Bytes(), []byte(testAgentSecret)) {
+			t.Errorf("%s leaked the agent secret: %s", tc.path, rr.Body.String())
+		}
+	}
+}
+
+func TestRegisterAgentReturnsStoredAgent(t *testing.T) {
+	mux, _, _ := setupRouter(t)
+	body, _ := json.Marshal(map[string]string{"id": "agent-2", "webhook_url": "http://localhost"})
+	req := httptest.NewRequest(http.MethodPost, "/v0/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var agent domain.Agent
+	if err := json.Unmarshal(rr.Body.Bytes(), &agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.ID != "agent-2" {
+		t.Errorf("expected id agent-2, got %q", agent.ID)
+	}
+	if agent.RegisteredAt.IsZero() {
+		t.Error("registered_at is zero")
+	}
+}

@@ -45,6 +45,9 @@ func (rt *Router) registerAgent(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
+	if stored, err := rt.admin.GetAgent(r.Context(), agent.ID); err == nil {
+		agent = stored
+	}
 	WriteJSON(w, agent, http.StatusCreated)
 }
 
@@ -55,7 +58,6 @@ func (rt *Router) getAgent(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	agent.Secret = ""
 	WriteJSON(w, agent, http.StatusOK)
 }
 
@@ -64,9 +66,6 @@ func (rt *Router) listAgents(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		WriteError(w, err)
 		return
-	}
-	for i := range agents {
-		agents[i].Secret = ""
 	}
 	WriteJSON(w, agents, http.StatusOK)
 }
