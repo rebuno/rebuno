@@ -164,20 +164,19 @@ func (s *Store) checkLeaseLocked(execID uuid.UUID, lease domain.Lease) error {
 	return nil
 }
 
-func (s *Store) ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
+func (s *Store) ReclaimStalled(ctx context.Context, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.reclaimStalledLocked(ctx, now, leaseTimeout, batch)
+	return s.reclaimStalledLocked(ctx, now, defaultLeaseTimeout, batch)
 }
 
-func (s *Store) reclaimStalledLocked(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
-	cutoff := now.Add(-leaseTimeout)
+func (s *Store) reclaimStalledLocked(ctx context.Context, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
 	var stalled []domain.Dispatch
 	for _, d := range s.dispatches {
 		if d.Status != domain.DispatchInFlight {
 			continue
 		}
-		if d.LockedAt == nil || d.LockedAt.Before(cutoff) {
+		if d.LockedAt == nil || d.LockedAt.Before(now.Add(-s.leaseTimeoutLocked(d, defaultLeaseTimeout))) {
 			stalled = append(stalled, d)
 		}
 	}
@@ -229,6 +228,17 @@ func (tx *txStore) CheckLease(ctx context.Context, execID uuid.UUID, lease domai
 	return tx.checkLeaseLocked(execID, lease)
 }
 
-func (tx *txStore) ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
-	return tx.reclaimStalledLocked(ctx, now, leaseTimeout, batch)
+func (tx *txStore) ReclaimStalled(ctx context.Context, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
+	return tx.reclaimStalledLocked(ctx, now, defaultLeaseTimeout, batch)
+}
+
+func (s *Store) leaseTimeoutLocked(d domain.Dispatch, fallback time.Duration) time.Duration {
+	exec, ok := s.executions[d.ExecutionID]
+	if !ok {
+		return fallback
+	}
+	if secs := s.agents[exec.AgentID].LeaseTimeoutSeconds; secs > 0 {
+		return time.Duration(secs * float64(time.Second))
+	}
+	return fallback
 }

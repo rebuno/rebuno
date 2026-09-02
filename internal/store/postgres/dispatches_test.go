@@ -264,3 +264,59 @@ func TestLateAckCannotRequeueARetiredDispatch(t *testing.T) {
 		})
 	}
 }
+
+// leasedFor registers an agent with the given lease override and returns the
+// lease of one delivered dispatch for it.
+func leasedFor(t *testing.T, s fenceStore, timeoutSeconds float64, now time.Time) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	agentID := "lease-" + uuid.NewString()
+	if err := s.RegisterAgent(ctx, domain.Agent{
+		ID: agentID, WebhookURL: "http://localhost", Secret: "s",
+		LeaseTimeoutSeconds: timeoutSeconds,
+	}); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+	execID := uuid.Must(uuid.NewV7())
+	if err := s.CreateExecution(ctx, domain.Execution{
+		ID: execID, AgentID: agentID, Status: domain.ExecutionRunning,
+		Input: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	if err := s.Enqueue(ctx, domain.Dispatch{
+		ID: uuid.Must(uuid.NewV7()), ExecutionID: execID, Status: domain.DispatchPending,
+		MaxAttempts: 5, NextAttemptAt: now, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	return claimFor(t, s, execID, now).ID
+}
+
+// TestReclaimHonorsThePerAgentLease holds two dispatches claimed at the same
+// instant, one under an agent that overrides the lease and one under an agent
+// that does not, and reclaims at a moment that has passed only the override.
+func TestReclaimHonorsThePerAgentLease(t *testing.T) {
+	for name, s := range fenceBackends(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Now().UTC()
+			short := leasedFor(t, s, 30, now)
+			deflt := leasedFor(t, s, 0, now)
+
+			reclaimed, err := s.ReclaimStalled(ctx, now.Add(time.Minute), 10*time.Minute, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ids []uuid.UUID
+			for _, d := range reclaimed {
+				if d.ID == short || d.ID == deflt {
+					ids = append(ids, d.ID)
+				}
+			}
+			if len(ids) != 1 || ids[0] != short {
+				t.Fatalf("only the 30s lease must expire after a minute, reclaimed %v", ids)
+			}
+		})
+	}
+}

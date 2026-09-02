@@ -103,7 +103,12 @@ func agentAddCmd() *cobra.Command {
 }
 
 func registerAgentOverHTTP(ctx context.Context, c *client, a domain.Agent) error {
-	req := api.AgentRegistrationRequest{ID: a.ID, WebhookURL: a.WebhookURL, Secret: a.Secret}
+	req := api.AgentRegistrationRequest{
+		ID:                  a.ID,
+		WebhookURL:          a.WebhookURL,
+		Secret:              a.Secret,
+		LeaseTimeoutSeconds: a.LeaseTimeoutSeconds,
+	}
 	if err := c.do(ctx, http.MethodPost, "/v0/agents", req, nil); err != nil {
 		return err
 	}

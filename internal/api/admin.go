@@ -25,9 +25,10 @@ type AdminKernel interface {
 }
 
 type AgentRegistrationRequest struct {
-	ID         string `json:"id"`
-	WebhookURL string `json:"webhook_url"`
-	Secret     string `json:"secret"`
+	ID                  string  `json:"id"`
+	WebhookURL          string  `json:"webhook_url"`
+	Secret              string  `json:"secret"`
+	LeaseTimeoutSeconds float64 `json:"lease_timeout_seconds,omitempty"`
 }
 
 type LoadPolicyRequest struct {
@@ -40,7 +41,12 @@ func (rt *Router) registerAgent(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	agent := domain.Agent{ID: req.ID, WebhookURL: req.WebhookURL, Secret: req.Secret}
+	agent := domain.Agent{
+		ID:                  req.ID,
+		WebhookURL:          req.WebhookURL,
+		Secret:              req.Secret,
+		LeaseTimeoutSeconds: req.LeaseTimeoutSeconds,
+	}
 	if err := rt.admin.Register(r.Context(), agent); err != nil {
 		WriteError(w, err)
 		return

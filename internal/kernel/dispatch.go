@@ -220,6 +220,13 @@ func (k *Kernel) workerError(msg string, err error) {
 	k.log.Error(msg, "err", err)
 }
 
+func (k *Kernel) leaseTimeout(agent domain.Agent) time.Duration {
+	if agent.LeaseTimeoutSeconds > 0 {
+		return time.Duration(agent.LeaseTimeoutSeconds * float64(time.Second))
+	}
+	return k.cfg.DispatchLeaseTimeout
+}
+
 // reclaimBatch bounds one statement's locks; reclaiming pages until drained.
 const reclaimBatch = 100
 
@@ -281,7 +288,7 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		return err
 	}
 	start := time.Now()
-	res := k.d.Dispatcher.Deliver(ctx, agent.WebhookURL, agent.Secret, d.ExecutionID, lease)
+	res := k.d.Dispatcher.Deliver(ctx, agent.WebhookURL, agent.Secret, d.ExecutionID, lease, k.leaseTimeout(agent))
 	k.d.Observer.RecordDispatchLatency(time.Since(start))
 	if res.Outcome != dispatcher.OutcomeSuccess || res.Err != nil {
 		k.log.Info("dispatch attempt", "dispatch_id", d.ID, "outcome", res.Outcome, "status", res.StatusCode, "err", res.Err)

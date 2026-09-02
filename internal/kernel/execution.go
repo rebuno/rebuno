@@ -101,11 +101,10 @@ func New(cfg Config, d Deps) *Kernel {
 	}
 	if d.Dispatcher == nil {
 		d.Dispatcher = dispatcher.New(nil, dispatcher.Config{
-			MaxAttempts:  cfg.DispatchMaxAttempts,
-			BaseDelay:    cfg.DispatchBaseDelay,
-			MaxDelay:     cfg.DispatchMaxDelay,
-			Timeout:      cfg.DispatchTimeout,
-			LeaseTimeout: cfg.DispatchLeaseTimeout,
+			MaxAttempts: cfg.DispatchMaxAttempts,
+			BaseDelay:   cfg.DispatchBaseDelay,
+			MaxDelay:    cfg.DispatchMaxDelay,
+			Timeout:     cfg.DispatchTimeout,
 		}, d.Logger)
 	}
 	if d.RateLimiter == nil {

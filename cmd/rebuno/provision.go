@@ -20,11 +20,12 @@ type agentConfigFile struct {
 }
 
 type agentConfigEntry struct {
-	ID         string `yaml:"id"`
-	WebhookURL string `yaml:"webhook_url"`
-	Secret     string `yaml:"secret"`
-	Policy     string `yaml:"policy"`      // inline bundle (literal block)
-	PolicyFile string `yaml:"policy_file"` // path, relative to the config file
+	ID                  string  `yaml:"id"`
+	WebhookURL          string  `yaml:"webhook_url"`
+	Secret              string  `yaml:"secret"`
+	LeaseTimeoutSeconds float64 `yaml:"lease_timeout_seconds"`
+	Policy              string  `yaml:"policy"`      // inline bundle (literal block)
+	PolicyFile          string  `yaml:"policy_file"` // path, relative to the config file
 }
 
 func expandEnv(s string) string {
@@ -81,10 +82,11 @@ func loadAgentConfig(path string) ([]domain.Agent, error) {
 		}
 
 		agents = append(agents, domain.Agent{
-			ID:           a.ID,
-			WebhookURL:   a.WebhookURL,
-			Secret:       a.Secret,
-			PolicyBundle: bundle,
+			ID:                  a.ID,
+			WebhookURL:          a.WebhookURL,
+			Secret:              a.Secret,
+			PolicyBundle:        bundle,
+			LeaseTimeoutSeconds: a.LeaseTimeoutSeconds,
 		})
 	}
 	return agents, nil

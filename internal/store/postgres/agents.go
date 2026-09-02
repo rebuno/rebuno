@@ -23,14 +23,15 @@ func registerAgent(ctx context.Context, q Querier, agent domain.Agent) error {
 	}
 
 	_, err := q.Exec(ctx, `
-		INSERT INTO agents (id, webhook_url, secret, registered_at, policy_bundle)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO agents (id, webhook_url, secret, registered_at, policy_bundle, lease_timeout_seconds)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0::double precision))
 		ON CONFLICT (id) DO UPDATE SET
 			webhook_url = EXCLUDED.webhook_url,
 			secret = EXCLUDED.secret,
 			registered_at = EXCLUDED.registered_at,
-			policy_bundle = EXCLUDED.policy_bundle
-	`, agent.ID, agent.WebhookURL, agent.Secret, registeredAt, agent.PolicyBundle)
+			policy_bundle = EXCLUDED.policy_bundle,
+			lease_timeout_seconds = EXCLUDED.lease_timeout_seconds
+	`, agent.ID, agent.WebhookURL, agent.Secret, registeredAt, agent.PolicyBundle, agent.LeaseTimeoutSeconds)
 	if err != nil {
 		return fmt.Errorf("register agent: %w", err)
 	}
@@ -47,8 +48,8 @@ func (q querier) GetAgent(ctx context.Context, id string) (domain.Agent, error) 
 
 func getAgent(ctx context.Context, q Querier, id string) (domain.Agent, error) {
 	var agent domain.Agent
-	row := q.QueryRow(ctx, `SELECT id, webhook_url, secret, registered_at, COALESCE(policy_bundle, '') FROM agents WHERE id = $1`, id)
-	err := row.Scan(&agent.ID, &agent.WebhookURL, &agent.Secret, &agent.RegisteredAt, &agent.PolicyBundle)
+	row := q.QueryRow(ctx, `SELECT id, webhook_url, secret, registered_at, COALESCE(policy_bundle, ''), COALESCE(lease_timeout_seconds, 0) FROM agents WHERE id = $1`, id)
+	err := row.Scan(&agent.ID, &agent.WebhookURL, &agent.Secret, &agent.RegisteredAt, &agent.PolicyBundle, &agent.LeaseTimeoutSeconds)
 	if err != nil {
 		return domain.Agent{}, mapNotFound(err)
 	}
@@ -57,7 +58,8 @@ func getAgent(ctx context.Context, q Querier, id string) (domain.Agent, error) {
 
 func (s *Store) ListAgents(ctx context.Context) ([]domain.Agent, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, webhook_url, secret, registered_at, COALESCE(policy_bundle, '')
+		SELECT id, webhook_url, secret, registered_at, COALESCE(policy_bundle, ''),
+		       COALESCE(lease_timeout_seconds, 0)
 		FROM agents
 		ORDER BY id
 	`)
@@ -68,7 +70,7 @@ func (s *Store) ListAgents(ctx context.Context) ([]domain.Agent, error) {
 	var out []domain.Agent
 	for rows.Next() {
 		var agent domain.Agent
-		if err := rows.Scan(&agent.ID, &agent.WebhookURL, &agent.Secret, &agent.RegisteredAt, &agent.PolicyBundle); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.WebhookURL, &agent.Secret, &agent.RegisteredAt, &agent.PolicyBundle, &agent.LeaseTimeoutSeconds); err != nil {
 			return nil, fmt.Errorf("scan agent: %w", err)
 		}
 		out = append(out, agent)

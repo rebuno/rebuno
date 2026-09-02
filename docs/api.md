@@ -166,7 +166,8 @@ stalled.
 ### Agents
 
 `POST /v0/agents` · bearer registers or upserts an agent. Body
-`{ "id", "webhook_url", "secret" }`. Returns `201` and the stored agent.
+`{ "id", "webhook_url", "secret", "lease_timeout_seconds?" }`. Returns `201` and
+the stored agent.
 
 `GET /v0/agents` · bearer lists agents.
 
@@ -174,8 +175,8 @@ stalled.
 
 `DELETE /v0/agents/{id}` · bearer → `204`.
 
-An agent reads `{ "id", "webhook_url", "policy_bundle?", "registered_at" }`. The
-secret is never returned.
+An agent reads `{ "id", "webhook_url", "policy_bundle?", "registered_at",
+"lease_timeout_seconds?" }`. The secret is never returned.
 
 ### Policy
 

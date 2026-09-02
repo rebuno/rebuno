@@ -240,36 +240,41 @@ func checkLease(ctx context.Context, q Querier, execID uuid.UUID, lease domain.L
 	return nil
 }
 
-func (s *Store) ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
-	return reclaimStalled(ctx, s.pool, now, leaseTimeout, batch)
+func (s *Store) ReclaimStalled(ctx context.Context, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
+	return reclaimStalled(ctx, s.pool, now, defaultLeaseTimeout, batch)
 }
 
-func (q querier) ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
-	return reclaimStalled(ctx, q.q, now, leaseTimeout, batch)
+func (q querier) ReclaimStalled(ctx context.Context, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
+	return reclaimStalled(ctx, q.q, now, defaultLeaseTimeout, batch)
 }
 
-func reclaimStalled(ctx context.Context, q Querier, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
-	cutoff := now.Add(-leaseTimeout)
+// reclaimStalled expires each lease against its agent's timeout, falling back to
+// defaultLeaseTimeout. FOR UPDATE OF d locks only dispatches.
+func reclaimStalled(ctx context.Context, q Querier, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
 	rows, err := q.Query(ctx, `
 		WITH stalled AS (
-			SELECT id
-			FROM dispatches
-			WHERE status = 'in_flight' AND locked_at < $1
-			ORDER BY locked_at
-			LIMIT $3
-			FOR UPDATE SKIP LOCKED
+			SELECT d.id
+			FROM dispatches d
+			JOIN executions e ON e.id = d.execution_id
+			JOIN agents a ON a.id = e.agent_id
+			WHERE d.status = 'in_flight'
+			  AND d.locked_at < $1 - make_interval(secs =>
+			        COALESCE(a.lease_timeout_seconds, $3))
+			ORDER BY d.locked_at
+			LIMIT $2
+			FOR UPDATE OF d SKIP LOCKED
 		)
 		UPDATE dispatches d
 		SET status = 'pending',
 		    locked_by = NULL,
 		    locked_at = NULL,
-		    next_attempt_at = $2,
-		    updated_at = $2
+		    next_attempt_at = $1,
+		    updated_at = $1
 		FROM stalled c
 		WHERE d.id = c.id
 		RETURNING d.id, d.execution_id, d.status, d.attempt, d.max_attempts, d.next_attempt_at,
 		          d.locked_by, d.locked_at, d.created_at, d.updated_at
-	`, cutoff, now, batch)
+	`, now, batch, defaultLeaseTimeout.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("reclaim stalled dispatches: %w", err)
 	}

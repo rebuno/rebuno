@@ -16,8 +16,12 @@ agents:
   - id: researcher
     webhook_url: http://localhost:5001/webhook
     secret: researcher-secret
+    lease_timeout_seconds: 600
     policy_file: policies/research.yaml
 ```
+
+`lease_timeout_seconds` overrides `REBUNO_DISPATCH_LEASE_TIMEOUT` for this
+agent. Omit it to use the kernel default. Values under ten seconds are ignored.
 
 ## Dispatch lifecycle
 

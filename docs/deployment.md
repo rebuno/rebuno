@@ -47,6 +47,7 @@ agents:
   - id: researcher
     webhook_url: https://researcher.internal/webhook
     secret: ${RESEARCHER_SECRET}
+    lease_timeout_seconds: 600            # omit to use the kernel default
     policy_file: policies/research.yaml   # or an inline `policy: |` block
 ```
 

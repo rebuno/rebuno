@@ -20,20 +20,18 @@ import (
 )
 
 type Config struct {
-	MaxAttempts  int
-	BaseDelay    time.Duration
-	MaxDelay     time.Duration
-	Timeout      time.Duration
-	LeaseTimeout time.Duration
+	MaxAttempts int
+	BaseDelay   time.Duration
+	MaxDelay    time.Duration
+	Timeout     time.Duration
 }
 
 func DefaultConfig() Config {
 	return Config{
-		MaxAttempts:  5,
-		BaseDelay:    1 * time.Second,
-		MaxDelay:     30 * time.Second,
-		Timeout:      30 * time.Second,
-		LeaseTimeout: 2 * time.Minute,
+		MaxAttempts: 5,
+		BaseDelay:   1 * time.Second,
+		MaxDelay:    30 * time.Second,
+		Timeout:     30 * time.Second,
 	}
 }
 
@@ -75,12 +73,12 @@ func New(client *http.Client, cfg Config, logger *slog.Logger) *Dispatcher {
 }
 
 // Deliver makes a single delivery attempt and returns the result immediately.
-func (d *Dispatcher) Deliver(ctx context.Context, url, secret string, execID uuid.UUID, lease domain.Lease) Result {
+func (d *Dispatcher) Deliver(ctx context.Context, url, secret string, execID uuid.UUID, lease domain.Lease, leaseTimeout time.Duration) Result {
 	payload := WebhookPayload{
 		ExecutionID:         execID.String(),
 		DispatchID:          lease.DispatchID.String(),
 		DispatchAttempt:     lease.Attempt,
-		LeaseTimeoutSeconds: d.cfg.LeaseTimeout.Seconds(),
+		LeaseTimeoutSeconds: leaseTimeout.Seconds(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

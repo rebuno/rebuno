@@ -3,14 +3,20 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/policy"
 )
 
+const minLeaseTimeout = 10 * time.Second
+
 func (k *Kernel) RegisterAgent(ctx context.Context, agent domain.Agent) error {
 	if err := validatePolicyBundle(agent.PolicyBundle); err != nil {
 		return err
+	}
+	if agent.LeaseTimeoutSeconds < minLeaseTimeout.Seconds() {
+		agent.LeaseTimeoutSeconds = 0
 	}
 	return k.d.Agents.RegisterAgent(ctx, agent)
 }

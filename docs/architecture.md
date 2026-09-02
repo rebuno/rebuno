@@ -133,9 +133,10 @@ with `dispatch_exhausted`.
 
 A replica claims no more rows than it has idle delivery workers, so it never
 holds work another replica could deliver sooner. A claim leases the row for the
-length of the agent's run, renewed by heartbeat. The payload carries the lease
-period, which the agent paces its heartbeat against. A lease from a crashed
-replica expires, and any dispatch loop returns it to the queue.
+length of the agent's run, renewed by heartbeat. The period is the agent's own
+`lease_timeout_seconds` or the kernel default, and the payload carries it so the
+agent paces its heartbeat against it. A lease from a crashed replica expires, and
+any dispatch loop returns it to the queue.
 
 A reclaim cannot tell a crashed agent from a slow one, so the redelivery can run
 alongside an agent that is only stalled. Each claim takes the next
