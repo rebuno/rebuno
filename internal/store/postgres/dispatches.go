@@ -258,7 +258,7 @@ func reclaimStalled(ctx context.Context, q Querier, now time.Time, defaultLeaseT
 			JOIN executions e ON e.id = d.execution_id
 			JOIN agents a ON a.id = e.agent_id
 			WHERE d.status = 'in_flight'
-			  AND d.locked_at < $1 - make_interval(secs =>
+			  AND d.locked_at < $1::timestamptz - make_interval(secs =>
 			        COALESCE(a.lease_timeout_seconds, $3))
 			ORDER BY d.locked_at
 			LIMIT $2
