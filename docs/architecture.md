@@ -121,7 +121,8 @@ webhook:
 ```http
 POST <webhook_url>
 Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>
-{ "execution_id": "…", "dispatch_id": "…", "dispatch_attempt": 1 }
+{ "execution_id": "…", "dispatch_id": "…", "dispatch_attempt": 1,
+  "lease_timeout_seconds": 120 }
 ```
 
 The payload carries no history. The agent fetches what it needs from the API.
@@ -132,8 +133,9 @@ with `dispatch_exhausted`.
 
 A replica claims no more rows than it has idle delivery workers, so it never
 holds work another replica could deliver sooner. A claim leases the row for the
-length of the agent's run, renewed by heartbeat. A lease from a crashed replica
-expires, and any dispatch loop returns it to the queue.
+length of the agent's run, renewed by heartbeat. The payload carries the lease
+period, which the agent paces its heartbeat against. A lease from a crashed
+replica expires, and any dispatch loop returns it to the queue.
 
 A reclaim cannot tell a crashed agent from a slow one, so the redelivery can run
 alongside an agent that is only stalled. Each claim takes the next

@@ -83,9 +83,9 @@ further dispatch.
 ## Agent API
 
 The kernel dispatches a webhook carrying `{execution_id, dispatch_id,
-dispatch_attempt}`. The agent acks `200 OK`, then pulls what it needs and drives
-its effects. These routes are HMAC-verified, except the reads, which also take a
-bearer token.
+dispatch_attempt, lease_timeout_seconds}`. The agent acks `200 OK`, then pulls
+what it needs and drives its effects. These routes are HMAC-verified, except the
+reads, which also take a bearer token.
 
 ### Read execution input and steps
 

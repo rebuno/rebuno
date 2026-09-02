@@ -93,15 +93,19 @@ func New(cfg Config, d Deps) *Kernel {
 	if cfg.DispatchConcurrency <= 0 {
 		cfg.DispatchConcurrency = 8
 	}
+	if cfg.DispatchLeaseTimeout <= 0 {
+		cfg.DispatchLeaseTimeout = 2 * time.Minute
+	}
 	if d.Policy == nil {
 		d.Policy = policy.PermissiveEngine{}
 	}
 	if d.Dispatcher == nil {
 		d.Dispatcher = dispatcher.New(nil, dispatcher.Config{
-			MaxAttempts: cfg.DispatchMaxAttempts,
-			BaseDelay:   cfg.DispatchBaseDelay,
-			MaxDelay:    cfg.DispatchMaxDelay,
-			Timeout:     cfg.DispatchTimeout,
+			MaxAttempts:  cfg.DispatchMaxAttempts,
+			BaseDelay:    cfg.DispatchBaseDelay,
+			MaxDelay:     cfg.DispatchMaxDelay,
+			Timeout:      cfg.DispatchTimeout,
+			LeaseTimeout: cfg.DispatchLeaseTimeout,
 		}, d.Logger)
 	}
 	if d.RateLimiter == nil {
@@ -116,9 +120,6 @@ func New(cfg Config, d Deps) *Kernel {
 	}
 	if cfg.ReplicaID == "" {
 		cfg.ReplicaID = uuid.NewString()
-	}
-	if cfg.DispatchLeaseTimeout <= 0 {
-		cfg.DispatchLeaseTimeout = 2 * time.Minute
 	}
 	if cfg.LeaderLockKey == "" {
 		cfg.LeaderLockKey = "rebuno_scheduler_leader"

@@ -20,25 +20,28 @@ import (
 )
 
 type Config struct {
-	MaxAttempts int
-	BaseDelay   time.Duration
-	MaxDelay    time.Duration
-	Timeout     time.Duration
+	MaxAttempts  int
+	BaseDelay    time.Duration
+	MaxDelay     time.Duration
+	Timeout      time.Duration
+	LeaseTimeout time.Duration
 }
 
 func DefaultConfig() Config {
 	return Config{
-		MaxAttempts: 5,
-		BaseDelay:   1 * time.Second,
-		MaxDelay:    30 * time.Second,
-		Timeout:     30 * time.Second,
+		MaxAttempts:  5,
+		BaseDelay:    1 * time.Second,
+		MaxDelay:     30 * time.Second,
+		Timeout:      30 * time.Second,
+		LeaseTimeout: 2 * time.Minute,
 	}
 }
 
 type WebhookPayload struct {
-	ExecutionID     string `json:"execution_id"`
-	DispatchID      string `json:"dispatch_id"`
-	DispatchAttempt int    `json:"dispatch_attempt"`
+	ExecutionID         string  `json:"execution_id"`
+	DispatchID          string  `json:"dispatch_id"`
+	DispatchAttempt     int     `json:"dispatch_attempt"`
+	LeaseTimeoutSeconds float64 `json:"lease_timeout_seconds"`
 }
 
 type Outcome int
@@ -74,9 +77,10 @@ func New(client *http.Client, cfg Config, logger *slog.Logger) *Dispatcher {
 // Deliver makes a single delivery attempt and returns the result immediately.
 func (d *Dispatcher) Deliver(ctx context.Context, url, secret string, execID uuid.UUID, lease domain.Lease) Result {
 	payload := WebhookPayload{
-		ExecutionID:     execID.String(),
-		DispatchID:      lease.DispatchID.String(),
-		DispatchAttempt: lease.Attempt,
+		ExecutionID:         execID.String(),
+		DispatchID:          lease.DispatchID.String(),
+		DispatchAttempt:     lease.Attempt,
+		LeaseTimeoutSeconds: d.cfg.LeaseTimeout.Seconds(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -25,7 +25,7 @@ The kernel POSTs to the webhook every time it has work for an execution. The
 agent runs the same sequence on the first dispatch and on every resume:
 
 1. **Dispatch.** The webhook arrives with `{execution_id, dispatch_id,
-   dispatch_attempt}` and a signature header,
+   dispatch_attempt, lease_timeout_seconds}` and a signature header,
    `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`. The agent checks the
    signature and acks with `200 OK` right away. The kernel delivers at least
    once, so the same dispatch can arrive twice. Key the handler on

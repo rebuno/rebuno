@@ -77,7 +77,8 @@ re-raises one even if your handler swallowed it. See
 A dispatch holds a lease so the kernel won't reclaim it and re-deliver while the
 handler is still running. Handlers routinely outlive a fixed lease, so the
 context wraps the whole handler in a background task that calls `heartbeat`
-every 30 seconds.
+every `min(lease_timeout_seconds / 3, 30)` seconds: three renewals per lease
+period, capped.
 
 The lease is the `(dispatch_id, dispatch_attempt)` pair the webhook arrived
 with, and every mutation sends it back. A handler whose dispatch was reclaimed
