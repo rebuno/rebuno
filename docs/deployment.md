@@ -87,6 +87,33 @@ Additional environment-only settings:
 | `REBUNO_RETENTION` | `24h` | How long terminal executions are kept. |
 | `REBUNO_LEADER_LOCK_KEY` | `rebuno_scheduler_leader` | Advisory-lock key for leader election. |
 
+## Load balancer
+
+Set the balancer's read timeout below the client's, so it fails over to another
+replica before the client gives up. Both SDK clients default to 35 seconds. Point
+pool health checks at `/v0/ready`, which returns 503 when a dependency is down;
+`/v0/health` answers `ok` regardless.
+
+```nginx
+upstream rebuno {
+    server kernel-1:8080;
+    server kernel-2:8080;
+    server kernel-3:8080;
+}
+
+server {
+    location / {
+        proxy_pass http://rebuno;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 20s;
+    }
+}
+```
+
+Execution streams (`GET /v0/executions/{id}/stream`) are server-sent events. The
+kernel sets `X-Accel-Buffering: no`; a balancer that ignores it needs response
+buffering disabled for that path.
+
 ## Docker
 
 The image is built from [`deploy/Dockerfile`](../deploy/Dockerfile) and published
