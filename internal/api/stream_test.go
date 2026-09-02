@@ -70,6 +70,18 @@ func TestStreamEndToEnd(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
 		t.Fatalf("content-type = %q", ct)
 	}
+	// Without this a reverse proxy buffers the body and the client sees nothing.
+	if v := resp.Header.Get("X-Accel-Buffering"); v != "no" {
+		t.Fatalf("X-Accel-Buffering = %q, want \"no\"", v)
+	}
+	// A first body byte at connect, for proxies that ignore the header above.
+	head := make([]byte, 6)
+	if _, err := io.ReadFull(resp.Body, head); err != nil {
+		t.Fatalf("read connect frame: %v", err)
+	}
+	if string(head) != ": ok\n\n" {
+		t.Fatalf("connect frame = %q", head)
+	}
 
 	// Push a delta via the producer endpoint (HMAC-signed like other agent calls).
 	body, _ := json.Marshal(map[string]any{"seq": 7, "data": "hello world"})

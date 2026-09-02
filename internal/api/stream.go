@@ -66,7 +66,11 @@ func (rt *Router) streamExecution(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write([]byte(": ok\n\n")); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	ch, cancel := rt.stream.Subscribe(id)
