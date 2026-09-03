@@ -8,16 +8,13 @@
   </a>
 </p>
 
-<p align="center"><em>REB-yoo-noh</em></p>
-
-<p align="center">
-  <a href="https://discord.gg/zv72f2PvzB"><img src="https://img.shields.io/discord/1483512352438616238?logo=discord&logoColor=white&color=5865F2&label=Discord&style=for-the-badge" alt="Discord"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?&style=for-the-badge" alt="License"></a>
-</p>
-
 Rebuno is an open-source execution runtime for production agents.
 
 It records every tool call and LLM call as a durable step. Interrupted runs resume from the last recorded step instead of starting over. Any step can be allowed, denied, or held for human approval.
+
+<p align="center">
+  <img src="docs/assets/execution.gif" width="900">
+</p>
 
 ## Quick Start
 
