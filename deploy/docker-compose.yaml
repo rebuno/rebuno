@@ -2,7 +2,7 @@ name: rebuno
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-rebuno}
       POSTGRES_USER: ${POSTGRES_USER:-rebuno}
