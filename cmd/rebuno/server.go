@@ -61,6 +61,7 @@ func serverCmd() *cobra.Command {
 }
 
 func runServer(cfg config.Config, configPath string) error {
+	printBanner()
 	logger := observe.NewLogger(cfg.LogLevel, cfg.LogFormat)
 	slog.SetDefault(logger)
 

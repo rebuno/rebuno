@@ -79,6 +79,7 @@ func runDev(cfg config.Config, configPath string) error {
 		agentsDesc = fmt.Sprintf("%d provisioned from %s", len(agents), configPath)
 	}
 
+	printBanner()
 	fmt.Printf("\nrebuno dev (development mode)\n\n")
 	fmt.Printf("  kernel    http://%s\n", cfg.ListenAddr)
 	fmt.Printf("  agents    %s\n", agentsDesc)
