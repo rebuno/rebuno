@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/rebuno/rebuno/internal/domain"
@@ -32,7 +33,12 @@ func DecodeJSON(r *http.Request, v any) error {
 
 func WriteError(w http.ResponseWriter, err error) {
 	code, status := MapError(err)
-	WriteJSON(w, domain.APIError{Code: code, Message: err.Error()}, status)
+	msg := err.Error()
+	if status == http.StatusInternalServerError {
+		slog.Error("request failed", "error", err)
+		msg = "internal error"
+	}
+	WriteJSON(w, domain.APIError{Code: code, Message: msg}, status)
 }
 
 func MapError(err error) (string, int) {
