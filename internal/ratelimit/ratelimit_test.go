@@ -8,7 +8,7 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
-func TestMemoryLimiter_DeniesAfterMaxCalls(t *testing.T) {
+func TestMemoryLimiterDeniesAfterMaxCalls(t *testing.T) {
 	ctx := context.Background()
 	lim := NewMemoryLimiter()
 	cfg := domain.RateLimitConfig{MaxCalls: 2, Window: time.Hour}
@@ -42,7 +42,7 @@ func TestMemoryLimiter_DeniesAfterMaxCalls(t *testing.T) {
 	}
 }
 
-func TestMemoryLimiter_RefillsAfterWindow(t *testing.T) {
+func TestMemoryLimiterRefillsAfterWindow(t *testing.T) {
 	ctx := context.Background()
 	lim := NewMemoryLimiter()
 	cfg := domain.RateLimitConfig{MaxCalls: 1, Window: 50 * time.Millisecond}
@@ -71,7 +71,7 @@ func TestMemoryLimiter_RefillsAfterWindow(t *testing.T) {
 	}
 }
 
-func TestMemoryLimiter_DifferentKeysAreIndependent(t *testing.T) {
+func TestMemoryLimiterDifferentKeysAreIndependent(t *testing.T) {
 	ctx := context.Background()
 	lim := NewMemoryLimiter()
 	cfg := domain.RateLimitConfig{MaxCalls: 1, Window: time.Hour}
