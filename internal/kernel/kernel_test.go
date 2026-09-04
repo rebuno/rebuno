@@ -50,17 +50,7 @@ func setup(t *testing.T) (*kernel.Kernel, context.Context) {
 	t.Helper()
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DispatchBaseDelay: 1 * time.Millisecond}
-	k := kernel.New(cfg, kernel.Deps{
-		Events:     ms,
-		Steps:      ms,
-		Executions: ms,
-		Agents:     ms,
-		Approvals:  ms,
-		Queue:      ms,
-		Locker:     ms,
-		UnitOfWork: ms,
-		Policy:     policy.PermissiveEngine{},
-	})
+	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: policy.PermissiveEngine{}}))
 	ctx := context.Background()
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
@@ -68,11 +58,9 @@ func setup(t *testing.T) (*kernel.Kernel, context.Context) {
 	return k, ctx
 }
 
-// leaseOf returns the lease for the execution's newest dispatch, claiming it
-// first when the test never ran the dispatcher, since an agent only holds a
-// lease for an attempt that was delivered. The dispatch also scopes occurrence
-// counting, so a test that wants a fresh replay generation asks for a new
-// dispatch rather than resetting anything itself.
+// Claims first when the test never ran the dispatcher, since an agent only holds
+// a lease for a delivered attempt. The dispatch also scopes occurrence counting,
+// so a test wanting a fresh replay generation asks for a new dispatch.
 func leaseOf(t *testing.T, k *kernel.Kernel, execID uuid.UUID) domain.Lease {
 	t.Helper()
 	ctx := context.Background()
@@ -140,7 +128,6 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 	argsHash := mustHash(args)
 	stepID := identity.ComputeStepID(exec.ID, domain.StepKindTool, "read", argsHash, 0)
 
-	// First submit -> proceed
 	dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
@@ -171,9 +158,9 @@ func TestSubmitAndReplayToolStep(t *testing.T) {
 	}
 }
 
-// A dispatch id from a different execution must be rejected rather than silently
-// opening a fresh occurrence namespace — that would make every already-recorded
-// effect miss its replay and run for real a second time.
+// A dispatch id from a different execution opens a fresh occurrence namespace,
+// so every already-recorded effect misses its replay and runs for real a second
+// time. It must be rejected.
 func TestSubmitRejectsForeignDispatch(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
@@ -203,7 +190,7 @@ func TestSubmitRejectsForeignDispatch(t *testing.T) {
 }
 
 // Occurrence is scoped to the dispatch, so a re-dispatch walks the same step IDs
-// and replays, while identical calls *within* one dispatch get distinct steps.
+// and replays, while identical calls within one dispatch get distinct steps.
 func TestOccurrenceIsScopedToDispatch(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
@@ -336,7 +323,6 @@ func TestApprovalFlow(t *testing.T) {
 		t.Fatalf("expected running after grant, got %s", got.Status)
 	}
 
-	// Now submit returns proceed.
 	dec3, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: args, Lease: leaseOf(t, k, exec.ID)})
 	if err != nil {
 		t.Fatal(err)
@@ -419,7 +405,6 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The resumed execution must immediately have a pending dispatch.
 	dispatches, err := ms.ListDispatchesByExecution(ctx, exec.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -589,9 +574,7 @@ func mustHash(args []byte) string {
 	return h
 }
 
-// approvalLLMEngine builds a policy engine that requires approval for any
-// llm_call step, so we can verify the step_type recorded in approval events
-// reflects the actual step kind rather than a hardcoded tool_call.
+// Requires approval for any llm_call step.
 func approvalLLMEngine(t *testing.T, timeout time.Duration) *policy.RuleEngine {
 	t.Helper()
 	pe, err := policy.NewRuleEngine(policy.Config{
@@ -625,8 +608,6 @@ func submitLLMStep(t *testing.T, k *kernel.Kernel, ctx context.Context, exec dom
 	return stepID, *dec.ApprovalID
 }
 
-// findStepType scans the execution events for one of the given event types and
-// returns the recorded step_type payload field.
 func findStepType(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UUID, wantTypes ...string) string {
 	t.Helper()
 	events, err := k.GetEvents(ctx, execID, 0, 1000)
@@ -656,11 +637,57 @@ func findStepType(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uu
 	return ""
 }
 
-// assertSingleTerminalStepEvent enforces the single-terminal-event invariant
-// for a step: exactly one terminal step event (step.denied, step.failed,
-// step.succeeded, or step.cancelled) must appear in the execution's event log,
-// and it must match wantType. It fatals on zero, multiple, or mismatched
-// terminal events.
+// Exactly one terminal step event may appear in the log, and it must be wantType.
+func TestTerminalPathsRecordActualStepKind(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		timeout time.Duration
+		finish  func(t *testing.T, k *kernel.Kernel, ctx context.Context, execID, approvalID uuid.UUID)
+		want    string
+	}{
+		{"grant", time.Hour, func(t *testing.T, k *kernel.Kernel, ctx context.Context, _, approvalID uuid.UUID) {
+			if err := k.GrantApproval(ctx, approvalID, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
+				t.Fatal(err)
+			}
+		}, domain.EventStepAllowed},
+		{"deny", time.Hour, func(t *testing.T, k *kernel.Kernel, ctx context.Context, _, approvalID uuid.UUID) {
+			if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob"}); err != nil {
+				t.Fatal(err)
+			}
+		}, domain.EventStepDenied},
+		{"expire", time.Millisecond, func(t *testing.T, k *kernel.Kernel, ctx context.Context, _, _ uuid.UUID) {
+			time.Sleep(10 * time.Millisecond)
+			if err := k.ExpireApprovals(ctx, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+		}, domain.EventStepDenied},
+		{"cancel execution", time.Hour, func(t *testing.T, k *kernel.Kernel, ctx context.Context, execID, _ uuid.UUID) {
+			if err := k.CancelExecution(ctx, execID); err != nil {
+				t.Fatal(err)
+			}
+		}, domain.EventStepDenied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ms := memstore.NewStore()
+			cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: tc.timeout}
+			k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, tc.timeout)}))
+			ctx := context.Background()
+			_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+			exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
+			_, approvalID := submitLLMStep(t, k, ctx, exec)
+
+			tc.finish(t, k, ctx, exec.ID, approvalID)
+
+			if got := findStepType(t, k, ctx, exec.ID, tc.want); got != string(domain.StepKindLLM) {
+				t.Fatalf("%s step_type = %q, want %q", tc.want, got, domain.StepKindLLM)
+			}
+			if tc.want == domain.EventStepDenied {
+				assertSingleTerminalStepEvent(t, k, ctx, exec.ID, tc.want)
+			}
+		})
+	}
+}
+
 func assertSingleTerminalStepEvent(t *testing.T, k *kernel.Kernel, ctx context.Context, execID uuid.UUID, wantType string) {
 	t.Helper()
 	events, err := k.GetEvents(ctx, execID, 0, 1000)
@@ -687,45 +714,6 @@ func assertSingleTerminalStepEvent(t *testing.T, k *kernel.Kernel, ctx context.C
 	}
 }
 
-func TestApprovalGrantRecordsActualStepKind(t *testing.T) {
-	ms := memstore.NewStore()
-	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
-	ctx := context.Background()
-	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
-	_, approvalID := submitLLMStep(t, k, ctx, exec)
-
-	if err := k.GrantApproval(ctx, approvalID, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepAllowed); got != string(domain.StepKindLLM) {
-		t.Fatalf("EventStepAllowed step_type = %q, want %q", got, domain.StepKindLLM)
-	}
-}
-
-func TestApprovalDenyRecordsActualStepKind(t *testing.T) {
-	ms := memstore.NewStore()
-	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
-	ctx := context.Background()
-	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
-	_, approvalID := submitLLMStep(t, k, ctx, exec)
-
-	if err := k.DenyApproval(ctx, approvalID, kernel.DenyApprovalRequest{DecidedBy: "bob"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
-		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
-	}
-	assertSingleTerminalStepEvent(t, k, ctx, exec.ID, domain.EventStepDenied)
-}
-
-// TestApprovalDenyResumesExecution verifies that denying an approval resumes the
-// execution with the step denied, so the handler is told what happened rather
-// than being killed, and that re-proposing the same effect stays denied without
-// asking the approver again.
 func TestApprovalDenyResumesExecution(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
@@ -791,46 +779,6 @@ func TestApprovalDenyRationaleReachesHandler(t *testing.T) {
 	}
 }
 
-func TestApprovalExpireRecordsActualStepKind(t *testing.T) {
-	ms := memstore.NewStore()
-	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: 1 * time.Millisecond}
-	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, 1*time.Millisecond)}))
-	ctx := context.Background()
-	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
-	submitLLMStep(t, k, ctx, exec)
-
-	time.Sleep(10 * time.Millisecond)
-	if err := k.ExpireApprovals(ctx, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
-		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
-	}
-	assertSingleTerminalStepEvent(t, k, ctx, exec.ID, domain.EventStepDenied)
-}
-
-func TestCancelExecutionRecordsActualStepKind(t *testing.T) {
-	ms := memstore.NewStore()
-	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
-	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
-	ctx := context.Background()
-	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
-	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
-	submitLLMStep(t, k, ctx, exec)
-
-	if err := k.CancelExecution(ctx, exec.ID); err != nil {
-		t.Fatal(err)
-	}
-	if got := findStepType(t, k, ctx, exec.ID, domain.EventStepDenied); got != string(domain.StepKindLLM) {
-		t.Fatalf("EventStepDenied step_type = %q, want %q", got, domain.StepKindLLM)
-	}
-	assertSingleTerminalStepEvent(t, k, ctx, exec.ID, domain.EventStepDenied)
-}
-
-// TestCompleteStepAfterExecutionCancelled verifies that completing a step
-// whose execution is already terminal does not append a step.succeeded event.
-// See https://github.com/rebuno/rebuno/issues/122.
 func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
@@ -854,7 +802,6 @@ func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 		t.Fatalf("expected execution_terminal, got %s", dec.Decision)
 	}
 
-	// No step.succeeded event must have been appended.
 	events, err := k.GetEvents(ctx, exec.ID, 0, 1000)
 	if err != nil {
 		t.Fatal(err)
@@ -865,7 +812,6 @@ func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 		}
 	}
 
-	// The step must not have transitioned to succeeded.
 	step, err := k.GetStep(ctx, stepID)
 	if err != nil {
 		t.Fatal(err)
@@ -875,8 +821,6 @@ func TestCompleteStepAfterExecutionCancelled(t *testing.T) {
 	}
 }
 
-// TestFailStepAfterExecutionCancelled verifies that failing a step whose
-// execution is already terminal does not append a step.failed event.
 func TestFailStepAfterExecutionCancelled(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
@@ -920,9 +864,8 @@ func TestFailStepAfterExecutionCancelled(t *testing.T) {
 	}
 }
 
-// TestCancelExecutionCancelsInFlightSteps verifies that cancelling an execution
-// closes out steps left in `executing`: they were handed to the agent and their
-// outcome was never reported back, so they are terminal with an unknown result.
+// A step left executing was handed to the agent and never reported back, so it
+// is terminal with an unknown result.
 func TestCancelExecutionCancelsInFlightSteps(t *testing.T) {
 	k, ctx := setup(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
@@ -954,8 +897,6 @@ func TestCancelExecutionCancelsInFlightSteps(t *testing.T) {
 	assertSingleTerminalStepEvent(t, k, ctx, exec.ID, domain.EventStepCancelled)
 }
 
-// TestCancelExecutionCancelsPendingApprovals verifies that cancelling an
-// execution expires its pending approvals and does not leave them orphaned.
 func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
@@ -977,9 +918,8 @@ func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
 	}
 }
 
-// failingQueue wraps a memstore and fails ListDispatchesByExecution so we can
-// verify CancelExecution propagates the dispatches query error instead of
-// swallowing it and leaving active dispatches orphaned.
+// Fails ListDispatchesByExecution, so a swallowed error would leave active
+// dispatches orphaned.
 type failingQueue struct {
 	*memstore.Store
 	dispatchErr error
@@ -989,8 +929,7 @@ func (f *failingQueue) ListDispatchesByExecution(ctx context.Context, execID uui
 	return nil, f.dispatchErr
 }
 
-// failingUnitOfWork delegates RunInTx to the underlying store but hands fn a
-// TxStore whose dispatch listing fails.
+// Hands fn a TxStore whose dispatch listing fails.
 type failingUnitOfWork struct {
 	*memstore.Store
 	dispatchErr error
@@ -1011,9 +950,6 @@ func (f *failingTxStore) ListDispatchesByExecution(ctx context.Context, execID u
 	return nil, f.dispatchErr
 }
 
-// TestCancelExecutionPropagatesDispatchError verifies that a failure while
-// listing dispatches aborts the cancel instead of proceeding with an empty
-// list and leaving active dispatches orphaned.
 func TestCancelExecutionPropagatesDispatchError(t *testing.T) {
 	ms := memstore.NewStore()
 	dispatchErr := errors.New("dispatch query failed")
@@ -1086,12 +1022,10 @@ rules:
 	}
 	// The rule asked for 5m; the kernel default is 1h, so a dropped timeout is visible.
 	if gap := approval.TimeoutAt.Sub(before); gap > 6*time.Minute {
-		t.Errorf("timeout_at is %v out — the rule's 5m was dropped in favour of the default", gap)
+		t.Errorf("timeout_at is %v out; the rule's 5m was dropped in favour of the default", gap)
 	}
 }
 
-// blockedApproval submits a step that the given approval_config gates, and
-// returns the kernel and the pending approval's id.
 func blockedApproval(t *testing.T, approvalConfig string) (*kernel.Kernel, uuid.UUID) {
 	t.Helper()
 	ms := memstore.NewStore()
@@ -1425,10 +1359,8 @@ func TestRateLimitRefusesWaitOverMaxWait(t *testing.T) {
 	}
 }
 
-// TestCompleteStepOnBlockedStepConflicts verifies that a step parked on a human
-// approval cannot be resolved by the agent that proposed it. Its originating
-// lease still checks out, so the status guard is the only thing standing
-// between a blocked effect and a recorded outcome.
+// The proposing agent's lease still checks out, so the status guard is the only
+// thing between a blocked effect and a recorded outcome.
 func TestCompleteStepOnBlockedStepConflicts(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}

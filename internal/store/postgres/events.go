@@ -23,11 +23,8 @@ func (s *Store) Append(ctx context.Context, execID uuid.UUID, eventType string, 
 	return events[0], nil
 }
 
-// AppendBatch runs in its own transaction so the per-execution row lock taken in
-// appendBatch is held across the SELECT MAX(seq) and the INSERTs. This serializes
-// concurrent appenders for the same execution at the database level — including
-// the dispatch-delivery path, which appends events without holding the kernel's
-// per-execution advisory lock — keeping event_seq contiguous and gap-free.
+// Its own transaction, so appendBatch's row lock is held across the MAX read
+// and the INSERTs.
 func (s *Store) AppendBatch(ctx context.Context, execID uuid.UUID, records []store.EventRecord) ([]domain.Event, error) {
 	if len(records) == 0 {
 		return nil, nil
@@ -64,11 +61,8 @@ func appendBatch(ctx context.Context, q Querier, execID uuid.UUID, records []sto
 		return nil, nil
 	}
 
-	// Serialize concurrent appenders for this execution by row-locking the parent
-	// execution row, then read the current high-water sequence. The lock is held
-	// until the surrounding transaction commits (see Store.AppendBatch), so the
-	// MAX read and the inserts below cannot interleave with another appender.
-	// Note: FOR UPDATE cannot be combined with an aggregate, hence the two steps.
+	// FOR UPDATE cannot be combined with an aggregate, hence the separate lock
+	// and MAX.
 	if _, err := q.Exec(ctx, `SELECT id FROM executions WHERE id = $1 FOR UPDATE`, execID.String()); err != nil {
 		return nil, fmt.Errorf("lock execution for event append: %w", err)
 	}

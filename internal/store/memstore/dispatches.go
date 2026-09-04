@@ -47,8 +47,8 @@ func (s *Store) claimLocked(ctx context.Context, replica string, batch int, now 
 	}
 	for i := range pending {
 		// Each delivery attempt gets a fresh occurrence namespace. A reclaimed
-		// dispatch keeps its id, so without this the resumed agent would resume
-		// counting instead of replaying, and re-run every recorded effect.
+		// dispatch keeps its id, so without this a resumed agent continues the
+		// old count, misses its replays, and re-runs every recorded effect.
 		s.clearCountersLocked(pending[i].ID)
 		pending[i].Attempt++
 		pending[i].Status = domain.DispatchInFlight

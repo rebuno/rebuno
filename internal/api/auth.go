@@ -37,9 +37,7 @@ func bearerAuthMiddleware(token string) func(http.Handler) http.Handler {
 	}
 }
 
-// bearerOrHMAC accepts a request authenticated either by bearer token (client)
-// or by agent HMAC (Rebuno-Agent-Id + Rebuno-Signature). Used for routes an
-// agent must reach without a bearer token, e.g. fetching execution input.
+// For routes an agent must reach without a bearer token, e.g. fetching input.
 func bearerOrHMAC(token string, lookup agentLookup) func(http.Handler) http.Handler {
 	bearer := bearerAuthMiddleware(token)
 	hmacMW := hmacAuthMiddleware(lookup)
@@ -54,10 +52,6 @@ func bearerOrHMAC(token string, lookup agentLookup) func(http.Handler) http.Hand
 	}
 }
 
-// hmacAuthMiddleware verifies inbound agent requests using the agent's
-// webhook secret. Requests must provide Rebuno-Agent-Id and Rebuno-Signature
-// headers; the signature is computed over the raw request body bytes using the
-// same HMAC as outbound dispatch webhooks.
 func hmacAuthMiddleware(lookup agentLookup) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

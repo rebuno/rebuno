@@ -13,36 +13,16 @@ import (
 	"time"
 
 	"github.com/rebuno/rebuno/internal/api"
-	"github.com/rebuno/rebuno/internal/domain"
-	"github.com/rebuno/rebuno/internal/kernel"
-	"github.com/rebuno/rebuno/internal/policy"
-	"github.com/rebuno/rebuno/internal/store/memstore"
 	"github.com/rebuno/rebuno/internal/stream"
 )
 
-// setupStreamRouterFixtures builds a memstore-backed *api.KernelAPI adapter
-// with the shared test agent registered and one execution created, mirroring
-// setupRouter in router_test.go.
-func setupStreamRouterFixtures(t *testing.T) (*api.KernelAPI, string) {
-	t.Helper()
-	ms := memstore.NewStore()
-	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: policy.NewBundleResolver(ms, policy.PermissiveEngine{}),
-	})
-	ctx := context.Background()
-	if err := k.RegisterAgent(ctx, domain.Agent{ID: testAgentID, WebhookURL: "http://localhost", Secret: testAgentSecret}); err != nil {
-		t.Fatal(err)
-	}
-	adapt := &api.KernelAPI{Inner: k}
-	exec, err := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
+func TestStreamEndToEnd(t *testing.T) {
+	adapt, k := setupKernel(t)
+	exec, err := k.CreateExecution(context.Background(), testAgentID, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return adapt, exec.ID.String()
-}
-
-func TestStreamEndToEnd(t *testing.T) {
-	adapt, execID := setupStreamRouterFixtures(t)
+	execID := exec.ID.String()
 
 	hub := stream.NewHub(stream.NewMemoryBus())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -54,11 +34,13 @@ func TestStreamEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// Open the SSE consumer stream. Bound it with a timeout so a broken
-	// producer path fails the test instead of hanging it.
+	// Bounded so a broken producer path fails the test instead of hanging it.
 	reqCtx, reqCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer reqCancel()
-	req, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, srv.URL+"/v0/executions/"+execID+"/stream", nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, srv.URL+"/v0/executions/"+execID+"/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("open stream: %v", err)
@@ -83,17 +65,15 @@ func TestStreamEndToEnd(t *testing.T) {
 		t.Fatalf("connect frame = %q", head)
 	}
 
-	// Push a delta via the producer endpoint (HMAC-signed like other agent calls).
 	body, _ := json.Marshal(map[string]any{"seq": 7, "data": "hello world"})
 	preq := httptest.NewRequest(http.MethodPost, "/v0/executions/"+execID+"/steps/step-abc/stream", bytes.NewReader(body))
-	signAgentRequest(preq, body) // from router_test.go
+	signAgentRequest(preq, body)
 	prr := httptest.NewRecorder()
 	mux.ServeHTTP(prr, preq)
 	if prr.Code != http.StatusNoContent {
 		t.Fatalf("producer status = %d body=%s", prr.Code, prr.Body.String())
 	}
 
-	// Read the SSE frame.
 	got := readSSEData(t, resp.Body)
 	var d stream.Delta
 	if err := json.Unmarshal([]byte(got), &d); err != nil {
@@ -104,7 +84,6 @@ func TestStreamEndToEnd(t *testing.T) {
 	}
 }
 
-// readSSEData reads until the first "data: " line and returns its payload.
 func readSSEData(t *testing.T, r io.Reader) string {
 	t.Helper()
 	sc := bufio.NewScanner(r)

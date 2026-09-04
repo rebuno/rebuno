@@ -20,19 +20,7 @@ import (
 )
 
 type Config struct {
-	MaxAttempts int
-	BaseDelay   time.Duration
-	MaxDelay    time.Duration
-	Timeout     time.Duration
-}
-
-func DefaultConfig() Config {
-	return Config{
-		MaxAttempts: 5,
-		BaseDelay:   1 * time.Second,
-		MaxDelay:    30 * time.Second,
-		Timeout:     30 * time.Second,
-	}
+	Timeout time.Duration
 }
 
 type WebhookPayload struct {
@@ -58,7 +46,6 @@ type Result struct {
 
 type Dispatcher struct {
 	client *http.Client
-	cfg    Config
 	logger *slog.Logger
 }
 
@@ -69,10 +56,9 @@ func New(client *http.Client, cfg Config, logger *slog.Logger) *Dispatcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Dispatcher{client: client, cfg: cfg, logger: logger}
+	return &Dispatcher{client: client, logger: logger}
 }
 
-// Deliver makes a single delivery attempt and returns the result immediately.
 func (d *Dispatcher) Deliver(ctx context.Context, url, secret string, execID uuid.UUID, lease domain.Lease, leaseTimeout time.Duration) Result {
 	payload := WebhookPayload{
 		ExecutionID:         execID.String(),

@@ -315,7 +315,6 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 				k.d.Observer.RecordRateLimit("error_denied")
 				return k.refuseRateLimited(ctx, execID, stepID, req, pol.RuleID, domain.ReasonRateLimiterUnavailable)
 			}
-			// Fail open
 			k.log.Warn("rate limiter error, failing open",
 				"rule_id", pol.RuleID, "execution_id", execID.String(), "error", err)
 			k.d.Observer.RecordRateLimit("error_allowed")

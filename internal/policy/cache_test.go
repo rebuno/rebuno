@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"sync"
 	"testing"
 )
@@ -60,18 +61,15 @@ func TestBundleCacheEvictsLeastRecentlyUsed(t *testing.T) {
 		}
 	}
 
-	// Fill to capacity, then touch agent-1 so agent-2 becomes least-recently-used.
 	_, _ = c.getOrCompile("agent-1", "b", compile("agent-1"))
 	_, _ = c.getOrCompile("agent-2", "b", compile("agent-2"))
 	_, _ = c.getOrCompile("agent-1", "b", compile("agent-1")) // hit, promotes agent-1
 	_, _ = c.getOrCompile("agent-3", "b", compile("agent-3")) // evicts agent-2
 
-	// agent-2 was evicted: re-fetching recompiles.
 	_, _ = c.getOrCompile("agent-2", "b", compile("agent-2"))
 	if compiles["agent-2"] != 2 {
 		t.Fatalf("expected agent-2 to be evicted and recompiled, got %d compiles", compiles["agent-2"])
 	}
-	// agent-1 stayed resident: still one compile.
 	if compiles["agent-1"] != 1 {
 		t.Fatalf("expected agent-1 to stay cached, got %d compiles", compiles["agent-1"])
 	}
@@ -82,13 +80,12 @@ func TestBundleCacheDoesNotCacheCompileErrors(t *testing.T) {
 	calls := 0
 	failing := func(b string) (*RuleEngine, error) {
 		calls++
-		return nil, errCompile
+		return nil, errors.New("compile failed")
 	}
 
 	if _, err := c.getOrCompile("agent-1", "bundle-v1", failing); err == nil {
 		t.Fatal("expected the compile error to propagate")
 	}
-	// A failed compile must not be cached: the next attempt recompiles.
 	if _, err := c.getOrCompile("agent-1", "bundle-v1", failing); err == nil {
 		t.Fatal("expected the compile error to propagate again")
 	}
@@ -98,7 +95,7 @@ func TestBundleCacheDoesNotCacheCompileErrors(t *testing.T) {
 }
 
 func TestBundleCacheConcurrentAccess(t *testing.T) {
-	c := newBundleCache(16)
+	c := newBundleCache(2)
 	compile := func(b string) (*RuleEngine, error) { return &RuleEngine{}, nil }
 
 	var wg sync.WaitGroup
@@ -106,7 +103,6 @@ func TestBundleCacheConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			// A mix of shared and distinct agents to exercise hits, inserts, and eviction.
 			agent := "agent-" + string(rune('a'+n%5))
 			for j := 0; j < 100; j++ {
 				if _, err := c.getOrCompile(agent, "bundle", compile); err != nil {
@@ -117,9 +113,3 @@ func TestBundleCacheConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
-
-var errCompile = errTest("compile failed")
-
-type errTest string
-
-func (e errTest) Error() string { return string(e) }

@@ -5,14 +5,6 @@ import (
 	"time"
 )
 
-type APIError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Details string `json:"details,omitempty"`
-}
-
-func (e APIError) Error() string { return e.Code + ": " + e.Message }
-
 const (
 	DecisionAllow           = "allow"
 	DecisionDeny            = "deny"

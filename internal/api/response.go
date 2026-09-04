@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -55,8 +54,4 @@ func MapError(err error) (string, int) {
 	default:
 		return "internal_error", http.StatusInternalServerError
 	}
-}
-
-func CtxWithValue(ctx context.Context, key, val any) context.Context {
-	return context.WithValue(ctx, key, val)
 }

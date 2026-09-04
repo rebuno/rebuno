@@ -16,9 +16,7 @@ const maxDeltaBytes = 7000
 
 const streamKeepAlive = 15 * time.Second
 
-// Streamer is the live side channel the router needs: publish agent deltas and
-// subscribe SSE clients. *stream.Hub satisfies it. A nil Streamer disables the
-// feature (endpoints degrade gracefully).
+// A nil Streamer disables streaming; the endpoints degrade gracefully.
 type Streamer interface {
 	Publish(ctx context.Context, execID uuid.UUID, d stream.Delta) error
 	Subscribe(execID uuid.UUID) (<-chan stream.Delta, func())

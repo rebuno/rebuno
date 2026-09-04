@@ -13,9 +13,7 @@ import (
 
 const maxRequestBodyBytes = 10 << 20 // 10 MiB
 
-// bodyLimit rejects oversized request bodies before a handler reads them,
-// closing off unbounded-memory reads on create/submit and the HMAC middleware's
-// io.ReadAll.
+// Global, not per-handler: the HMAC middleware io.ReadAlls the body first.
 func bodyLimit(n int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +50,6 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 
 	mux.Get("/metrics", promhttp.HandlerFor(obs.Registry(), promhttp.HandlerOpts{}).ServeHTTP)
 
-	// Client routes
 	mux.With(bearer).Post("/v0/executions", r.createExecution)
 	mux.With(bearer).Get("/v0/executions", r.listExecutions)
 	mux.With(dual).Get("/v0/executions/{id}", r.getExecution)
@@ -60,7 +57,6 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(bearer).Get("/v0/executions/{id}/stream", r.streamExecution)
 	mux.With(bearer).Post("/v0/executions/{id}/cancel", r.cancelExecution)
 
-	// Agent routes
 	mux.With(dual).Get("/v0/executions/{id}/steps", r.listSteps)
 	mux.With(dual).Get("/v0/executions/{id}/steps/{step_id}", r.getStep)
 	mux.With(hmac).Post("/v0/executions/{id}/steps", r.submitStep)
@@ -71,7 +67,6 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(hmac).Post("/v0/executions/{id}/complete", r.agentCompleteExecution)
 	mux.With(hmac).Post("/v0/executions/{id}/fail", r.agentFailExecution)
 
-	// Admin routes
 	mux.With(bearer).Post("/v0/agents", r.registerAgent)
 	mux.With(bearer).Get("/v0/agents", r.listAgents)
 	mux.With(bearer).Get("/v0/agents/{id}", r.getAgent)

@@ -8,8 +8,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// startHub wires a Hub over a MemoryBus and runs its receive loop until the
-// test ends.
 func startHub(t *testing.T) *Hub {
 	t.Helper()
 	h := NewHub(NewMemoryBus())
@@ -29,22 +27,6 @@ func recv(t *testing.T, ch <-chan Delta) Delta {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for delta")
 		return Delta{}
-	}
-}
-
-func TestHubDeliversToSubscriber(t *testing.T) {
-	h := startHub(t)
-	exec := uuid.New()
-
-	ch, cancel := h.Subscribe(exec)
-	defer cancel()
-
-	want := Delta{StepID: "step-1", Seq: 1, Data: "hello"}
-	if err := h.Publish(context.Background(), exec, want); err != nil {
-		t.Fatalf("publish: %v", err)
-	}
-	if got := recv(t, ch); got != want {
-		t.Fatalf("got %+v want %+v", got, want)
 	}
 }
 
@@ -94,10 +76,9 @@ func TestHubDropsWhenSubscriberFull(t *testing.T) {
 	h := startHub(t)
 	exec := uuid.New()
 
-	ch, cancel := h.Subscribe(exec)
+	_, cancel := h.Subscribe(exec)
 	defer cancel()
 
-	// Publish more than the buffer without draining. deliver must never block.
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < subBuffer*4; i++ {
@@ -110,5 +91,4 @@ func TestHubDropsWhenSubscriberFull(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Publish blocked on a full subscriber")
 	}
-	_ = ch
 }

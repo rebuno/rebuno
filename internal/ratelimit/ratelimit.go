@@ -8,21 +8,18 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
-// Key identifies the scope being rate-limited, e.g. "ruleID:executionID".
 type Key string
 
 type Limiter interface {
 	Allow(ctx context.Context, key Key, cfg domain.RateLimitConfig) (bool, time.Duration, error)
 }
 
-// Reaper is optionally implemented by limiters that accumulate per-key state and
-// need periodic eviction. The lifecycle cleanup worker calls it on the leader.
+// Implemented by limiters that accumulate per-key state. The lifecycle cleanup
+// worker calls it on the leader.
 type Reaper interface {
 	ReapBefore(ctx context.Context, cutoff time.Time) error
 }
 
-// ScopeKey builds the limiter key for a rule honoring its per_what scope, so a
-// rule limits the intended subject rather than always per-execution.
 func ScopeKey(ruleID, perWhat, execID, agentID string) Key {
 	switch perWhat {
 	case "agent":
@@ -34,7 +31,6 @@ func ScopeKey(ruleID, perWhat, execID, agentID string) Key {
 	}
 }
 
-// MemoryLimiter is a simple, process-local token-bucket rate limiter.
 type MemoryLimiter struct {
 	mu      sync.RWMutex
 	buckets map[Key]*bucket
@@ -43,16 +39,12 @@ type MemoryLimiter struct {
 type bucket struct {
 	tokens     float64
 	lastUpdate time.Time
-	max        int
-	window     time.Duration
 }
 
 func NewMemoryLimiter() *MemoryLimiter {
 	return &MemoryLimiter{buckets: make(map[Key]*bucket)}
 }
 
-// Allow reports whether one more call is allowed for key under the given config.
-// If denied, it returns the estimated wait time until one token is available.
 func (l *MemoryLimiter) Allow(ctx context.Context, key Key, cfg domain.RateLimitConfig) (bool, time.Duration, error) {
 	if cfg.MaxCalls <= 0 || cfg.Window <= 0 {
 		return true, 0, nil
@@ -64,16 +56,12 @@ func (l *MemoryLimiter) Allow(ctx context.Context, key Key, cfg domain.RateLimit
 	now := time.Now()
 	b, ok := l.buckets[key]
 	if !ok {
-		b = &bucket{tokens: float64(cfg.MaxCalls), lastUpdate: now, max: cfg.MaxCalls, window: cfg.Window}
+		b = &bucket{tokens: float64(cfg.MaxCalls), lastUpdate: now}
 		l.buckets[key] = b
 	} else {
-		// Ensure the bucket uses the latest limit configuration.
-		b.max = cfg.MaxCalls
-		b.window = cfg.Window
-		capacity := float64(b.max)
 		elapsed := now.Sub(b.lastUpdate)
-		refill := float64(b.max) * float64(elapsed) / float64(b.window)
-		b.tokens = min(capacity, b.tokens+refill)
+		refill := float64(cfg.MaxCalls) * float64(elapsed) / float64(cfg.Window)
+		b.tokens = min(float64(cfg.MaxCalls), b.tokens+refill)
 		b.lastUpdate = now
 	}
 
@@ -82,11 +70,10 @@ func (l *MemoryLimiter) Allow(ctx context.Context, key Key, cfg domain.RateLimit
 		return true, 0, nil
 	}
 
-	wait := time.Duration((1.0 - b.tokens) * float64(b.window) / float64(b.max))
+	wait := time.Duration((1.0 - b.tokens) * float64(cfg.Window) / float64(cfg.MaxCalls))
 	return false, wait, nil
 }
 
-// NoOpLimiter always allows requests with no waiting.
 type NoOpLimiter struct{}
 
 func NoOp() *NoOpLimiter {
@@ -97,8 +84,6 @@ func (NoOpLimiter) Allow(ctx context.Context, key Key, cfg domain.RateLimitConfi
 	return true, 0, nil
 }
 
-// ReapBefore drops buckets untouched since cutoff. Without this the map grows
-// unbounded — one entry per (rule, scope) ever seen.
 func (l *MemoryLimiter) ReapBefore(ctx context.Context, cutoff time.Time) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

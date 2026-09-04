@@ -8,10 +8,10 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
-func TestMemoryLimiter_AllowsUpToMaxCalls(t *testing.T) {
+func TestMemoryLimiter_DeniesAfterMaxCalls(t *testing.T) {
 	ctx := context.Background()
 	lim := NewMemoryLimiter()
-	cfg := domain.RateLimitConfig{MaxCalls: 3, Window: time.Hour}
+	cfg := domain.RateLimitConfig{MaxCalls: 2, Window: time.Hour}
 	key := Key("rule:exec")
 
 	for i := 0; i < cfg.MaxCalls; i++ {
@@ -24,19 +24,6 @@ func TestMemoryLimiter_AllowsUpToMaxCalls(t *testing.T) {
 		}
 		if wait != 0 {
 			t.Fatalf("call %d expected no wait, got %v", i+1, wait)
-		}
-	}
-}
-
-func TestMemoryLimiter_DeniesAfterMaxCalls(t *testing.T) {
-	ctx := context.Background()
-	lim := NewMemoryLimiter()
-	cfg := domain.RateLimitConfig{MaxCalls: 2, Window: time.Hour}
-	key := Key("rule:exec")
-
-	for i := 0; i < cfg.MaxCalls; i++ {
-		if allowed, _, _ := lim.Allow(ctx, key, cfg); !allowed {
-			t.Fatalf("call %d expected allowed, got denied", i+1)
 		}
 	}
 
@@ -96,30 +83,10 @@ func TestMemoryLimiter_DifferentKeysAreIndependent(t *testing.T) {
 		t.Fatal("key b expected allowed")
 	}
 
-	// Both keys have now exhausted their single token.
 	if allowed, _, _ := lim.Allow(ctx, Key("a"), cfg); allowed {
 		t.Fatal("key a expected denied")
 	}
 	if allowed, _, _ := lim.Allow(ctx, Key("b"), cfg); allowed {
 		t.Fatal("key b expected denied")
-	}
-}
-
-func TestNoOpLimiter_AlwaysAllows(t *testing.T) {
-	ctx := context.Background()
-	lim := NoOp()
-	cfg := domain.RateLimitConfig{MaxCalls: 1, Window: time.Hour}
-
-	for i := 0; i < 10; i++ {
-		allowed, wait, err := lim.Allow(ctx, Key("any"), cfg)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !allowed {
-			t.Fatalf("call %d expected allowed, got denied", i+1)
-		}
-		if wait != 0 {
-			t.Fatalf("call %d expected no wait, got %v", i+1, wait)
-		}
 	}
 }

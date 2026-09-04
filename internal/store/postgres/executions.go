@@ -84,8 +84,6 @@ func listExecutions(ctx context.Context, q Querier, filter domain.ExecutionFilte
 	if filter.Cursor != "" {
 		cursor = filter.Cursor
 	}
-	// Fetch one extra row to detect whether a further page exists. Keyset
-	// pagination on id DESC; id is UUIDv7 so id order is creation order.
 	rows, err := q.Query(ctx, `
 		SELECT id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at
 		FROM executions

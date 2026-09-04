@@ -123,7 +123,7 @@ rules:
 
 func TestEmptyArgPredicateIsRejectedAtLoad(t *testing.T) {
 	// An empty predicate and equals:"" unmarshal to the same zero struct, so
-	// both must be rejected — otherwise the rule silently matches any command.
+	// both must be rejected: an unconstrained rule matches any command.
 	for _, bundle := range []string{
 		"rules:\n  - id: a\n    when:\n      arguments:\n        command: {}\n    then: { decision: allow }\n",
 		"rules:\n  - id: a\n    when:\n      arguments:\n        command: { equals: \"\" }\n    then: { decision: allow }\n",
@@ -133,8 +133,6 @@ func TestEmptyArgPredicateIsRejectedAtLoad(t *testing.T) {
 		}
 	}
 
-	// A predicate with a real constraint alongside an empty field still loads —
-	// the empty field is just ignored, the constraint carries the rule.
 	if _, err := NewRuleEngineFromBundle(
 		"rules:\n  - id: a\n    when:\n      arguments:\n        command: { contains: rm, equals: \"\" }\n    then: { decision: deny }\n",
 	); err != nil {

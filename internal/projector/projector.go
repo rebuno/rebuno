@@ -1,36 +1,12 @@
 package projector
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
-	"github.com/rebuno/rebuno/internal/store"
 	"github.com/rebuno/rebuno/internal/usage"
 )
-
-type State struct {
-	Execution        domain.Execution
-	Steps            []domain.Step
-	PendingApprovals []domain.Approval
-}
-
-type Projector struct {
-	steps store.StepStore
-}
-
-func New(steps store.StepStore) *Projector {
-	return &Projector{steps: steps}
-}
-
-func (p *Projector) ExecutionState(ctx context.Context, exec domain.Execution) (State, error) {
-	steps, err := p.steps.ListByExecution(ctx, exec.ID)
-	if err != nil {
-		return State{}, err
-	}
-	return State{Execution: exec, Steps: steps}, nil
-}
 
 func StepPayload(stepID string, kind domain.StepKind, target, ruleID string) map[string]any {
 	m := map[string]any{
@@ -71,11 +47,6 @@ func StepErrorPayload(stepID string, kind domain.StepKind, target string, err []
 	return m
 }
 
-// StepDeniedPayload builds the payload for a step.denied event. It is the
-// single contract for all deny paths: step_id and step_type are always present,
-// while target, rule_id, and error are included only when non-empty so that
-// consumers reading step.denied events see a consistent shape regardless of
-// whether the denial came from policy, approval, timeout, or cancellation.
 func StepDeniedPayload(stepID string, kind domain.StepKind, target, ruleID string, err []byte) map[string]any {
 	m := map[string]any{
 		"step_id":   stepID,

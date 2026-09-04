@@ -12,9 +12,6 @@ import (
 	"github.com/rebuno/rebuno/internal/policy"
 )
 
-// agentConfigFile is the declarative provisioning manifest passed via --config.
-// It lists the agents the kernel should register (upsert) on boot, each with
-// its policy bundle. Loaded by both `dev` and `server`.
 type agentConfigFile struct {
 	Agents []agentConfigEntry `yaml:"agents"`
 }
@@ -24,8 +21,8 @@ type agentConfigEntry struct {
 	WebhookURL          string  `yaml:"webhook_url"`
 	Secret              string  `yaml:"secret"`
 	LeaseTimeoutSeconds float64 `yaml:"lease_timeout_seconds"`
-	Policy              string  `yaml:"policy"`      // inline bundle (literal block)
-	PolicyFile          string  `yaml:"policy_file"` // path, relative to the config file
+	Policy              string  `yaml:"policy"`
+	PolicyFile          string  `yaml:"policy_file"` // relative to the manifest
 }
 
 func expandEnv(s string) string {
@@ -37,10 +34,6 @@ func expandEnv(s string) string {
 	})
 }
 
-// loadAgentConfig parses a provisioning manifest into agents ready to register.
-// policy_file paths are resolved relative to the manifest, and every bundle is
-// validated up front so a malformed policy fails the boot instead of silently
-// falling back to the permissive engine at evaluation time.
 func loadAgentConfig(path string) ([]domain.Agent, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -75,6 +68,7 @@ func loadAgentConfig(path string) ([]domain.Agent, error) {
 			bundle = string(b)
 		}
 
+		// Reject here: an unparsed bundle degrades to the permissive engine.
 		if bundle != "" {
 			if _, err := policy.NewRuleEngineFromBundle(bundle); err != nil {
 				return nil, fmt.Errorf("agent %q: invalid policy bundle: %w", a.ID, err)
@@ -92,11 +86,6 @@ func loadAgentConfig(path string) ([]domain.Agent, error) {
 	return agents, nil
 }
 
-// registerAgents upserts each agent from the manifest. RegisterAgent is an
-// upsert, so the policy bundle is persisted alongside the agent in one call and
-// re-applying the manifest on every boot is idempotent. It is additive: agents
-// not in the manifest (e.g. registered at runtime via the admin API) are left
-// untouched.
 func registerAgents(ctx context.Context, r interface {
 	RegisterAgent(context.Context, domain.Agent) error
 }, agents []domain.Agent) error {

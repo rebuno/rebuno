@@ -21,9 +21,6 @@ func (k *Kernel) RegisterAgent(ctx context.Context, agent domain.Agent) error {
 	return k.d.Agents.RegisterAgent(ctx, agent)
 }
 
-// validatePolicyBundle rejects a bundle that fails to parse or compile before it
-// is persisted, so a malformed bundle can never silently weaken enforcement at
-// evaluation time. An empty bundle means "no policy" and is always valid.
 func validatePolicyBundle(bundle string) error {
 	if bundle == "" {
 		return nil

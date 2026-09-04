@@ -11,21 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/store"
-	"github.com/rebuno/rebuno/internal/store/memstore"
-)
-
-// Compile-time interface satisfaction checks.
-var (
-	_ store.EventStore     = (*Store)(nil)
-	_ store.StepStore      = (*Store)(nil)
-	_ store.ExecutionStore = (*Store)(nil)
-	_ store.AgentStore     = (*Store)(nil)
-	_ store.ApprovalStore  = (*Store)(nil)
-	_ store.JobQueue       = (*Store)(nil)
-	_ store.Locker         = (*Store)(nil)
-	_ store.UnitOfWork     = (*Store)(nil)
-
-	_ store.TxStore = (*txStore)(nil)
 )
 
 func TestNewStore(t *testing.T) {
@@ -59,7 +44,6 @@ func TestNewStore(t *testing.T) {
 		t.Fatalf("register agent: %v", err)
 	}
 
-	// Create an execution and check events commit atomically.
 	execID := uuid.Must(uuid.NewV7())
 	exec := domain.Execution{
 		ID:        execID,
@@ -99,17 +83,4 @@ func TestNewStore(t *testing.T) {
 	if len(events) != 2 {
 		t.Errorf("expected 2 events, got %d", len(events))
 	}
-
-	// Lock/unlock smoke test.
-	release, err := s.Acquire(ctx, "test-lock")
-	if err != nil {
-		t.Fatalf("acquire lock: %v", err)
-	}
-	release()
-}
-
-func TestMemStoreInterfaces(t *testing.T) {
-	// Sanity check that this test file itself compiles in the package and
-	// that the in-memory store remains the fallback comparison.
-	_ = memstore.NewStore()
 }

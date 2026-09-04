@@ -1,11 +1,11 @@
 """LLM interceptor that fulfils the Rebuno step contract, as a litellm proxy callback.
 
-No SDK needed — the contract is plain signed HTTP. Each intercepted call becomes an
+No SDK needed: the contract is plain signed HTTP. Each intercepted call becomes an
 `llm_call` step submitted under the dispatch the caller forwards; the kernel assigns
 the step id and says whether to call the provider or return the recorded response.
 Streamed and whole responses are both recorded, and either replays as either. A
 streamed call's chunks are also republished on the kernel's live side channel, so
-clients can render the answer as it is produced — see docs/streaming.md.
+clients can render the answer as it is produced. See docs/streaming.md.
 
 The agent forwards five headers per request:
 
@@ -143,7 +143,7 @@ class RebunoInterceptor(CustomLogger):
     async def async_post_call_streaming_iterator_hook(
         self, user_api_key_dict, response, request_data
     ):
-        """Where litellm sends a streamed call — the success hook never fires for one.
+        """Where litellm sends a streamed call; the success hook never fires for one.
         Chunks go straight out to the caller as they arrive and are republished as
         live deltas; the step is completed with the whole response assembled from
         them, the shape a replay expects.
@@ -193,7 +193,7 @@ class RebunoInterceptor(CustomLogger):
             raise
         finally:
             # in `finally`, not after the loop: a caller that disconnects mid-stream
-            # closes this generator, and the step still has to be closed out — with
+            # closes this generator, and the step still has to be closed out, with
             # whatever arrived, the same as any other half-finished stream
             if error is not None:
                 await self._record(

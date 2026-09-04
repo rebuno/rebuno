@@ -13,7 +13,6 @@ import (
 	"github.com/rebuno/rebuno/internal/lifecycle"
 )
 
-// fakeKernel records calls to each Kernel method so tests can assert cadence.
 type fakeKernel struct {
 	dispatches              int32
 	expireApprovals         int32
@@ -43,13 +42,8 @@ func (f *fakeKernel) Cleanup(ctx context.Context, retain time.Duration, now time
 	return nil
 }
 
-// TestDeadlineLoopRunsIndependentlyOfCleanup verifies that the dedicated
-// deadline enforcement loop fires far more often than the singleton/cleanup
-// interval, so executions past their deadline are cancelled promptly even when
-// cleanup is configured to a long interval (the bug in issue #123).
 func TestDeadlineLoopRunsIndependentlyOfCleanup(t *testing.T) {
 	k := &fakeKernel{}
-	// Cleanup interval is deliberately long; deadline interval is short.
 	mgr := lifecycle.NewManagerWithLocker(
 		k, slog.New(slog.NewTextHandler(io.Discard, nil)),
 		10*time.Minute, // singleton/cleanup interval
@@ -59,8 +53,6 @@ func TestDeadlineLoopRunsIndependentlyOfCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	mgr.Start(ctx)
 
-	// Within 200ms the deadline loop should have fired many times, while the
-	// singleton loop (10 min) should not have fired at all.
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 	mgr.Stop()
@@ -76,9 +68,6 @@ func TestDeadlineLoopRunsIndependentlyOfCleanup(t *testing.T) {
 	}
 }
 
-// TestDeadlineLoopDisabledByDefault verifies that a zero deadline interval
-// disables the dedicated loop (deadline enforcement falls back to the
-// singleton tick), preserving backward-compatible behavior.
 func TestDeadlineLoopDisabledByDefault(t *testing.T) {
 	k := &fakeKernel{}
 	mgr := lifecycle.NewManagerWithLocker(
@@ -93,11 +82,8 @@ func TestDeadlineLoopDisabledByDefault(t *testing.T) {
 	cancel()
 	mgr.Stop()
 
-	// With the dedicated loop disabled, CancelExpiredExecutions is only
-	// reached via the singleton tick (runSingletons). Tie the assertion to
-	// that path: cleanups also only fire from runSingletons, so a nonzero
-	// cleanup count confirms the deadline calls came from the singleton tick
-	// rather than an accidentally-enabled dedicated loop.
+	// Cleanup fires only from runSingletons, so an equal count is what pins these
+	// calls to the singleton tick instead of a dedicated loop left enabled.
 	if got := atomic.LoadInt32(&k.cancelExpiredExecutions); got == 0 {
 		t.Fatalf("expected singleton tick to drive CancelExpiredExecutions, got %d", got)
 	}
@@ -110,8 +96,6 @@ func TestDeadlineLoopDisabledByDefault(t *testing.T) {
 	}
 }
 
-// TestDeadlineTickPropagatesError verifies that errors from
-// CancelExpiredExecutions surface through the loop without panicking.
 func TestDeadlineTickPropagatesError(t *testing.T) {
 	k := &fakeKernel{cancelErr: errors.New("boom")}
 	mgr := lifecycle.NewManagerWithLocker(
@@ -142,9 +126,6 @@ func (heldLocker) TryAcquire(ctx context.Context, key string) (func(), error) {
 	return nil, nil
 }
 
-// TestDeadlineLoopGatedByLeaderLock verifies that when another replica holds
-// the leader lock, the dedicated deadline loop skips its tick (the shared
-// withLeaderLock helper gates both the deadline and singleton loops).
 func TestDeadlineLoopGatedByLeaderLock(t *testing.T) {
 	k := &fakeKernel{}
 	mgr := lifecycle.NewManagerWithLocker(

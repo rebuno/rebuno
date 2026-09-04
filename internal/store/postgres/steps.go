@@ -117,10 +117,9 @@ func (q querier) AdvanceDispatchOccurrence(ctx context.Context, execID uuid.UUID
 }
 
 func advanceDispatchOccurrence(ctx context.Context, q Querier, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
-	// Selecting the dispatch row makes the fence part of the write, and FOR
-	// UPDATE waits for a claim landing mid-statement rather than reading the row
-	// stale. GREATEST keeps the counter monotonic if a retry replays an older
-	// occurrence.
+	// Selecting the dispatch row makes the fence part of the write; FOR UPDATE
+	// waits for a claim landing mid-statement. GREATEST keeps the counter
+	// monotonic when a retry replays an older occurrence.
 	res, err := q.Exec(ctx, `
 		INSERT INTO dispatch_step_counters (dispatch_id, kind, target, args_hash, consumed)
 		SELECT d.id, $2::text, $3::text, $4::text, $5::int

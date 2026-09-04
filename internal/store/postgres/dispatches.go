@@ -248,8 +248,6 @@ func (q querier) ReclaimStalled(ctx context.Context, now time.Time, defaultLease
 	return reclaimStalled(ctx, q.q, now, defaultLeaseTimeout, batch)
 }
 
-// reclaimStalled expires each lease against its agent's timeout, falling back to
-// defaultLeaseTimeout. FOR UPDATE OF d locks only dispatches.
 func reclaimStalled(ctx context.Context, q Querier, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
 	rows, err := q.Query(ctx, `
 		WITH stalled AS (

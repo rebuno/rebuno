@@ -15,10 +15,8 @@ import (
 	"github.com/rebuno/rebuno/internal/store/memstore"
 )
 
-// fenceStore is the slice of a backend the dispatch lease fence touches. Both
-// implementations are exercised, since the fence has to mean the same thing in
-// each; memstore lives here rather than in its own package for the same reason
-// TestMemStoreInterfaces does, so one DATABASE_URL gate covers both.
+// The fence has to mean the same thing in both backends, so both are exercised
+// here under one DATABASE_URL gate.
 type fenceStore interface {
 	store.JobQueue
 	store.StepStore
@@ -26,8 +24,6 @@ type fenceStore interface {
 	store.ExecutionStore
 }
 
-// fenceBackends returns every store implementation under test. Postgres is
-// skipped unless DATABASE_URL is set, the same gate as TestNewStore.
 func fenceBackends(t *testing.T) map[string]fenceStore {
 	t.Helper()
 	backends := map[string]fenceStore{"memstore": memstore.NewStore()}
@@ -51,8 +47,6 @@ func fenceBackends(t *testing.T) map[string]fenceStore {
 	return backends
 }
 
-// deliveredDispatch registers an agent, creates an execution, queues one
-// dispatch and claims it, returning the lease of that first delivery.
 func deliveredDispatch(t *testing.T, s fenceStore) (uuid.UUID, domain.Lease) {
 	t.Helper()
 	ctx := context.Background()
@@ -78,8 +72,6 @@ func deliveredDispatch(t *testing.T, s fenceStore) (uuid.UUID, domain.Lease) {
 	return execID, domain.Lease{DispatchID: claimed.ID, Attempt: claimed.Attempt}
 }
 
-// claimFor claims due work and returns this execution's dispatch, which is the
-// only one a fresh fixture has.
 func claimFor(t *testing.T, s fenceStore, execID uuid.UUID, now time.Time) domain.Dispatch {
 	t.Helper()
 	ctx := context.Background()
@@ -111,7 +103,6 @@ func TestLeaseFenceRefusesSupersededAttempt(t *testing.T) {
 				t.Fatalf("live lease must check out: %v", err)
 			}
 
-			// A lease naming another execution is not this dispatch's.
 			if err := s.RenewLease(ctx, uuid.Must(uuid.NewV7()), stalled, now); !errors.Is(err, domain.ErrLeaseSuperseded) {
 				t.Fatalf("foreign execution must be refused, got %v", err)
 			}
@@ -136,7 +127,6 @@ func TestLeaseFenceRefusesSupersededAttempt(t *testing.T) {
 				t.Fatalf("live lease must renew after re-claim: %v", err)
 			}
 
-			// A late ack from the stalled attempt must leave the live row alone.
 			next := later.Add(time.Hour)
 			if err := s.Ack(ctx, stalled.DispatchID, stalled.Attempt, domain.DispatchFailed, &next); !errors.Is(err, domain.ErrLeaseSuperseded) {
 				t.Fatalf("superseded ack must be refused, got %v", err)
@@ -239,8 +229,8 @@ func TestCheckedLeaseBlocksAConcurrentClaim(t *testing.T) {
 }
 
 // Settling a delivery and retiring a dispatch are different operations. A late
-// failure from a delivery the kernel has already retired — an approval took the
-// work back, or the execution went terminal — must not requeue it.
+// failure from a delivery the kernel has already retired (an approval took the
+// work back, or the execution went terminal) must not requeue it.
 func TestLateAckCannotRequeueARetiredDispatch(t *testing.T) {
 	ctx := context.Background()
 	for name, s := range fenceBackends(t) {
@@ -265,8 +255,6 @@ func TestLateAckCannotRequeueARetiredDispatch(t *testing.T) {
 	}
 }
 
-// leasedFor registers an agent with the given lease override and returns the
-// lease of one delivered dispatch for it.
 func leasedFor(t *testing.T, s fenceStore, timeoutSeconds float64, now time.Time) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
@@ -293,9 +281,6 @@ func leasedFor(t *testing.T, s fenceStore, timeoutSeconds float64, now time.Time
 	return claimFor(t, s, execID, now).ID
 }
 
-// TestReclaimHonorsThePerAgentLease holds two dispatches claimed at the same
-// instant, one under an agent that overrides the lease and one under an agent
-// that does not, and reclaims at a moment that has passed only the override.
 func TestReclaimHonorsThePerAgentLease(t *testing.T) {
 	for name, s := range fenceBackends(t) {
 		t.Run(name, func(t *testing.T) {

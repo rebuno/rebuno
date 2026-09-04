@@ -107,7 +107,6 @@ const (
 	reapInterval = 2 * time.Second
 )
 
-// reap returns expired leases to the queue for as long as ctx lives.
 func (k *Kernel) reap(ctx context.Context) {
 	// Reaping is bounded by the lease, but a short lease has to be reaped sooner.
 	t := time.NewTicker(max(time.Millisecond, min(reapInterval, k.cfg.DispatchLeaseTimeout/4)))
@@ -214,7 +213,6 @@ func (k *Kernel) runDispatches(ctx context.Context, poll time.Duration) error {
 	}
 }
 
-// workerError reports an error the dispatcher absorbs rather than returns.
 func (k *Kernel) workerError(msg string, err error) {
 	k.d.Observer.RecordWorkerError("dispatch")
 	k.log.Error(msg, "err", err)

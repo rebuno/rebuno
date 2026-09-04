@@ -9,9 +9,16 @@ var (
 	ErrExecutionTerminal = fmt.Errorf("execution terminal")
 	ErrUnauthorized      = fmt.Errorf("unauthorized")
 	ErrForbidden         = fmt.Errorf("forbidden")
-	ErrRateLimited       = fmt.Errorf("rate limit exceeded")
 	ErrLeaseSuperseded   = fmt.Errorf("dispatch lease superseded")
 )
+
+type APIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
+}
+
+func (e APIError) Error() string { return e.Code + ": " + e.Message }
 
 const (
 	ReasonPolicyDenied           = "policy_denied"

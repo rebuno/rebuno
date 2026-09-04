@@ -84,9 +84,7 @@ func New(cfg Config, d Deps) *Kernel {
 			panic("kernel.New: missing required dependency: " + name)
 		}
 	}
-	// Default the dispatch timeout defensively: a zero timeout produces an
-	// http.Client with no deadline, so a single unresponsive agent webhook would
-	// occupy a delivery slot indefinitely. Set before the dispatcher is built.
+	// Zero means an http.Client with no deadline: one hung webhook holds a slot forever.
 	if cfg.DispatchTimeout <= 0 {
 		cfg.DispatchTimeout = 30 * time.Second
 	}
@@ -101,10 +99,7 @@ func New(cfg Config, d Deps) *Kernel {
 	}
 	if d.Dispatcher == nil {
 		d.Dispatcher = dispatcher.New(nil, dispatcher.Config{
-			MaxAttempts: cfg.DispatchMaxAttempts,
-			BaseDelay:   cfg.DispatchBaseDelay,
-			MaxDelay:    cfg.DispatchMaxDelay,
-			Timeout:     cfg.DispatchTimeout,
+			Timeout: cfg.DispatchTimeout,
 		}, d.Logger)
 	}
 	if d.RateLimiter == nil {
@@ -179,7 +174,6 @@ func (k *Kernel) GetExecution(ctx context.Context, id uuid.UUID) (domain.Executi
 	return k.d.Executions.GetExecution(ctx, id)
 }
 
-// MaxListExecutionsLimit caps the page size a caller can request.
 const MaxListExecutionsLimit = 200
 
 func (k *Kernel) ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error) {

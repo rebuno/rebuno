@@ -10,7 +10,6 @@ import (
 
 type EventStore interface {
 	Append(ctx context.Context, execID uuid.UUID, eventType string, payload any) (domain.Event, error)
-	// AppendBatch writes multiple events atomically with sequential event_seqs.
 	AppendBatch(ctx context.Context, execID uuid.UUID, events []EventRecord) ([]domain.Event, error)
 	GetEvents(ctx context.Context, execID uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error)
 	GetLatestSequence(ctx context.Context, execID uuid.UUID) (int64, error)
@@ -65,20 +64,15 @@ type JobQueue interface {
 
 type Locker interface {
 	Acquire(ctx context.Context, key string) (release func(), err error)
-	// TryAcquire attempts to acquire the lock without blocking. It returns a
-	// release function when the lock is acquired, or (nil, nil) when the lock
-	// is held by another caller.
 	TryAcquire(ctx context.Context, key string) (release func(), err error)
 }
 
-// UnitOfWork runs a function inside a single transaction. The TxStore passed
-// to fn is backed by the same transaction so that all operations commit
-// atomically.
+// The TxStore passed to fn is backed by one transaction, so everything fn does
+// commits or rolls back together.
 type UnitOfWork interface {
 	RunInTx(ctx context.Context, fn func(TxStore) error) error
 }
 
-// TxStore is the union of stores that can participate in a unit of work.
 type TxStore interface {
 	EventStore
 	StepStore
