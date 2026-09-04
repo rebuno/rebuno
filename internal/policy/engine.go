@@ -52,6 +52,9 @@ type RuleEngine struct {
 }
 
 func NewRuleEngine(cfg Config) (*RuleEngine, error) {
+	if err := oneOf("default_action", cfg.DefaultAction, domain.DecisionAllow, domain.DecisionDeny); err != nil {
+		return nil, err
+	}
 	seen := make(map[string]bool)
 	for _, r := range cfg.Rules {
 		if r.ID == "" {
@@ -61,6 +64,19 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 			return nil, fmt.Errorf("duplicate rule id %q", r.ID)
 		}
 		seen[r.ID] = true
+		if r.Then.Decision == "" {
+			return nil, fmt.Errorf("rule %q: missing decision", r.ID)
+		}
+		for _, err := range []error{
+			oneOf("decision", r.Then.Decision, domain.DecisionAllow, domain.DecisionDeny, domain.DecisionRequireApproval),
+			oneOf("per_what", r.Then.RateLimit.PerWhat, domain.PerWhatExecution, domain.PerWhatAgent, domain.PerWhatGlobal),
+			oneOf("on_limiter_error", r.Then.RateLimit.OnLimiterError, domain.LimiterErrorAllow, domain.LimiterErrorDeny),
+			oneOf("on_exceed", r.Then.Budget.OnExceed, domain.DecisionDeny, domain.DecisionRequireApproval),
+		} {
+			if err != nil {
+				return nil, fmt.Errorf("rule %q: %w", r.ID, err)
+			}
+		}
 	}
 	rules := make([]Rule, len(cfg.Rules))
 	copy(rules, cfg.Rules)
@@ -88,6 +104,14 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 	}
 
 	return &RuleEngine{rules: rules, defaultResult: def}, nil
+}
+
+// An empty value keeps the documented default.
+func oneOf(field, value string, valid ...string) error {
+	if value == "" || slices.Contains(valid, value) {
+		return nil
+	}
+	return fmt.Errorf("unknown %s %q (want %s)", field, value, strings.Join(valid, ", "))
 }
 
 func NewRuleEngineFromBundle(bundleYAML string) (*RuleEngine, error) {

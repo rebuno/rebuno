@@ -22,11 +22,11 @@ type Reaper interface {
 
 func ScopeKey(ruleID, perWhat, execID, agentID string) Key {
 	switch perWhat {
-	case "agent":
+	case domain.PerWhatAgent:
 		return Key(ruleID + ":agent:" + agentID)
-	case "global":
+	case domain.PerWhatGlobal:
 		return Key(ruleID + ":global")
-	default: // "execution" or unset
+	default:
 		return Key(ruleID + ":exec:" + execID)
 	}
 }
