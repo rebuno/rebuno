@@ -24,7 +24,7 @@ func registerAgent(ctx context.Context, q Querier, agent domain.Agent) error {
 
 	_, err := q.Exec(ctx, `
 		INSERT INTO agents (id, webhook_url, secret, registered_at, policy_bundle, lease_timeout_seconds)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0::double precision))
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (id) DO UPDATE SET
 			webhook_url = EXCLUDED.webhook_url,
 			secret = EXCLUDED.secret,
@@ -48,7 +48,7 @@ func (q querier) GetAgent(ctx context.Context, id string) (domain.Agent, error) 
 
 func getAgent(ctx context.Context, q Querier, id string) (domain.Agent, error) {
 	var agent domain.Agent
-	row := q.QueryRow(ctx, `SELECT id, webhook_url, secret, registered_at, COALESCE(policy_bundle, ''), COALESCE(lease_timeout_seconds, 0) FROM agents WHERE id = $1`, id)
+	row := q.QueryRow(ctx, `SELECT id, webhook_url, secret, registered_at, policy_bundle, lease_timeout_seconds FROM agents WHERE id = $1`, id)
 	err := row.Scan(&agent.ID, &agent.WebhookURL, &agent.Secret, &agent.RegisteredAt, &agent.PolicyBundle, &agent.LeaseTimeoutSeconds)
 	if err != nil {
 		return domain.Agent{}, mapNotFound(err)
@@ -58,8 +58,7 @@ func getAgent(ctx context.Context, q Querier, id string) (domain.Agent, error) {
 
 func (s *Store) ListAgents(ctx context.Context) ([]domain.Agent, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, webhook_url, secret, registered_at, COALESCE(policy_bundle, ''),
-		       COALESCE(lease_timeout_seconds, 0)
+		SELECT id, webhook_url, secret, registered_at, policy_bundle, lease_timeout_seconds
 		FROM agents
 		ORDER BY id
 	`)

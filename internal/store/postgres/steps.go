@@ -74,7 +74,7 @@ func getStep(ctx context.Context, q Querier, stepID string) (domain.Step, error)
 	row := q.QueryRow(ctx, `
 		SELECT step_id, execution_id, kind, target, args_hash, occurrence, status,
 		       idempotency, args, result, error, started_at, completed_at,
-		       COALESCE(usage_input, 0), COALESCE(usage_output, 0)
+		       usage_input, usage_output
 		FROM steps
 		WHERE step_id = $1
 	`, stepID)
@@ -150,7 +150,7 @@ func listStepsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]d
 	rows, err := q.Query(ctx, `
 		SELECT step_id, execution_id, kind, target, args_hash, occurrence, status,
 		       idempotency, args, result, error, started_at, completed_at,
-		       COALESCE(usage_input, 0), COALESCE(usage_output, 0)
+		       usage_input, usage_output
 		FROM steps
 		WHERE execution_id = $1
 		ORDER BY step_id
@@ -166,7 +166,7 @@ func listStepsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]d
 func executionUsage(ctx context.Context, q Querier, execID uuid.UUID) (int, error) {
 	var total int
 	err := q.QueryRow(ctx, `
-		SELECT COALESCE(SUM(COALESCE(usage_input, 0) + COALESCE(usage_output, 0)), 0)
+		SELECT COALESCE(SUM(usage_input + usage_output), 0)
 		FROM steps
 		WHERE execution_id = $1
 	`, execID.String()).Scan(&total)

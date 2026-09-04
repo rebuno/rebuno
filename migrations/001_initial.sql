@@ -1,30 +1,30 @@
 -- +goose Up
 
-CREATE TABLE IF NOT EXISTS agents (
+CREATE TABLE agents (
     id TEXT PRIMARY KEY,
     webhook_url TEXT NOT NULL,
     secret TEXT NOT NULL,
-    policy_bundle TEXT,
+    policy_bundle TEXT NOT NULL DEFAULT '',
+    lease_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
     registered_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS executions (
+CREATE TABLE executions (
     id UUID PRIMARY KEY,
     agent_id TEXT NOT NULL REFERENCES agents(id),
-    agent_version TEXT,
     input JSONB COMPRESSION lz4 NOT NULL,
     status TEXT NOT NULL,
     output JSONB COMPRESSION lz4,
-    failure_reason TEXT,
+    failure_reason TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     deadline_at TIMESTAMPTZ
 );
-CREATE INDEX IF NOT EXISTS executions_active_idx ON executions (status) WHERE status IN ('pending','running','blocked');
+CREATE INDEX executions_deadline_idx ON executions (deadline_at) WHERE status IN ('pending','running','blocked');
 
-CREATE INDEX IF NOT EXISTS executions_agent_id_idx ON executions (agent_id, id DESC);
+CREATE INDEX executions_agent_id_idx ON executions (agent_id, id DESC);
 
-CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE events (
     execution_id UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
     event_seq BIGINT NOT NULL,
     type TEXT NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS events (
     PRIMARY KEY (execution_id, event_seq)
 );
 
-CREATE TABLE IF NOT EXISTS steps (
+CREATE TABLE steps (
     step_id TEXT PRIMARY KEY,
     execution_id UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
@@ -45,29 +45,31 @@ CREATE TABLE IF NOT EXISTS steps (
     args JSONB COMPRESSION lz4,
     result JSONB COMPRESSION lz4,
     error JSONB COMPRESSION lz4,
+    usage_input INT NOT NULL DEFAULT 0,
+    usage_output INT NOT NULL DEFAULT 0,
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     UNIQUE (execution_id, kind, target, args_hash, occurrence)
 );
-CREATE INDEX IF NOT EXISTS steps_execution_idx ON steps (execution_id);
 
-CREATE TABLE IF NOT EXISTS approvals (
+CREATE TABLE approvals (
     id UUID PRIMARY KEY,
     step_id TEXT NOT NULL REFERENCES steps(step_id) ON DELETE CASCADE,
     execution_id UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
     status TEXT NOT NULL,
     approvers JSONB,
-    message TEXT,
+    message TEXT NOT NULL DEFAULT '',
     timeout_at TIMESTAMPTZ NOT NULL,
-    decided_by TEXT,
+    decided_by TEXT NOT NULL DEFAULT '',
     decided_at TIMESTAMPTZ,
-    rationale TEXT,
+    rationale TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX IF NOT EXISTS approvals_pending_timeout_idx ON approvals (status, timeout_at) WHERE status = 'pending';
-CREATE INDEX IF NOT EXISTS approvals_pending_execution_idx ON approvals (execution_id) WHERE status = 'pending';
+CREATE INDEX approvals_pending_timeout_idx ON approvals (status, timeout_at) WHERE status = 'pending';
+CREATE INDEX approvals_execution_idx ON approvals (execution_id);
+CREATE INDEX approvals_step_idx ON approvals (step_id);
 
-CREATE TABLE IF NOT EXISTS dispatches (
+CREATE TABLE dispatches (
     id UUID PRIMARY KEY,
     execution_id UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
     status TEXT NOT NULL,
@@ -79,9 +81,11 @@ CREATE TABLE IF NOT EXISTS dispatches (
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX IF NOT EXISTS dispatches_due_idx ON dispatches (status, next_attempt_at) WHERE status IN ('pending','failed');
+CREATE INDEX dispatches_execution_idx ON dispatches (execution_id);
+CREATE INDEX dispatches_due_idx ON dispatches (next_attempt_at) WHERE status IN ('pending','failed');
+CREATE INDEX dispatches_lease_idx ON dispatches (locked_at) WHERE status = 'in_flight';
 
-CREATE TABLE IF NOT EXISTS dispatch_step_counters (
+CREATE TABLE dispatch_step_counters (
     dispatch_id UUID NOT NULL REFERENCES dispatches(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
     target TEXT NOT NULL,
@@ -90,11 +94,11 @@ CREATE TABLE IF NOT EXISTS dispatch_step_counters (
     PRIMARY KEY (dispatch_id, kind, target, args_hash)
 );
 
-CREATE TABLE IF NOT EXISTS rate_buckets (
+CREATE TABLE rate_buckets (
     key            TEXT PRIMARY KEY,
     tokens         DOUBLE PRECISION NOT NULL,
     max_tokens     INTEGER NOT NULL,
     window_seconds DOUBLE PRECISION NOT NULL,
     updated_at     TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX IF NOT EXISTS rate_buckets_updated_idx ON rate_buckets (updated_at);
+CREATE INDEX rate_buckets_updated_idx ON rate_buckets (updated_at);
