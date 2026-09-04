@@ -10,8 +10,8 @@ import (
 	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/observe"
+	"github.com/rebuno/rebuno/internal/payload"
 	"github.com/rebuno/rebuno/internal/policy"
-	"github.com/rebuno/rebuno/internal/projector"
 	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store"
 )
@@ -138,8 +138,8 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 		deadline := now.Add(k.cfg.ExecutionDeadlineTimeout)
 		exec.DeadlineAt = &deadline
 	}
-	createdPayload := projector.ExecutionPayload(exec.ID, exec.Status, nil, "")
-	startedPayload := projector.ExecutionPayload(exec.ID, domain.ExecutionRunning, nil, "")
+	createdPayload := payload.Execution(exec.ID, exec.Status, nil, "")
+	startedPayload := payload.Execution(exec.ID, domain.ExecutionRunning, nil, "")
 	if exec.DeadlineAt != nil {
 		createdPayload["deadline_at"] = *exec.DeadlineAt
 		startedPayload["deadline_at"] = *exec.DeadlineAt
@@ -202,7 +202,7 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 	}
 	now := time.Now().UTC()
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if _, err := tx.Append(ctx, id, domain.EventExecutionCancelled, projector.ExecutionPayload(id, domain.ExecutionCancelled, nil, "client_cancelled")); err != nil {
+		if _, err := tx.Append(ctx, id, domain.EventExecutionCancelled, payload.Execution(id, domain.ExecutionCancelled, nil, "client_cancelled")); err != nil {
 			return err
 		}
 		if err := tx.UpdateExecutionStatus(ctx, id, domain.ExecutionCancelled, nil, "client_cancelled"); err != nil {
@@ -222,8 +222,8 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 				return err
 			}
 			if _, err := tx.AppendBatch(ctx, id, []store.EventRecord{
-				{Type: domain.EventApprovalExpired, Payload: projector.ApprovalPayload(a.ID, a.StepID, id, domain.ApprovalExpired, "", "execution_cancelled")},
-				{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(a.StepID, step.Kind, step.Target, "", errPayload)},
+				{Type: domain.EventApprovalExpired, Payload: payload.Approval(a.ID, a.StepID, id, domain.ApprovalExpired, "", "execution_cancelled")},
+				{Type: domain.EventStepDenied, Payload: payload.StepDenied(a.StepID, step.Kind, step.Target, "", errPayload)},
 			}); err != nil {
 				return err
 			}
@@ -248,7 +248,7 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 			if s.Status != domain.StepExecuting {
 				continue
 			}
-			if _, err := tx.Append(ctx, id, domain.EventStepCancelled, projector.StepErrorPayload(s.StepID, s.Kind, s.Target, errPayload)); err != nil {
+			if _, err := tx.Append(ctx, id, domain.EventStepCancelled, payload.StepError(s.StepID, s.Kind, s.Target, errPayload)); err != nil {
 				return err
 			}
 			s.Status = domain.StepCancelled
@@ -295,7 +295,7 @@ func (k *Kernel) enqueueDispatchTx(ctx context.Context, tx store.TxStore, execID
 	if err := tx.Enqueue(ctx, d); err != nil {
 		return err
 	}
-	_, err := tx.Append(ctx, execID, domain.EventDispatchQueued, projector.DispatchPayload(d.ID, execID, d.Status, d.Attempt))
+	_, err := tx.Append(ctx, execID, domain.EventDispatchQueued, payload.Dispatch(d.ID, execID, d.Status, d.Attempt))
 	return err
 }
 

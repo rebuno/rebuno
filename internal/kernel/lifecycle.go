@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
-	"github.com/rebuno/rebuno/internal/projector"
+	"github.com/rebuno/rebuno/internal/payload"
 	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store"
 )
@@ -79,9 +79,9 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 			return err
 		}
 		evts := []store.EventRecord{
-			{Type: domain.EventApprovalExpired, Payload: projector.ApprovalPayload(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
-			{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(approval.StepID, step.Kind, step.Target, "", errPayload)},
-			{Type: domain.EventExecutionResumed, Payload: projector.ExecutionPayload(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
+			{Type: domain.EventApprovalExpired, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
+			{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
+			{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
 		}
 		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 			return err

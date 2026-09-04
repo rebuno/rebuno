@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/identity"
-	"github.com/rebuno/rebuno/internal/projector"
+	"github.com/rebuno/rebuno/internal/payload"
 	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store"
 	"github.com/rebuno/rebuno/internal/usage"
@@ -192,7 +192,7 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, lease
 		step.Status = domain.StepExecuting
 		step.StartedAt = &now
 		evts := []store.EventRecord{
-			{Type: domain.EventStepExecuting, Payload: projector.StepPayload(step.StepID, step.Kind, step.Target, "")},
+			{Type: domain.EventStepExecuting, Payload: payload.Step(step.StepID, step.Kind, step.Target, "")},
 		}
 		if err := k.writeStepLive(ctx, lease, step, evts); err != nil {
 			return domain.StepDecision{}, err
@@ -242,7 +242,7 @@ func (k *Kernel) refuseRateLimited(
 			return err
 		}
 		_, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
-			projector.StepDeniedPayload(stepID, req.Kind, req.Target, ruleID, errPayload))
+			payload.StepDenied(stepID, req.Kind, req.Target, ruleID, errPayload))
 		return err
 	}); err != nil {
 		return domain.StepDecision{}, false, err
@@ -291,7 +291,7 @@ func (k *Kernel) parkRateLimited(
 			return err
 		}
 		if _, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
-			projector.StepDeniedPayload(stepID, req.Kind, req.Target, ruleID, errPayload)); err != nil {
+			payload.StepDenied(stepID, req.Kind, req.Target, ruleID, errPayload)); err != nil {
 			return err
 		}
 		if err := releaseDispatchesLocked(ctx, tx, execID); err != nil {
@@ -358,7 +358,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 	}
 
 	evts := []store.EventRecord{
-		{Type: domain.EventStepProposed, Payload: projector.StepPayload(stepID, req.Kind, req.Target, "")},
+		{Type: domain.EventStepProposed, Payload: payload.Step(stepID, req.Kind, req.Target, "")},
 	}
 
 	switch pol.Decision {
@@ -366,8 +366,8 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		step.Status = domain.StepExecuting
 		step.StartedAt = &now
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepAllowed, Payload: projector.StepPayload(stepID, req.Kind, req.Target, pol.RuleID)},
-			store.EventRecord{Type: domain.EventStepExecuting, Payload: projector.StepPayload(stepID, req.Kind, req.Target, "")},
+			store.EventRecord{Type: domain.EventStepAllowed, Payload: payload.Step(stepID, req.Kind, req.Target, pol.RuleID)},
+			store.EventRecord{Type: domain.EventStepExecuting, Payload: payload.Step(stepID, req.Kind, req.Target, "")},
 		)
 		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
 			return domain.StepDecision{}, false, err
@@ -384,7 +384,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		errPayload, _ := json.Marshal(map[string]string{"reason": reason, "rule_id": pol.RuleID})
 		step.Error = errPayload
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepDenied, Payload: projector.StepDeniedPayload(stepID, req.Kind, req.Target, pol.RuleID, errPayload)},
+			store.EventRecord{Type: domain.EventStepDenied, Payload: payload.StepDenied(stepID, req.Kind, req.Target, pol.RuleID, errPayload)},
 		)
 		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
 			return domain.StepDecision{}, false, err
@@ -411,10 +411,10 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		}
 		step.Status = domain.StepAwaitingApproval
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepAwaitingApproval, Payload: projector.StepPayload(stepID, req.Kind, req.Target, pol.RuleID)},
-			store.EventRecord{Type: domain.EventApprovalRequested, Payload: projector.ApprovalPayload(approvalID, stepID, execID, domain.ApprovalPending, "", "")},
+			store.EventRecord{Type: domain.EventStepAwaitingApproval, Payload: payload.Step(stepID, req.Kind, req.Target, pol.RuleID)},
+			store.EventRecord{Type: domain.EventApprovalRequested, Payload: payload.Approval(approvalID, stepID, execID, domain.ApprovalPending, "", "")},
 		)
-		blockPayload := projector.ExecutionPayload(execID, domain.ExecutionBlocked, nil, "")
+		blockPayload := payload.Execution(execID, domain.ExecutionBlocked, nil, "")
 		evts = append(evts, store.EventRecord{Type: domain.EventExecutionBlocked, Payload: blockPayload})
 
 		if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
@@ -524,7 +524,7 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 	}
 
 	evts := []store.EventRecord{
-		{Type: domain.EventStepSucceeded, Payload: projector.StepResultPayload(stepID, step.Kind, step.Target, tokens)},
+		{Type: domain.EventStepSucceeded, Payload: payload.StepResult(stepID, step.Kind, step.Target, tokens)},
 	}
 	if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
 		return domain.StepDecision{}, err
@@ -570,7 +570,7 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 	step.Error = req.Error
 	step.CompletedAt = &now
 	evts := []store.EventRecord{
-		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(stepID, step.Kind, step.Target, req.Error)},
+		{Type: domain.EventStepFailed, Payload: payload.StepError(stepID, step.Kind, step.Target, req.Error)},
 	}
 	if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
 		return domain.StepDecision{}, err
@@ -584,7 +584,7 @@ func (k *Kernel) failStepInternal(ctx context.Context, lease domain.Lease, step 
 	step.Error = errPayload
 	step.CompletedAt = &now
 	evts := []store.EventRecord{
-		{Type: domain.EventStepFailed, Payload: projector.StepErrorPayload(step.StepID, step.Kind, step.Target, errPayload)},
+		{Type: domain.EventStepFailed, Payload: payload.StepError(step.StepID, step.Kind, step.Target, errPayload)},
 	}
 	return k.writeStepLive(ctx, lease, step, evts)
 }

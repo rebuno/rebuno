@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
-	"github.com/rebuno/rebuno/internal/projector"
+	"github.com/rebuno/rebuno/internal/payload"
 	"github.com/rebuno/rebuno/internal/store"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -38,7 +38,7 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease 
 		if err := tx.RenewLease(ctx, execID, lease, time.Now().UTC()); err != nil {
 			return err
 		}
-		if _, err := tx.Append(ctx, execID, domain.EventExecutionCompleted, projector.ExecutionPayload(execID, domain.ExecutionCompleted, output, "")); err != nil {
+		if _, err := tx.Append(ctx, execID, domain.EventExecutionCompleted, payload.Execution(execID, domain.ExecutionCompleted, output, "")); err != nil {
 			return err
 		}
 		if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionCompleted, output, ""); err != nil {
@@ -77,7 +77,7 @@ func (k *Kernel) failExecution(ctx context.Context, execID uuid.UUID, lease doma
 		if err := tx.RenewLease(ctx, execID, lease, time.Now().UTC()); err != nil {
 			return err
 		}
-		if _, err := tx.Append(ctx, execID, domain.EventExecutionFailed, projector.ExecutionPayload(execID, domain.ExecutionFailed, nil, reason)); err != nil {
+		if _, err := tx.Append(ctx, execID, domain.EventExecutionFailed, payload.Execution(execID, domain.ExecutionFailed, nil, reason)); err != nil {
 			return err
 		}
 		if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionFailed, nil, reason); err != nil {
@@ -272,7 +272,7 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		return err
 	}
 	if exec.Status.IsTerminal() {
-		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchDiscarded, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchExhausted, d.Attempt)); err != nil {
+		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchDiscarded, payload.Dispatch(d.ID, d.ExecutionID, domain.DispatchExhausted, d.Attempt)); err != nil {
 			return err
 		}
 		return ignoreSuperseded(k.d.Queue.Ack(ctx, d.ID, d.Attempt, domain.DispatchExhausted, nil))
@@ -301,12 +301,12 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 	}
 	switch res.Outcome {
 	case dispatcher.OutcomeSuccess:
-		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchAcked, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchAcked, d.Attempt)); err != nil {
+		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchAcked, payload.Dispatch(d.ID, d.ExecutionID, domain.DispatchAcked, d.Attempt)); err != nil {
 			return err
 		}
 		return nil
 	default:
-		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchFailed, projector.DispatchPayload(d.ID, d.ExecutionID, domain.DispatchFailed, d.Attempt)); err != nil {
+		if _, err := k.d.Events.Append(ctx, d.ExecutionID, domain.EventDispatchFailed, payload.Dispatch(d.ID, d.ExecutionID, domain.DispatchFailed, d.Attempt)); err != nil {
 			return err
 		}
 		if d.Attempt >= d.MaxAttempts {

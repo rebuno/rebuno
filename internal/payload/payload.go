@@ -1,4 +1,4 @@
-package projector
+package payload
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"github.com/rebuno/rebuno/internal/usage"
 )
 
-func StepPayload(stepID string, kind domain.StepKind, target, ruleID string) map[string]any {
+func Step(stepID string, kind domain.StepKind, target, ruleID string) map[string]any {
 	m := map[string]any{
 		"step_id":   stepID,
 		"step_type": string(kind),
@@ -20,7 +20,7 @@ func StepPayload(stepID string, kind domain.StepKind, target, ruleID string) map
 	return m
 }
 
-func StepResultPayload(stepID string, kind domain.StepKind, target string, tokens usage.Tokens) map[string]any {
+func StepResult(stepID string, kind domain.StepKind, target string, tokens usage.Tokens) map[string]any {
 	payload := map[string]any{
 		"step_id":   stepID,
 		"step_type": string(kind),
@@ -35,7 +35,7 @@ func StepResultPayload(stepID string, kind domain.StepKind, target string, token
 	return payload
 }
 
-func StepErrorPayload(stepID string, kind domain.StepKind, target string, err []byte) map[string]any {
+func StepError(stepID string, kind domain.StepKind, target string, err []byte) map[string]any {
 	m := map[string]any{
 		"step_id":   stepID,
 		"step_type": string(kind),
@@ -47,7 +47,7 @@ func StepErrorPayload(stepID string, kind domain.StepKind, target string, err []
 	return m
 }
 
-func StepDeniedPayload(stepID string, kind domain.StepKind, target, ruleID string, err []byte) map[string]any {
+func StepDenied(stepID string, kind domain.StepKind, target, ruleID string, err []byte) map[string]any {
 	m := map[string]any{
 		"step_id":   stepID,
 		"step_type": string(kind),
@@ -64,7 +64,7 @@ func StepDeniedPayload(stepID string, kind domain.StepKind, target, ruleID strin
 	return m
 }
 
-func ExecutionPayload(execID uuid.UUID, status domain.ExecutionStatus, output []byte, reason string) map[string]any {
+func Execution(execID uuid.UUID, status domain.ExecutionStatus, output []byte, reason string) map[string]any {
 	m := map[string]any{
 		"execution_id": execID.String(),
 		"status":       string(status),
@@ -78,7 +78,7 @@ func ExecutionPayload(execID uuid.UUID, status domain.ExecutionStatus, output []
 	return m
 }
 
-func ApprovalPayload(approvalID uuid.UUID, stepID string, execID uuid.UUID, status domain.ApprovalStatus, decidedBy, rationale string) map[string]any {
+func Approval(approvalID uuid.UUID, stepID string, execID uuid.UUID, status domain.ApprovalStatus, decidedBy, rationale string) map[string]any {
 	m := map[string]any{
 		"approval_id":  approvalID.String(),
 		"step_id":      stepID,
@@ -94,7 +94,7 @@ func ApprovalPayload(approvalID uuid.UUID, stepID string, execID uuid.UUID, stat
 	return m
 }
 
-func DispatchPayload(dispatchID, execID uuid.UUID, status domain.DispatchStatus, attempt int) map[string]any {
+func Dispatch(dispatchID, execID uuid.UUID, status domain.DispatchStatus, attempt int) map[string]any {
 	return map[string]any{
 		"dispatch_id":  dispatchID.String(),
 		"execution_id": execID.String(),
