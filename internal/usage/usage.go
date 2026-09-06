@@ -1,4 +1,3 @@
-// Package usage extracts token counts from a recorded LLM response.
 package usage
 
 import (
@@ -6,13 +5,10 @@ import (
 	"strings"
 )
 
-// Tokens is the token count parsed from one llm_call result.
 type Tokens struct {
 	Input  int
 	Output int
 }
-
-func (t Tokens) Total() int { return t.Input + t.Output }
 
 func (t Tokens) Found() bool { return t.Input > 0 || t.Output > 0 }
 
@@ -32,9 +28,8 @@ var outputKeys = map[string]bool{
 	"eval_count":           true,
 }
 
-// Parse reads token counts from a recorded step result. Each direction takes
-// the maximum seen, so a stream reporting input and output in separate events
-// resolves to a single pair.
+// Each direction takes the maximum seen, so a stream reporting input and output
+// in separate events resolves to a single pair.
 func Parse(result []byte) Tokens {
 	var envelope struct {
 		Body string `json:"body"`
@@ -51,8 +46,6 @@ func Parse(result []byte) Tokens {
 	return found
 }
 
-// jsonObjects decodes payload as JSON, falling back to the JSON carried by the
-// data: lines of a server-sent event stream.
 func jsonObjects(payload []byte) []any {
 	var single any
 	if err := json.Unmarshal(payload, &single); err == nil {

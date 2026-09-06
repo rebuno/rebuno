@@ -28,7 +28,7 @@ surface, events, or the policy format, update the corresponding doc.
 
 1. Fork the repo and create a branch from `main`.
 2. Make your changes. Add tests for new functionality.
-3. Run `make fmt`, then make sure `make test` and `make lint` pass — CI runs those two.
+3. Run `make fmt`, then make sure `make test` and `make lint` pass. CI runs those two.
 4. Open a pull request with a clear description of what changed and why.
 
 ## Reporting Issues

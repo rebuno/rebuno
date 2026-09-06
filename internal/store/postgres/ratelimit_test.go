@@ -11,9 +11,6 @@ import (
 	"github.com/rebuno/rebuno/internal/ratelimit"
 )
 
-// TestPostgresLimiterEnforcesGlobalLimitUnderConcurrency proves the property the
-// per-process MemoryLimiter cannot satisfy: across many concurrent "replicas"
-// sharing one bucket, exactly MaxCalls admits are granted.
 func TestPostgresLimiterEnforcesGlobalLimitUnderConcurrency(t *testing.T) {
 	pool := testPool(t)
 	defer pool.Close()
@@ -27,7 +24,7 @@ func TestPostgresLimiterEnforcesGlobalLimitUnderConcurrency(t *testing.T) {
 
 	// Window far longer than the test runtime so no tokens refill mid-run.
 	cfg := domain.RateLimitConfig{MaxCalls: 100, Window: time.Hour}
-	const replicas, perReplica = 20, 50 // 1000 attempts total
+	const replicas, perReplica = 20, 50
 
 	var allowed int64
 	var wg sync.WaitGroup

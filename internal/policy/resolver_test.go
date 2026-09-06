@@ -8,8 +8,6 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
-// fakeAgentStore returns a fixed agent (or error) for GetAgent and is inert for
-// the rest of the AgentStore interface.
 type fakeAgentStore struct {
 	agent domain.Agent
 	err   error
@@ -22,7 +20,7 @@ func (f fakeAgentStore) RegisterAgent(ctx context.Context, a domain.Agent) error
 func (f fakeAgentStore) ListAgents(ctx context.Context) ([]domain.Agent, error)  { return nil, nil }
 func (f fakeAgentStore) DeleteAgent(ctx context.Context, id string) error        { return nil }
 
-// A rule missing its id fails to compile in NewRuleEngine.
+// A missing id fails in NewRuleEngine.
 const uncompilableBundle = `rules:
   - when:
       target: write
@@ -30,7 +28,7 @@ const uncompilableBundle = `rules:
       decision: allow
 `
 
-// rules must be a list; a scalar fails to parse in LoadBundle.
+// A scalar where a list belongs fails in LoadBundle.
 const unparsableBundle = `rules: "not-a-list"`
 
 const allowWriteBundle = `rules:
@@ -84,7 +82,6 @@ func TestBundleResolverFailsClosedOnUncompilableBundle(t *testing.T) {
 }
 
 func TestBundleResolverEmptyBundleUsesFallback(t *testing.T) {
-	// An agent with no bundle is unrestricted by design: the fallback decides.
 	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a"}}, PermissiveEngine{})
 	res, err := r.Evaluate(context.Background(), domain.PolicyInput{AgentID: "a"})
 	if err != nil {
@@ -96,9 +93,7 @@ func TestBundleResolverEmptyBundleUsesFallback(t *testing.T) {
 }
 
 func TestBundleResolverPicksUpBundleChange(t *testing.T) {
-	// Caching must not serve a stale policy: when the agent's bundle changes,
-	// the next evaluation reflects it. Fallback denies, so the initial allow can
-	// only come from the agent's own bundle.
+	// Fallback denies, so the initial allow can only come from the bundle.
 	fs := &fakeAgentStore{agent: domain.Agent{ID: "a", PolicyBundle: allowWriteBundle}}
 	r := NewBundleResolver(fs, DenyAllEngine{})
 	in := domain.PolicyInput{AgentID: "a", Target: "write"}

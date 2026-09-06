@@ -38,10 +38,7 @@ type Execution struct {
 	DeadlineAt    *time.Time      `json:"deadline_at,omitempty"`
 }
 
-// ExecutionFilter selects and pages a list of executions. The zero value lists
-// the most recent executions across all agents. Executions are ordered newest
-// first by ID (UUIDv7, so ID order matches creation order), and paging is
-// keyset-based: Cursor is the ID of the last execution from the previous page.
+// Cursor holds an execution ID. IDs are UUIDv7, so ordering by ID orders by creation.
 type ExecutionFilter struct {
 	AgentID string
 	Status  ExecutionStatus
@@ -49,8 +46,7 @@ type ExecutionFilter struct {
 	Cursor  string
 }
 
-// ExecutionPage is one page of a listing. NextCursor is empty when there are no
-// further pages; otherwise pass it back as ExecutionFilter.Cursor.
+// Empty NextCursor means the last page; otherwise pass it back as ExecutionFilter.Cursor.
 type ExecutionPage struct {
 	Executions []Execution `json:"executions"`
 	NextCursor string      `json:"next_cursor,omitempty"`

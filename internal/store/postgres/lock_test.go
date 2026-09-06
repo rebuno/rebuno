@@ -16,10 +16,6 @@ func advisoryLockCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool) in
 	return n
 }
 
-// TestAdvisoryLockReleasedAfterContextCancel verifies that when the
-// context used to acquire the lock is already cancelled by the time release runs
-// (request timeout / client disconnect), the lock must still be freed and the
-// connection must not return to the pool holding it.
 func TestAdvisoryLockReleasedAfterContextCancel(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
@@ -40,8 +36,6 @@ func TestAdvisoryLockReleasedAfterContextCancel(t *testing.T) {
 	}
 }
 
-// TestTryAcquireReportsHeldLock confirms TryAcquire honors its non-blocking
-// contract: it returns (nil, nil) when the key is already held by Acquire.
 func TestTryAcquireReportsHeldLock(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)

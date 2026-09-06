@@ -89,8 +89,7 @@ func execCreateCmd() *cobra.Command {
 		Args:         cobra.MinimumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Joined so a shell-split object reaches the JSON check as one string,
-			// and the error shows what actually arrived.
+			// Unquoted JSON arrives shell-split; rejoin so the check sees it whole.
 			input := strings.TrimSpace(strings.Join(args[1:], " "))
 			if input == "" {
 				input = "{}"
@@ -311,8 +310,6 @@ func shortDuration(d time.Duration) string {
 	}
 }
 
-// oneLine collapses whitespace and truncates, for showing JSON payloads on a
-// single line.
 func oneLine(b []byte, max int) string {
 	s := strings.Join(strings.Fields(string(b)), " ")
 	if len(s) > max {
@@ -321,8 +318,6 @@ func oneLine(b []byte, max int) string {
 	return s
 }
 
-// indentJSON pretty-prints a JSON payload indented under its event header,
-// falling back to the raw bytes if it is not valid JSON.
 func indentJSON(b []byte) string {
 	var buf bytes.Buffer
 	if err := json.Indent(&buf, b, "      ", "  "); err != nil {

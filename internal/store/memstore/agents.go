@@ -35,7 +35,6 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListAgents returns all registered agents sorted by ID.
 func (s *Store) ListAgents(ctx context.Context) ([]domain.Agent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

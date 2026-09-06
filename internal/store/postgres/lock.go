@@ -11,9 +11,6 @@ import (
 
 var _ store.Locker = (*Store)(nil)
 
-// Acquire obtains a Postgres session-level advisory lock on a deterministic
-// integer derived from key. The returned release function must be called to
-// free the lock and return the connection to the pool.
 func (s *Store) Acquire(ctx context.Context, key string) (func(), error) {
 	keyInt := hashKey(key)
 
@@ -37,17 +34,6 @@ func (s *Store) Acquire(ctx context.Context, key string) (func(), error) {
 	}, nil
 }
 
-// releaseAdvisoryLock frees the session-level advisory lock and returns the
-// connection to the pool. It deliberately uses a fresh background context: the
-// caller's context is often already cancelled by the time the deferred release
-// runs (request timeout, client disconnect), and unlocking with a cancelled
-// context would skip the unlock and return a lock-holding connection to the
-// pool — leaking the lock and wedging every future operation on that key.
-//
-// If the unlock fails for any reason, the connection is hijacked out of the pool
-// and closed rather than returned: ending the session releases any session-level
-// advisory locks server-side, so a connection that might still hold the lock is
-// never reused.
 func releaseAdvisoryLock(conn *pgxpool.Conn, keyInt int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -59,9 +45,6 @@ func releaseAdvisoryLock(conn *pgxpool.Conn, keyInt int64) {
 	conn.Release()
 }
 
-// TryAcquire attempts a non-blocking Postgres session-level advisory lock. It
-// returns a release function when the lock is acquired, or (nil, nil) when it is
-// already held by another session.
 func (s *Store) TryAcquire(ctx context.Context, key string) (func(), error) {
 	keyInt := hashKey(key)
 

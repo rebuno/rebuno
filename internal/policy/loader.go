@@ -8,9 +8,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LoadBundle parses a raw YAML policy bundle into a policy Config. Unknown
-// keys are rejected: a misspelled predicate would otherwise be ignored, and a
-// rule whose constraint silently vanished matches every input.
+// Unknown keys are rejected: a misspelled predicate would be ignored, and a
+// rule whose constraint vanished matches every input.
 func LoadBundle(bundleYAML string) (Config, error) {
 	dec := yaml.NewDecoder(strings.NewReader(bundleYAML))
 	dec.KnownFields(true)

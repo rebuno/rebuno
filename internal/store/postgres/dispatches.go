@@ -248,8 +248,6 @@ func (q querier) ReclaimStalled(ctx context.Context, now time.Time, defaultLease
 	return reclaimStalled(ctx, q.q, now, defaultLeaseTimeout, batch)
 }
 
-// reclaimStalled expires each lease against its agent's timeout, falling back to
-// defaultLeaseTimeout. FOR UPDATE OF d locks only dispatches.
 func reclaimStalled(ctx context.Context, q Querier, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
 	rows, err := q.Query(ctx, `
 		WITH stalled AS (
@@ -259,7 +257,7 @@ func reclaimStalled(ctx context.Context, q Querier, now time.Time, defaultLeaseT
 			JOIN agents a ON a.id = e.agent_id
 			WHERE d.status = 'in_flight'
 			  AND d.locked_at < $1::timestamptz - make_interval(secs =>
-			        COALESCE(a.lease_timeout_seconds, $3))
+			        COALESCE(NULLIF(a.lease_timeout_seconds, 0), $3))
 			ORDER BY d.locked_at
 			LIMIT $2
 			FOR UPDATE OF d SKIP LOCKED

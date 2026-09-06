@@ -9,7 +9,7 @@ import (
 )
 
 func TestCanonicalizeJSONSortsKeysAndWhitespace(t *testing.T) {
-	in := []byte(`{"b":2,"a":1}`)
+	in := []byte("{\n  \"b\": 2,\n  \"a\": 1\n}")
 	got, err := identity.CanonicalizeJSON(in)
 	if err != nil {
 		t.Fatal(err)

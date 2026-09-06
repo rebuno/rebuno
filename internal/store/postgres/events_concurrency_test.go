@@ -13,8 +13,6 @@ import (
 	"github.com/rebuno/rebuno/internal/store"
 )
 
-// testPool connects to the integration database or skips the test. Mirrors the
-// gating used by TestNewStore so these run only when DATABASE_URL is set.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	if testing.Short() {
@@ -53,8 +51,6 @@ func seedExecution(t *testing.T, ctx context.Context, s *Store) uuid.UUID {
 	return execID
 }
 
-// TestAppendBatchAssignsSequence verifies a plain append succeeds and hands
-// back contiguous sequence numbers starting at 1.
 func TestAppendBatchAssignsSequence(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(testPool(t))
@@ -72,10 +68,6 @@ func TestAppendBatchAssignsSequence(t *testing.T) {
 	}
 }
 
-// TestConcurrentAppendsStayContiguous verifies many appenders
-// hitting the same execution via the pool (no kernel advisory lock, like the
-// dispatch-delivery path) must still produce a gap-free, duplicate-free 1..N
-// sequence because Store.AppendBatch row-locks the execution for the whole append.
 func TestConcurrentAppendsStayContiguous(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(testPool(t))

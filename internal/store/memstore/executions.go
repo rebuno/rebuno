@@ -19,9 +19,6 @@ func (tx *txStore) ListExecutions(ctx context.Context, filter domain.ExecutionFi
 	return tx.listExecutionsLocked(filter), nil
 }
 
-// listExecutionsLocked returns one page of executions matching filter, ordered
-// newest first by ID. Keyset paging: only executions with ID < filter.Cursor
-// are considered. The caller must hold the lock.
 func (s *Store) listExecutionsLocked(filter domain.ExecutionFilter) domain.ExecutionPage {
 	limit := filter.Limit
 	if limit <= 0 {

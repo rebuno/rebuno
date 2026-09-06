@@ -19,7 +19,6 @@ func (s *Store) upsertStepLocked(ctx context.Context, step domain.Step) {
 	key := step.StepID
 	existing, ok := s.steps[key]
 	if ok {
-		// Preserve non-overwritten immutable fields if not set.
 		if step.ExecutionID == uuid.Nil {
 			step.ExecutionID = existing.ExecutionID
 		}

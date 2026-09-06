@@ -26,9 +26,8 @@ import (
 	"github.com/rebuno/rebuno/internal/stream"
 )
 
-// bindServerFlags binds server flags onto cfg. cfg should already be seeded
-// from config.FromEnv() so that env values become the flag defaults and an
-// explicitly-set flag overrides env (precedence: flag > env > default).
+// cfg must already be seeded from config.FromEnv(); its values become the flag
+// defaults, making precedence flag > env > default.
 func bindServerFlags(f *pflag.FlagSet, cfg *config.Config) {
 	f.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "HTTP listen address")
 	f.StringVar(&cfg.DBURL, "db-url", cfg.DBURL, "PostgreSQL connection URL (required)")
@@ -87,9 +86,6 @@ func runServer(cfg config.Config, configPath string) error {
 
 	s := postgres.NewStore(pool)
 
-	// Provision agents and their policies from the manifest, if one was given.
-	// RegisterAgent upserts, so this is idempotent across restarts and additive:
-	// agents registered at runtime via the admin API are left untouched.
 	if configPath != "" {
 		agents, err := loadAgentConfig(configPath)
 		if err != nil {
@@ -125,9 +121,8 @@ func runServer(cfg config.Config, configPath string) error {
 	return serve(ctx, cfg, deps, logger, replicaID, pool.Ping, hub)
 }
 
-// buildPool parses the DB URL, raises MaxConns to a safe floor so per-execution
-// advisory-lock holders cannot starve transactions of connections, applies any
-// explicit pool overrides, and opens the pool.
+// buildPool raises MaxConns to a floor so per-execution advisory-lock holders
+// cannot starve transactions of connections.
 func buildPool(ctx context.Context, cfg config.Config, logger *slog.Logger) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.DBURL)
 	if err != nil {
@@ -150,8 +145,6 @@ func buildPool(ctx context.Context, cfg config.Config, logger *slog.Logger) (*pg
 	return pool, nil
 }
 
-// serve builds the kernel, starts the lifecycle manager and HTTP server, and
-// blocks until a shutdown signal, then drains gracefully.
 func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slog.Logger, replicaID string, ready func(context.Context) error, hub *stream.Hub) error {
 	k := kernel.New(kernel.Config{
 		ReplicaID:                replicaID,

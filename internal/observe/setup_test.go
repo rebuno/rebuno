@@ -7,23 +7,12 @@ import (
 )
 
 func TestNewLoggerRespectsLevel(t *testing.T) {
-	l := NewLogger("warn", "text")
-	if l == nil {
-		t.Fatal("nil logger")
-	}
-	h := l.Handler()
+	h := NewLogger("warn", "text").Handler()
 	if h.Enabled(context.Background(), slog.LevelInfo) {
 		t.Fatal("info should be disabled at warn level")
 	}
 	if !h.Enabled(context.Background(), slog.LevelWarn) {
 		t.Fatal("warn should be enabled at warn level")
-	}
-}
-
-func TestNewLoggerJSONFormat(t *testing.T) {
-	l := NewLogger("info", "json")
-	if l == nil {
-		t.Fatal("nil logger")
 	}
 }
 

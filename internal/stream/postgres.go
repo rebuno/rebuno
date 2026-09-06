@@ -17,9 +17,6 @@ type envelope struct {
 	Delta  Delta     `json:"delta"`
 }
 
-// PostgresBus fans deltas across replicas via pg_notify. Deltas are ephemeral:
-// pg_notify does not buffer, so a delta published while no replica is listening
-// is simply dropped — the event ledger stays the source of truth.
 type PostgresBus struct {
 	pool *pgxpool.Pool
 	log  *slog.Logger
@@ -41,8 +38,6 @@ func (b *PostgresBus) Publish(ctx context.Context, execID uuid.UUID, d Delta) er
 	return err
 }
 
-// Start holds one dedicated connection on LISTEN rebuno_stream and delivers
-// every notification. It reconnects on error until ctx is cancelled.
 func (b *PostgresBus) Start(ctx context.Context, deliver func(execID uuid.UUID, d Delta)) error {
 	for ctx.Err() == nil {
 		if err := b.listen(ctx, deliver); err != nil && ctx.Err() == nil {
