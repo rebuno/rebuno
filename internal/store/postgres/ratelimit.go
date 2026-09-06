@@ -14,11 +14,7 @@ import (
 var _ ratelimit.Limiter = (*Store)(nil)
 var _ ratelimit.Reaper = (*Store)(nil)
 
-// Allow performs an atomic token-bucket admission decision shared across all
-// replicas. The refill-and-decrement happens in a single statement under the
-// row lock that ON CONFLICT takes, so concurrent replicas serialize correctly
-// on the key. A denied call consumes no token: the WHERE on DO UPDATE skips the
-// decrement, RETURNING yields no row, and we read that as "denied".
+// ON CONFLICT takes a row lock, so replicas serialize on the key.
 func (s *Store) Allow(ctx context.Context, key ratelimit.Key, cfg domain.RateLimitConfig) (bool, time.Duration, error) {
 	if cfg.MaxCalls <= 0 || cfg.Window <= 0 {
 		return true, 0, nil
@@ -44,7 +40,7 @@ func (s *Store) Allow(ctx context.Context, key ratelimit.Key, cfg domain.RateLim
 	`, string(key), cfg.MaxCalls, cfg.Window.Seconds(), now).Scan(&tokens)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		// No row returned: the refilled balance was < 1. Denied, no token spent.
+		// The WHERE skipped the DO UPDATE: no token was available.
 		return false, 0, nil
 	}
 	if err != nil {
@@ -53,8 +49,6 @@ func (s *Store) Allow(ctx context.Context, key ratelimit.Key, cfg domain.RateLim
 	return true, 0, nil
 }
 
-// ReapBefore deletes buckets untouched since cutoff. Called from the leader's
-// cleanup worker to bound table growth.
 func (s *Store) ReapBefore(ctx context.Context, cutoff time.Time) error {
 	if _, err := s.pool.Exec(ctx, `DELETE FROM rate_buckets WHERE updated_at < $1`, cutoff); err != nil {
 		return fmt.Errorf("reap rate buckets: %w", err)

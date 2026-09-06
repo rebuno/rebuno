@@ -37,9 +37,6 @@ func approvalPolicy() *policy.RuleEngine {
 	return pe
 }
 
-// Flow: deliver → no heartbeat → lease expires → ReclaimStalled flips
-// the row back to pending → the drain loop re-delivers under the same
-// dispatch id → the agent replays into handleExistingStep.
 func TestDispatchLeaseSurvivesAck(t *testing.T) {
 	ms := memstore.NewStore()
 	called := 0
@@ -60,8 +57,7 @@ func TestDispatchLeaseSurvivesAck(t *testing.T) {
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
-	// First delivery: the webhook returns 200. The dispatch must stay
-	// in_flight (not be acked) so the lease can expire and be reclaimed.
+	// A 200 must leave the dispatch in_flight, so the lease can expire.
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -77,8 +73,7 @@ func TestDispatchLeaseSurvivesAck(t *testing.T) {
 		t.Fatalf("dispatch must stay in_flight after successful delivery, got %s", d.Status)
 	}
 
-	// No heartbeat arrives. Wait for the lease to expire, then ReclaimStalled
-	// flips the row back to pending so the drain loop can re-deliver.
+	// No heartbeat, so the lease expires and the row goes back to pending.
 	time.Sleep(20 * time.Millisecond)
 	reclaimed, err := ms.ReclaimStalled(ctx, time.Now().UTC(), cfg.DispatchLeaseTimeout, 10)
 	if err != nil {
@@ -88,7 +83,6 @@ func TestDispatchLeaseSurvivesAck(t *testing.T) {
 		t.Fatalf("expected the in_flight dispatch to be reclaimed, got %d", len(reclaimed))
 	}
 
-	// The drain loop re-delivers under the same dispatch id.
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +120,6 @@ func TestDispatchLeaseSurvivesAck(t *testing.T) {
 	}
 }
 
-// TestDispatchLeaseRenewedByHeartbeat verifies that a heartbeat while the
-// dispatch is in_flight resets the lease so ReclaimStalled does not reclaim it.
 func TestDispatchLeaseRenewedByHeartbeat(t *testing.T) {
 	ms := memstore.NewStore()
 	called := 0
@@ -152,7 +144,6 @@ func TestDispatchLeaseRenewedByHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Heartbeat renews the lease.
 	if err := k.Heartbeat(ctx, exec.ID, leaseOf(t, k, exec.ID)); err != nil {
 		t.Fatal(err)
 	}
@@ -166,8 +157,6 @@ func TestDispatchLeaseRenewedByHeartbeat(t *testing.T) {
 	}
 }
 
-// TestCompleteExecutionReleasesLease verifies that completing the execution
-// retires the dispatch lease so a healthy execution is not re-dispatched.
 func TestCompleteExecutionReleasesLease(t *testing.T) {
 	ms := memstore.NewStore()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +190,6 @@ func TestCompleteExecutionReleasesLease(t *testing.T) {
 	if d.Status != domain.DispatchExhausted {
 		t.Fatalf("complete must release the lease (exhausted), got %s", d.Status)
 	}
-	// ReclaimStalled must not flip it back to pending.
 	now := time.Now().UTC()
 	reclaimed, err := ms.ReclaimStalled(ctx, now.Add(time.Hour), cfg.DispatchLeaseTimeout, 10)
 	if err != nil {
@@ -212,9 +200,8 @@ func TestCompleteExecutionReleasesLease(t *testing.T) {
 	}
 }
 
-// TestApprovalBlockReleasesLease verifies that the require_approval branch
-// releases the dispatch lease so the execution is not re-delivered every
-// 2 minutes (which would hit dispatch_exhausted before the approval timeout).
+// Without the release, redelivery every 2 minutes hits dispatch_exhausted
+// before the approval timeout.
 func TestApprovalBlockReleasesLease(t *testing.T) {
 	ms := memstore.NewStore()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +221,6 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: ts.URL, Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
-	// Deliver, then submit a step that requires approval.
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +235,6 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 		t.Fatalf("expected blocked, got %s", dec.Decision)
 	}
 
-	// The dispatch must be released (exhausted), not left in_flight.
 	d, err := ms.GetDispatch(ctx, did.DispatchID)
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +242,6 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 	if d.Status != domain.DispatchExhausted {
 		t.Fatalf("approval block must release the lease (exhausted), got %s", d.Status)
 	}
-	// ReclaimStalled must not re-deliver.
 	now := time.Now().UTC()
 	reclaimed, err := ms.ReclaimStalled(ctx, now.Add(time.Hour), cfg.DispatchLeaseTimeout, 10)
 	if err != nil {
@@ -266,11 +250,9 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 	if len(reclaimed) != 0 {
 		t.Fatal("approval-blocked dispatch must not be reclaimed")
 	}
-	// Granting approval enqueues a fresh dispatch.
 	if err := k.GrantApproval(ctx, *dec.ApprovalID, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	// The new dispatch is pending.
 	dispatches, err := ms.ListDispatchesByExecution(ctx, exec.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -287,11 +269,8 @@ func TestApprovalBlockReleasesLease(t *testing.T) {
 	}
 }
 
-// TestDispatchRedeliveryCapFailsExecution verifies the redelivery cap: a
-// webhook that always 200s but never completes would otherwise redeliver
-// forever (the success branch has no MaxAttempts guard). Once attempts exceed
-// MaxAttempts, deliver fails the execution dispatch_exhausted instead of
-// re-delivering.
+// The success branch has no MaxAttempts guard of its own, so a webhook that
+// always 200s but never completes would redeliver forever.
 func TestDispatchRedeliveryCapFailsExecution(t *testing.T) {
 	ms := memstore.NewStore()
 	called := 0
@@ -342,7 +321,6 @@ func TestDispatchRedeliveryCapFailsExecution(t *testing.T) {
 	}
 }
 
-// TestSubmitStepRenewsLease verifies that submitting a step renews the dispatch lease.
 func TestSubmitStepRenewsLease(t *testing.T) {
 	ms := memstore.NewStore()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -366,7 +344,7 @@ func TestSubmitStepRenewsLease(t *testing.T) {
 	}
 	did := leaseOf(t, k, exec.ID)
 
-	// Submit a step — this renews the lease.
+	// Submitting a step renews the lease.
 	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
 		Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{"path":"/tmp"}`), Lease: did,
 	}); err != nil {
@@ -385,9 +363,6 @@ func TestSubmitStepRenewsLease(t *testing.T) {
 	}
 }
 
-// TestApprovedAtMostOnceStepIsNotRerunAfterCrash approves a step, resumes it,
-// then re-delivers the dispatch with no result recorded: the at_most_once step
-// must resolve as indeterminate rather than proceed a second time.
 func TestApprovedAtMostOnceStepIsNotRerunAfterCrash(t *testing.T) {
 	ms := memstore.NewStore()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -800,7 +775,7 @@ func TestSubmitIsFencedAfterItsEntryCheck(t *testing.T) {
 }
 
 // The agent accepts the webhook and parks the work on an approval, which retires
-// the dispatch — and then its HTTP response is lost. The dispatcher sees the
+// the dispatch, and then its HTTP response is lost. The dispatcher sees the
 // final attempt fail, but exhaustion is that delivery's verdict, and the
 // delivery no longer owns the dispatch: the execution must stay blocked, waiting
 // on the approval it raised.
@@ -875,7 +850,6 @@ func TestDispatcherDeliveryAndRetry(t *testing.T) {
 		called++
 		lastBody, _ = io.ReadAll(r.Body)
 		lastSig = r.Header.Get("Rebuno-Signature")
-		// Verify HMAC over raw body.
 		expected := dispatcher.SignPayload("secret", lastBody)
 		if lastSig != "sha256="+expected {
 			t.Errorf("signature mismatch: got %s want sha256=%s", lastSig, expected)
@@ -907,7 +881,6 @@ func TestDispatcherDeliveryAndRetry(t *testing.T) {
 	if lastSig == "" {
 		t.Fatal("missing signature")
 	}
-	// Confirm the transmitted body does not contain a signature field.
 	if bytes.Contains(lastBody, []byte(`"signature"`)) {
 		t.Fatal("signature must not be part of the request body")
 	}
@@ -917,10 +890,8 @@ func TestDispatcherDeliveryAndRetry(t *testing.T) {
 	}
 }
 
-// TestDispatchRejectionExhaustsAndFails guards the regression where an agent
-// 4xx acked the dispatch 'failed' with a NULL next_attempt_at, stranding it:
-// never retried, never exhausted, execution never failed. A persistent 4xx must
-// retry with backoff up to max attempts, then fail the execution.
+// Regression: an agent 4xx acked the dispatch 'failed' with a NULL
+// next_attempt_at, stranding it: never retried, never exhausted.
 func TestDispatchRejectionExhaustsAndFails(t *testing.T) {
 	ms := memstore.NewStore()
 	called := 0
@@ -955,8 +926,6 @@ func TestDispatchRejectionExhaustsAndFails(t *testing.T) {
 	}
 }
 
-// TestDispatchTimeoutBoundsHungAgent verifies a non-responsive agent webhook is
-// bounded by DispatchTimeout rather than blocking a delivery slot indefinitely.
 func TestDispatchTimeoutBoundsHungAgent(t *testing.T) {
 	ms := memstore.NewStore()
 	release := make(chan struct{})
@@ -987,8 +956,6 @@ func TestDispatchTimeoutBoundsHungAgent(t *testing.T) {
 	}
 }
 
-// TestDispatchConcurrency verifies a batch of slow deliveries runs concurrently:
-// wall-clock time stays far below the serial sum of per-delivery latencies.
 func TestDispatchConcurrency(t *testing.T) {
 	ms := memstore.NewStore()
 	const perCall = 80 * time.Millisecond

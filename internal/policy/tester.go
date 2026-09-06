@@ -169,8 +169,8 @@ func ReplayCases(steps []domain.Step, events []domain.Event) []Case {
 		if !ok {
 			continue
 		}
-		// Granting an approval writes a second decision event, describing the
-		// approval rather than the policy.
+		// Granting an approval writes a second decision event for the same
+		// step; the first is the policy's.
 		if _, dup := seen[id]; dup {
 			continue
 		}

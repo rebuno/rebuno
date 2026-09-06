@@ -42,8 +42,7 @@ const (
 	httpRequestDuration   = "http_request_duration_seconds"
 )
 
-// Observer exposes Prometheus and OpenTelemetry helpers for the kernel.
-// All methods are nil-safe; passing a nil Observer is equivalent to a no-op.
+// All methods are nil-safe: a nil Observer is a no-op.
 type Observer struct {
 	registry *prometheus.Registry
 	tracer   trace.Tracer
@@ -72,14 +71,11 @@ var (
 	defaultObs  *Observer
 )
 
-// Default returns a shared package-level Observer backed by a fresh
-// Prometheus registry. Tests should prefer New() to avoid sharing metrics.
 func Default() *Observer {
 	defaultOnce.Do(func() { defaultObs = New() })
 	return defaultObs
 }
 
-// New creates an Observer with its own fresh Prometheus registry.
 func New() *Observer {
 	reg := prometheus.NewRegistry()
 
@@ -206,8 +202,6 @@ func New() *Observer {
 		obs.httpDuration,
 	)
 
-	// Go runtime and process collectors (goroutines, GC, heap, open FDs, CPU).
-	// The bare registry above does not include these by default.
 	reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
@@ -362,9 +356,6 @@ func (o *Observer) RecordHTTP(route string, statusCode int, duration time.Durati
 	o.httpDuration.With(labels).Observe(duration.Seconds())
 }
 
-// NewLogger builds a slog.Logger writing to stderr in the given format
-// ("json" or "text", default text) at the given level ("debug", "info",
-// "warn", "error", default info).
 func NewLogger(level, format string) *slog.Logger {
 	var lvl slog.Level
 	switch level {
@@ -387,13 +378,8 @@ func NewLogger(level, format string) *slog.Logger {
 	return slog.New(h)
 }
 
-// InitTracer configures the global OpenTelemetry tracer provider.
-//
-// When endpoint is empty it installs a provider with no exporter (spans are
-// created but dropped) and returns a no-op shutdown — this is the default
-// self-hosted posture. When endpoint is set it attaches an OTLP/gRPC exporter
-// with a ParentBased(TraceIDRatio(sampleRate)) sampler and returns the
-// provider's shutdown func for flush-on-exit.
+// An empty endpoint installs a provider with no exporter, so spans are created
+// and dropped. That is the default self-hosted posture.
 func InitTracer(ctx context.Context, endpoint string, sampleRate float64, insecure bool, logger *slog.Logger) (func(context.Context) error, error) {
 	res := resource.NewWithAttributes(
 		"",

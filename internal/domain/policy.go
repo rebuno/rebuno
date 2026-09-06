@@ -5,14 +5,6 @@ import (
 	"time"
 )
 
-type APIError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Details string `json:"details,omitempty"`
-}
-
-func (e APIError) Error() string { return e.Code + ": " + e.Message }
-
 const (
 	DecisionAllow           = "allow"
 	DecisionDeny            = "deny"
@@ -40,7 +32,7 @@ type BudgetConfig struct {
 type RateLimitConfig struct {
 	MaxCalls       int           `json:"max_calls,omitempty" yaml:"max_calls,omitempty"`
 	Window         time.Duration `json:"window,omitempty" yaml:"window,omitempty"`
-	PerWhat        string        `json:"per_what,omitempty" yaml:"per_what,omitempty"` // "execution" (default), "agent", "global"
+	PerWhat        string        `json:"per_what,omitempty" yaml:"per_what,omitempty"`
 	MaxWait        time.Duration `json:"max_wait,omitempty" yaml:"max_wait,omitempty"`
 	OnLimiterError string        `json:"on_limiter_error,omitempty" yaml:"on_limiter_error,omitempty"`
 }
@@ -48,6 +40,12 @@ type RateLimitConfig struct {
 const (
 	LimiterErrorAllow = "allow"
 	LimiterErrorDeny  = "deny"
+)
+
+const (
+	PerWhatExecution = "execution"
+	PerWhatAgent     = "agent"
+	PerWhatGlobal    = "global"
 )
 
 type PolicyApprovalConfig struct {

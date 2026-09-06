@@ -29,6 +29,7 @@ RebunoError
 │  ├─ UnauthorizedError    401  authentication failed
 │  ├─ ForbiddenError       403  the caller is not permitted
 │  ├─ NotFoundError        404  resource not found
+│  ├─ ConflictError        409  resource conflict
 │  ├─ PolicyError          403  denied by policy (carries .ruleId)
 │  └─ LeaseSuperseded      409  internal: a newer attempt owns this dispatch
 ├─ ToolError               a tool's effect body failed (carries .toolId, .stepId)
@@ -64,7 +65,8 @@ unwind a dispatch cleanly.
   code just submitted or an earlier one that already parked the execution. The
   kernel re-dispatches once the approval is resolved.
 - `Terminated` means the execution went terminal partway through the dispatch,
-  usually a cancel.
+  usually a cancel. `Client` calls against an already-terminal execution raise
+  it too.
 - `LeaseSuperseded` means a newer delivery attempt owns the dispatch. The kernel
   refuses every mutation from the attempt this handler was sent under, so it
   stops where it stands and leaves the execution to its replacement.

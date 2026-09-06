@@ -12,8 +12,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// MetricsMiddleware returns chi-compatible middleware that records request
-// count/duration and creates an OpenTelemetry span per request.
 func (o *Observer) MetricsMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,12 +42,6 @@ func (o *Observer) MetricsMiddleware() func(http.Handler) http.Handler {
 	}
 }
 
-// MetricsMiddlewareWithDefault is a convenience wrapper that uses the package
-// default Observer.
-func MetricsMiddlewareWithDefault() func(http.Handler) http.Handler {
-	return Default().MetricsMiddleware()
-}
-
 type recordingResponseWriter struct {
 	http.ResponseWriter
 	statusCode int
@@ -71,8 +63,6 @@ func (rw *recordingResponseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
-// Flush forwards to the underlying ResponseWriter when it supports flushing, so
-// streaming handlers (SSE) work through this middleware.
 func (rw *recordingResponseWriter) Flush() {
 	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
 		f.Flush()

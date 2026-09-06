@@ -11,8 +11,6 @@ import (
 	"github.com/rebuno/rebuno/migrations"
 )
 
-// Migrate applies the embedded migrations in version order, each exactly once,
-// recorded in goose_db_version. A session lock serializes concurrent replicas.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	locker, err := lock.NewPostgresSessionLocker()
 	if err != nil {

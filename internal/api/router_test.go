@@ -24,23 +24,26 @@ import (
 const testAgentID = "agent-1"
 const testAgentSecret = "secret"
 
-func setupRouter(t *testing.T) (http.Handler, *kernel.Kernel, context.Context) {
+func setupKernel(t *testing.T) (*api.KernelAPI, *kernel.Kernel) {
 	t.Helper()
 	ms := memstore.NewStore()
 	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms, Policy: policy.NewBundleResolver(ms, policy.PermissiveEngine{}),
+		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		Policy: policy.NewBundleResolver(ms, policy.PermissiveEngine{}),
 	})
-	ctx := context.Background()
-	if err := k.RegisterAgent(ctx, domain.Agent{ID: testAgentID, WebhookURL: "http://localhost", Secret: testAgentSecret}); err != nil {
+	agent := domain.Agent{ID: testAgentID, WebhookURL: "http://localhost", Secret: testAgentSecret}
+	if err := k.RegisterAgent(context.Background(), agent); err != nil {
 		t.Fatal(err)
 	}
-	adapt := &api.KernelAPI{Inner: k}
-	mux := api.NewRouter(adapt, adapt, adapt, "", nil, nil)
-	return mux, k, ctx
+	return &api.KernelAPI{Inner: k}, k
 }
 
-// signAgentRequest adds Rebuno-Agent-Id and Rebuno-Signature headers computed
-// over the exact request body bytes.
+func setupRouter(t *testing.T) (http.Handler, *kernel.Kernel, context.Context) {
+	t.Helper()
+	adapt, k := setupKernel(t)
+	return api.NewRouter(adapt, adapt, adapt, "", nil, nil), k, context.Background()
+}
+
 func signAgentRequest(req *http.Request, body []byte) {
 	req.Header.Set("Rebuno-Agent-Id", testAgentID)
 	req.Header.Set("Rebuno-Signature", "sha256="+dispatcher.SignPayload(testAgentSecret, body))
@@ -98,7 +101,6 @@ func TestAgentSubmitAndCompleteViaHTTP(t *testing.T) {
 		t.Fatalf("complete failed: %d %s", rr.Code, rr.Body.String())
 	}
 
-	// Replay via GET step
 	req = httptest.NewRequest(http.MethodGet, "/v0/executions/"+exec.ID.String()+"/steps/"+stepID, nil)
 	signAgentRequest(req, nil)
 	rr = httptest.NewRecorder()
@@ -117,22 +119,18 @@ func TestListStepsTerminalFilter(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
-	// Step 1: submit + complete -> terminal (succeeded).
 	doneArgs := json.RawMessage(`{"path":"/a"}`)
 	doneID := computeStepID(t, exec.ID, domain.StepKindTool, "read", doneArgs, 0)
 	submitStepHTTP(t, mux, k, exec.ID, "read", doneArgs)
 	completeStepHTTP(t, mux, k, exec.ID, doneID)
 
-	// Step 2: submit only -> non-terminal (executing).
 	openArgs := json.RawMessage(`{"path":"/b"}`)
 	submitStepHTTP(t, mux, k, exec.ID, "read", openArgs)
 
-	// Unfiltered: both steps.
 	if got := listStepsHTTP(t, mux, exec.ID, ""); len(got) != 2 {
 		t.Fatalf("expected 2 steps unfiltered, got %d", len(got))
 	}
 
-	// status=terminal: only the completed step.
 	terminal := listStepsHTTP(t, mux, exec.ID, "terminal")
 	if len(terminal) != 1 {
 		t.Fatalf("expected 1 terminal step, got %d", len(terminal))
@@ -143,24 +141,14 @@ func TestListStepsTerminalFilter(t *testing.T) {
 }
 
 func TestStepsReachableViaBearerAuth(t *testing.T) {
-	ms := memstore.NewStore()
-	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: policy.NewBundleResolver(ms, policy.PermissiveEngine{}),
-	})
-	ctx := context.Background()
-	if err := k.RegisterAgent(ctx, domain.Agent{ID: testAgentID, WebhookURL: "http://localhost", Secret: testAgentSecret}); err != nil {
-		t.Fatal(err)
-	}
-	adapt := &api.KernelAPI{Inner: k}
+	adapt, k := setupKernel(t)
 	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil)
 
-	exec, _ := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
+	exec, _ := k.CreateExecution(context.Background(), testAgentID, json.RawMessage(`{}`))
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := computeStepID(t, exec.ID, domain.StepKindTool, "read", args, 0)
-	submitStepHTTP(t, mux, k, exec.ID, "read", args) // submitted as the agent, over HMAC
+	submitStepHTTP(t, mux, k, exec.ID, "read", args)
 
-	// listSteps via bearer token (no HMAC headers) must succeed.
 	req := httptest.NewRequest(http.MethodGet, "/v0/executions/"+exec.ID.String()+"/steps", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	rr := httptest.NewRecorder()
@@ -169,7 +157,6 @@ func TestStepsReachableViaBearerAuth(t *testing.T) {
 		t.Fatalf("expected 200 for bearer-authed listSteps, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	// getStep via bearer token must also succeed.
 	req = httptest.NewRequest(http.MethodGet, "/v0/executions/"+exec.ID.String()+"/steps/"+stepID, nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	rr = httptest.NewRecorder()
@@ -179,9 +166,8 @@ func TestStepsReachableViaBearerAuth(t *testing.T) {
 	}
 }
 
-// setLeaseHeaders carries the dispatch lease every agent mutation must present.
-// It claims the execution's dispatch first, so the lease names an attempt that
-// was delivered, as a real agent's would.
+// Claims the dispatch first, so the lease names a delivered attempt as a real
+// agent's would.
 func setLeaseHeaders(t *testing.T, k *kernel.Kernel, req *http.Request, execID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -265,9 +251,7 @@ func TestAgentHMACRejectsBadSignature(t *testing.T) {
 }
 
 func TestBearerAuth(t *testing.T) {
-	ms := memstore.NewStore()
-	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms})
-	adapt := &api.KernelAPI{Inner: k}
+	adapt, _ := setupKernel(t)
 	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/v0/approvals", nil)
 	rr := httptest.NewRecorder()
@@ -309,7 +293,6 @@ default_action: deny
 		t.Fatalf("load policy failed: %d %s", rr.Code, rr.Body.String())
 	}
 
-	// Non-matching argument should be denied by the loaded bundle.
 	args := json.RawMessage(`{"env":"staging-123"}`)
 	submit := map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(args)}
 	body, _ = json.Marshal(submit)
@@ -327,7 +310,6 @@ default_action: deny
 		t.Fatalf("expected denied, got %s", dec.Decision)
 	}
 
-	// Matching argument should be allowed.
 	args = json.RawMessage(`{"env":"prod-123"}`)
 	submit = map[string]any{"kind": "tool_call", "target": "read", "args": json.RawMessage(args)}
 	body, _ = json.Marshal(submit)
@@ -389,7 +371,6 @@ func TestSupersededLeaseIsRejectedWith409(t *testing.T) {
 		t.Fatalf("expected lease_superseded, got %q", apiErr.Code)
 	}
 
-	// The attempt that replaced it is served normally.
 	req = httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/steps", bytes.NewReader(body))
 	setLeaseHeaders(t, k, req, exec.ID)
 	signAgentRequest(req, body)

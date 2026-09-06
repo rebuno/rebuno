@@ -2,7 +2,7 @@
 
 ## Before you begin
 
-Install Go 1.26+, plus Python 3.10+ or Node 22+ to run the agent.
+Install Go 1.26+, plus Python 3.11+ or Node 22+ to run the agent.
 
 ## Start the dev kernel
 

@@ -69,8 +69,7 @@ Each webhook POST carries an `execution_id`, a `dispatch_id`, a
 `dispatch_attempt`, and a `lease_timeout_seconds`. The agent:
 
 1. Verifies the `Rebuno-Signature` header (see [Signing](internals.md#signing)).
-   A bad or missing signature gets a `401`, and a body missing any of the four
-   gets a `400`.
+   A bad or missing signature gets a `401`.
 2. Acknowledges immediately. The handler runs in a background task and the
    webhook returns `200` right away, so delivery isn't held open for the whole
    execution.

@@ -1,11 +1,12 @@
 package identity
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -43,7 +44,7 @@ func CanonicalizeJSON(in []byte) ([]byte, error) {
 		return []byte("null"), nil
 	}
 	var v any
-	dec := json.NewDecoder(strings.NewReader(string(in)))
+	dec := json.NewDecoder(bytes.NewReader(in))
 	dec.UseNumber()
 	if err := dec.Decode(&v); err != nil {
 		return nil, fmt.Errorf("canonicalize decode: %w", err)
@@ -58,7 +59,7 @@ func marshalCanonical(v any) ([]byte, error) {
 		for k := range x {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		var b strings.Builder
 		b.WriteByte('{')
 		for i, k := range keys {
@@ -102,8 +103,4 @@ func marshalCanonical(v any) ([]byte, error) {
 	default:
 		return json.Marshal(x)
 	}
-}
-
-func LLMCanonicalArgs(body []byte) ([]byte, error) {
-	return CanonicalizeJSON(body)
 }

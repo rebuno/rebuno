@@ -22,7 +22,6 @@ type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// Store is a durable Postgres-backed implementation of the store interfaces.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -31,7 +30,6 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// querier bundles helpers that accept either a connection-pool or a transaction.
 type querier struct {
 	q Querier
 }

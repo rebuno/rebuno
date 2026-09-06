@@ -62,8 +62,6 @@ func (h *Hub) Subscribe(execID uuid.UUID) (<-chan Delta, func()) {
 	return ch, cancel
 }
 
-// deliver fans a delta out to every local subscriber of execID with a
-// non-blocking send: a full subscriber drops the delta.
 func (h *Hub) deliver(execID uuid.UUID, d Delta) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

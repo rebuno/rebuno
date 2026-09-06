@@ -18,7 +18,7 @@ It records every tool call and LLM call as a durable step. Interrupted runs resu
 
 ## Quick Start
 
-**Prerequisites:** Go 1.26+, Python 3.10+ / Node 22+
+**Prerequisites:** Go 1.26+, Python 3.11+ / Node 22+
 
 Start the dev kernel:
 

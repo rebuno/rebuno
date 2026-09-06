@@ -15,7 +15,7 @@ agents:
     secret: hello-secret
     # No policy block: falls back to the permissive dev engine (allow all).
 
-  # examples/python/researcher.py — LangGraph agent with local tools.
+  # examples/python/researcher.py: LangGraph agent with local tools.
   # Inline bundle (compare with shell-assistant's policy_file below): deny by
   # default, allow only this agent's known tools.
   - id: researcher
@@ -36,7 +36,7 @@ agents:
             decision: allow
             reason: research tools are permitted
 
-  # examples/python/shell.py — shell tool gated by the kernel approval flow.
+  # examples/python/shell.py: shell tool gated by the kernel approval flow.
   # Safe read-only commands are auto-allowed; anything else needs human approval
   # (granted via examples/python/client.py).
   - id: shell
@@ -44,7 +44,7 @@ agents:
     secret: shell-secret
     policy_file: policies/shell.yaml
 
-  # examples/python/mcp_agent.py — LangGraph agent backed by a local stdio MCP server.
+  # examples/python/mcp_agent.py: LangGraph agent backed by a local stdio MCP server.
   # Inline bundle: allow by default, but gate filesystem writes behind approval.
   # The MCP tools are namespaced with the "fs" prefix (see wrap_mcp_tools).
   - id: mcp
