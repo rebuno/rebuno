@@ -82,4 +82,7 @@ func TestCancelExpiredExecutions(t *testing.T) {
 	if got.Status != domain.ExecutionCancelled {
 		t.Fatalf("expected cancelled, got %s", got.Status)
 	}
+	if got.FailureReason != domain.ReasonDeadlineExceeded {
+		t.Fatalf("expected %s, got %q", domain.ReasonDeadlineExceeded, got.FailureReason)
+	}
 }

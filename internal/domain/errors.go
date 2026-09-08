@@ -28,4 +28,6 @@ const (
 	ReasonRateLimited            = "rate_limit_exceeded"
 	ReasonRateLimiterUnavailable = "rate_limiter_unavailable"
 	ReasonDispatchExhausted      = "dispatch_exhausted"
+	ReasonClientCancelled        = "client_cancelled"
+	ReasonDeadlineExceeded       = "deadline_exceeded"
 )

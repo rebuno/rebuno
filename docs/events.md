@@ -39,7 +39,7 @@ The `execution.*` types cover the lifecycle of the run itself. Payloads carry
 | `execution.resumed` | An approval was granted, denied, or expired, and work continues. |
 | `execution.completed` | Terminal, success. Payload carries the `output`. |
 | `execution.failed` | Terminal, failure. Payload carries a `reason`. |
-| `execution.cancelled` | Terminal, cancelled by the client. |
+| `execution.cancelled` | Terminal. The payload's `reason` is `client_cancelled` or `deadline_exceeded`. |
 
 ## Step events
 

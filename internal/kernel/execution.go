@@ -187,6 +187,10 @@ func (k *Kernel) ListExecutions(ctx context.Context, filter domain.ExecutionFilt
 }
 
 func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
+	return k.cancelExecution(ctx, id, domain.ReasonClientCancelled)
+}
+
+func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason string) error {
 	release, err := k.d.Locker.Acquire(ctx, lockKey(id))
 	if err != nil {
 		return err
@@ -202,10 +206,10 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 	}
 	now := time.Now().UTC()
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if _, err := tx.Append(ctx, id, domain.EventExecutionCancelled, payload.Execution(id, domain.ExecutionCancelled, nil, "client_cancelled")); err != nil {
+		if _, err := tx.Append(ctx, id, domain.EventExecutionCancelled, payload.Execution(id, domain.ExecutionCancelled, nil, reason)); err != nil {
 			return err
 		}
-		if err := tx.UpdateExecutionStatus(ctx, id, domain.ExecutionCancelled, nil, "client_cancelled"); err != nil {
+		if err := tx.UpdateExecutionStatus(ctx, id, domain.ExecutionCancelled, nil, reason); err != nil {
 			return err
 		}
 		if err := releaseDispatchesLocked(ctx, tx, id); err != nil {

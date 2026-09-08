@@ -31,7 +31,7 @@ func (k *Kernel) CancelExpiredExecutions(ctx context.Context, now time.Time) err
 		return err
 	}
 	for _, exec := range executions {
-		if err := k.CancelExecution(ctx, exec.ID); err != nil {
+		if err := k.cancelExecution(ctx, exec.ID, domain.ReasonDeadlineExceeded); err != nil {
 			if errors.Is(err, domain.ErrExecutionTerminal) || errors.Is(err, domain.ErrNotFound) {
 				continue
 			}
