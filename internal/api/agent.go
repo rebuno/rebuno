@@ -15,11 +15,11 @@ import (
 
 type AgentKernel interface {
 	GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error)
-	GetStep(ctx context.Context, stepID string) (domain.Step, error)
+	GetStep(ctx context.Context, execID uuid.UUID, stepID string) (domain.Step, error)
 	ListSteps(ctx context.Context, execID uuid.UUID) ([]domain.Step, error)
 	SubmitStep(ctx context.Context, execID uuid.UUID, req kernel.SubmitStepRequest) (domain.StepDecision, error)
-	CompleteStep(ctx context.Context, stepID string, req kernel.CompleteStepRequest) (domain.StepDecision, error)
-	FailStep(ctx context.Context, stepID string, req kernel.FailStepRequest) (domain.StepDecision, error)
+	CompleteStep(ctx context.Context, execID uuid.UUID, stepID string, req kernel.CompleteStepRequest) (domain.StepDecision, error)
+	FailStep(ctx context.Context, execID uuid.UUID, stepID string, req kernel.FailStepRequest) (domain.StepDecision, error)
 	Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.Lease) error
 	CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output json.RawMessage) error
 	FailExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error
@@ -52,8 +52,13 @@ type FailExecutionRequest struct {
 }
 
 func (rt *Router) getStep(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
 	stepID := chi.URLParam(r, "step_id")
-	step, err := rt.agent.GetStep(r.Context(), stepID)
+	step, err := rt.agent.GetStep(r.Context(), id, stepID)
 	if err != nil {
 		WriteError(w, err)
 		return
@@ -109,6 +114,11 @@ func (rt *Router) submitStep(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Router) completeStep(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
 	stepID := chi.URLParam(r, "step_id")
 	var req kernel.CompleteStepRequest
 	if err := DecodeJSON(r, &req); err != nil {
@@ -121,7 +131,7 @@ func (rt *Router) completeStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Lease = lease
-	dec, err := rt.agent.CompleteStep(r.Context(), stepID, req)
+	dec, err := rt.agent.CompleteStep(r.Context(), id, stepID, req)
 	if err != nil {
 		WriteError(w, err)
 		return
@@ -130,6 +140,11 @@ func (rt *Router) completeStep(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Router) failStep(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
 	stepID := chi.URLParam(r, "step_id")
 	var req kernel.FailStepRequest
 	if err := DecodeJSON(r, &req); err != nil {
@@ -142,7 +157,7 @@ func (rt *Router) failStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Lease = lease
-	dec, err := rt.agent.FailStep(r.Context(), stepID, req)
+	dec, err := rt.agent.FailStep(r.Context(), id, stepID, req)
 	if err != nil {
 		WriteError(w, err)
 		return

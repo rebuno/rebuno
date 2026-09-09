@@ -38,8 +38,8 @@ func (k *KernelAPI) CancelExecution(ctx context.Context, id uuid.UUID) error {
 	return k.Inner.CancelExecution(ctx, id)
 }
 
-func (k *KernelAPI) GetStep(ctx context.Context, stepID string) (domain.Step, error) {
-	return k.Inner.GetStep(ctx, stepID)
+func (k *KernelAPI) GetStep(ctx context.Context, execID uuid.UUID, stepID string) (domain.Step, error) {
+	return k.Inner.GetExecutionStep(ctx, execID, stepID)
 }
 
 func (k *KernelAPI) ListSteps(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {
@@ -50,12 +50,12 @@ func (k *KernelAPI) SubmitStep(ctx context.Context, execID uuid.UUID, req kernel
 	return k.Inner.SubmitStep(ctx, execID, req)
 }
 
-func (k *KernelAPI) CompleteStep(ctx context.Context, stepID string, req kernel.CompleteStepRequest) (domain.StepDecision, error) {
-	return k.Inner.CompleteStep(ctx, stepID, req)
+func (k *KernelAPI) CompleteStep(ctx context.Context, execID uuid.UUID, stepID string, req kernel.CompleteStepRequest) (domain.StepDecision, error) {
+	return k.Inner.CompleteExecutionStep(ctx, execID, stepID, req)
 }
 
-func (k *KernelAPI) FailStep(ctx context.Context, stepID string, req kernel.FailStepRequest) (domain.StepDecision, error) {
-	return k.Inner.FailStep(ctx, stepID, req)
+func (k *KernelAPI) FailStep(ctx context.Context, execID uuid.UUID, stepID string, req kernel.FailStepRequest) (domain.StepDecision, error) {
+	return k.Inner.FailExecutionStep(ctx, execID, stepID, req)
 }
 
 func (k *KernelAPI) Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.Lease) error {

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
@@ -26,7 +27,7 @@ func TestApprovalExpiry(t *testing.T) {
 		}},
 	})
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	args := json.RawMessage(`{"path":"/tmp"}`)
@@ -60,7 +61,7 @@ func TestCancelExpiredExecutions(t *testing.T) {
 		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
 		Policy: policy.PermissiveEngine{},
 	})
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}

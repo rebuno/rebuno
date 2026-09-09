@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/identity"
 	"github.com/rebuno/rebuno/internal/kernel"
@@ -51,7 +52,7 @@ func setup(t *testing.T) (*kernel.Kernel, context.Context) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DispatchBaseDelay: 1 * time.Millisecond}
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: policy.PermissiveEngine{}}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +292,7 @@ func TestApprovalFlow(t *testing.T) {
 		}},
 	})
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
@@ -347,7 +348,7 @@ func TestApprovalFlowAtMostOnce(t *testing.T) {
 		}},
 	})
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
@@ -391,7 +392,7 @@ func TestApprovalResumeEnqueuesDispatch(t *testing.T) {
 		}},
 	})
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
@@ -502,7 +503,7 @@ func TestRateLimitDoubleStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	k := kernel.New(kernel.DefaultConfig(), memDeps(ms, kernel.Deps{Policy: pe, RateLimiter: ratelimit.NewMemoryLimiter()}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
@@ -671,7 +672,7 @@ func TestTerminalPathsRecordActualStepKind(t *testing.T) {
 			ms := memstore.NewStore()
 			cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: tc.timeout}
 			k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, tc.timeout)}))
-			ctx := context.Background()
+			ctx := auth.WithAdmin(context.Background())
 			_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 			exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 			_, approvalID := submitLLMStep(t, k, ctx, exec)
@@ -718,7 +719,7 @@ func TestApprovalDenyResumesExecution(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
@@ -759,7 +760,7 @@ func TestApprovalDenyRationaleReachesHandler(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
@@ -901,7 +902,7 @@ func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	_, approvalID := submitLLMStep(t, k, ctx, exec)
@@ -959,7 +960,7 @@ func TestCancelExecutionPropagatesDispatchError(t *testing.T) {
 		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: &failingQueue{Store: ms, dispatchErr: dispatchErr}, Locker: ms, UnitOfWork: uow,
 		Policy: approvalLLMEngine(t, time.Hour),
 	})
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
@@ -990,7 +991,7 @@ rules:
 		t.Fatal(err)
 	}
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: pe}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
@@ -1042,7 +1043,7 @@ rules:
 		t.Fatal(err)
 	}
 	k := kernel.New(kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}, memDeps(ms, kernel.Deps{Policy: pe}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 
@@ -1064,7 +1065,7 @@ func TestApproversGateWhoMayDecide(t *testing.T) {
       approval_config:
         approvers: ["alice", "bob"]
 `
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 
 	t.Run("a non-approver cannot grant", func(t *testing.T) {
 		k, id := blockedApproval(t, listed)
@@ -1196,7 +1197,7 @@ func TestDenyReasonMatchesOnReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	k := kernel.New(kernel.DefaultConfig(), memDeps(ms, kernel.Deps{Policy: pe}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1238,7 +1239,7 @@ func rateLimitedKernel(t *testing.T, cfg domain.RateLimitConfig) (*kernel.Kernel
 		t.Fatal(err)
 	}
 	k := kernel.New(kernel.DefaultConfig(), memDeps(ms, kernel.Deps{Policy: pe, RateLimiter: ratelimit.NewMemoryLimiter()}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1365,7 +1366,7 @@ func TestCompleteStepOnBlockedStepConflicts(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	k := kernel.New(cfg, memDeps(ms, kernel.Deps{Policy: approvalLLMEngine(t, time.Hour)}))
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
 	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
 	lease := leaseOf(t, k, exec.ID)

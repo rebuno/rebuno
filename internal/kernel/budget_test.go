@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
@@ -35,7 +36,7 @@ func budgetKernel(t *testing.T, maxTokens int, onExceed string) (*kernel.Kernel,
 		kernel.Config{ReplicaID: "test", DispatchBaseDelay: time.Millisecond},
 		memDeps(ms, kernel.Deps{Policy: pe}),
 	)
-	ctx := context.Background()
+	ctx := auth.WithAdmin(context.Background())
 	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
 		t.Fatal(err)
 	}

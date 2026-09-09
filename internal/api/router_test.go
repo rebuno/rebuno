@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/api"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/identity"
@@ -41,7 +42,7 @@ func setupKernel(t *testing.T) (*api.KernelAPI, *kernel.Kernel) {
 func setupRouter(t *testing.T) (http.Handler, *kernel.Kernel, context.Context) {
 	t.Helper()
 	adapt, k := setupKernel(t)
-	return api.NewRouter(adapt, adapt, adapt, "", nil, nil), k, context.Background()
+	return api.NewRouter(adapt, adapt, adapt, "", nil, nil), k, auth.WithAdmin(context.Background())
 }
 
 func signAgentRequest(req *http.Request, body []byte) {

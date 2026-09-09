@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rebuno/rebuno/internal/api"
+	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/stream"
 )
 
@@ -31,6 +32,8 @@ func TestStreamEndToEnd(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	mux := api.NewRouter(adapt, adapt, adapt, "", hub, nil)
+	submitStepHTTP(t, mux, k, exec.ID, "streaming", json.RawMessage(`{}`))
+	stepID := computeStepID(t, exec.ID, domain.StepKindTool, "streaming", []byte(`{}`), 0)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -66,7 +69,7 @@ func TestStreamEndToEnd(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(map[string]any{"seq": 7, "data": "hello world"})
-	preq := httptest.NewRequest(http.MethodPost, "/v0/executions/"+execID+"/steps/step-abc/stream", bytes.NewReader(body))
+	preq := httptest.NewRequest(http.MethodPost, "/v0/executions/"+execID+"/steps/"+stepID+"/stream", bytes.NewReader(body))
 	signAgentRequest(preq, body)
 	prr := httptest.NewRecorder()
 	mux.ServeHTTP(prr, preq)
@@ -79,7 +82,7 @@ func TestStreamEndToEnd(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &d); err != nil {
 		t.Fatalf("decode frame %q: %v", got, err)
 	}
-	if d.StepID != "step-abc" || d.Seq != 7 || d.Data != "hello world" {
+	if d.StepID != stepID || d.Seq != 7 || d.Data != "hello world" {
 		t.Fatalf("unexpected delta: %+v", d)
 	}
 }

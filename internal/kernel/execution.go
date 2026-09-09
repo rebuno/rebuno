@@ -171,7 +171,7 @@ func (k *Kernel) Deps() Deps {
 }
 
 func (k *Kernel) GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error) {
-	return k.d.Executions.GetExecution(ctx, id)
+	return authorizedExecution(ctx, k.d.Executions, id)
 }
 
 const MaxListExecutionsLimit = 200

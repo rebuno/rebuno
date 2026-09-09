@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/payload"
@@ -27,7 +28,7 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease 
 	}
 	defer release()
 
-	exec, err := k.d.Executions.GetExecution(ctx, execID)
+	exec, err := authorizedExecution(ctx, k.d.Executions, execID)
 	if err != nil {
 		return err
 	}
@@ -35,7 +36,7 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease 
 		return domain.ErrExecutionTerminal
 	}
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := tx.RenewLease(ctx, execID, lease, time.Now().UTC()); err != nil {
+		if err := renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		if _, err := tx.Append(ctx, execID, domain.EventExecutionCompleted, payload.Execution(execID, domain.ExecutionCompleted, output, "")); err != nil {
@@ -66,7 +67,7 @@ func (k *Kernel) failExecution(ctx context.Context, execID uuid.UUID, lease doma
 	}
 	defer release()
 
-	exec, err := k.d.Executions.GetExecution(ctx, execID)
+	exec, err := authorizedExecution(ctx, k.d.Executions, execID)
 	if err != nil {
 		return err
 	}
@@ -74,7 +75,7 @@ func (k *Kernel) failExecution(ctx context.Context, execID uuid.UUID, lease doma
 		return domain.ErrExecutionTerminal
 	}
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := tx.RenewLease(ctx, execID, lease, time.Now().UTC()); err != nil {
+		if err := renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		if _, err := tx.Append(ctx, execID, domain.EventExecutionFailed, payload.Execution(execID, domain.ExecutionFailed, nil, reason)); err != nil {
@@ -99,7 +100,14 @@ func (k *Kernel) Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.L
 	if !lease.Valid() {
 		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
 	}
-	return k.d.Queue.RenewLease(ctx, execID, lease, time.Now().UTC())
+	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
+	if err != nil {
+		return err
+	}
+	defer release()
+	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		return renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC())
+	})
 }
 
 const (
@@ -278,6 +286,7 @@ func (k *Kernel) deliver(ctx context.Context, d domain.Dispatch) error {
 		return ignoreSuperseded(k.d.Queue.Ack(ctx, d.ID, d.Attempt, domain.DispatchExhausted, nil))
 	}
 
+	ctx = auth.WithAgent(ctx, exec.AgentID)
 	if d.Attempt > d.MaxAttempts {
 		return ignoreSuperseded(k.failExecution(ctx, d.ExecutionID, lease, domain.ReasonDispatchExhausted))
 	}

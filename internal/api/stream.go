@@ -43,6 +43,10 @@ func (rt *Router) streamStepDelta(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, domain.ErrValidation)
 		return
 	}
+	if _, err := rt.agent.GetStep(r.Context(), id, stepID); err != nil {
+		WriteError(w, err)
+		return
+	}
 	if rt.stream != nil {
 		_ = rt.stream.Publish(r.Context(), id, stream.Delta{StepID: stepID, Seq: req.Seq, Data: req.Data})
 	}
@@ -53,6 +57,10 @@ func (rt *Router) streamExecution(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		WriteError(w, domain.ErrValidation)
+		return
+	}
+	if _, err := rt.client.GetExecution(r.Context(), id); err != nil {
+		WriteError(w, err)
 		return
 	}
 	flusher, ok := w.(http.Flusher)

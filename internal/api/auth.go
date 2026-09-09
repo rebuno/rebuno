@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 )
@@ -20,7 +21,7 @@ func bearerAuthMiddleware(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if token == "" {
-				next.ServeHTTP(w, r)
+				next.ServeHTTP(w, r.WithContext(auth.WithAdmin(r.Context())))
 				return
 			}
 			header := r.Header.Get("Authorization")
@@ -32,7 +33,7 @@ func bearerAuthMiddleware(token string) func(http.Handler) http.Handler {
 				WriteError(w, domain.ErrUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(auth.WithAdmin(r.Context())))
 		})
 	}
 }
@@ -77,7 +78,7 @@ func hmacAuthMiddleware(lookup agentLookup) func(http.Handler) http.Handler {
 				WriteError(w, domain.ErrUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(auth.WithAgent(r.Context(), agent.ID)))
 		})
 	}
 }

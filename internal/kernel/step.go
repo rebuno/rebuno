@@ -48,7 +48,7 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 	}
 	defer release()
 
-	exec, err := k.d.Executions.GetExecution(ctx, execID)
+	exec, err := authorizedExecution(ctx, k.d.Executions, execID)
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
@@ -238,7 +238,7 @@ func (k *Kernel) refuseRateLimited(
 ) (domain.StepDecision, bool, error) {
 	errPayload, _ := json.Marshal(map[string]string{"reason": reason, "rule_id": ruleID})
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := tx.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
+		if err := renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		_, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
@@ -287,7 +287,7 @@ func (k *Kernel) parkRateLimited(
 	errPayload, _ := json.Marshal(map[string]string{"reason": domain.ReasonRateLimited, "rule_id": ruleID})
 	at := time.Now().UTC().Add(wait)
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := tx.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
+		if err := renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		if _, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
@@ -418,7 +418,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		evts = append(evts, store.EventRecord{Type: domain.EventExecutionBlocked, Payload: blockPayload})
 
 		if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-			if err := tx.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
+			if err := renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
 				return err
 			}
 			if _, err := tx.AppendBatch(ctx, execID, evts); err != nil {
@@ -446,12 +446,15 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 
 func (k *Kernel) writeStepLive(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord) error {
 	return k.writeStep(ctx, step, evts, func(tx store.TxStore) error {
-		return tx.RenewLease(ctx, step.ExecutionID, lease, time.Now().UTC())
+		return renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC())
 	})
 }
 
 func (k *Kernel) writeStepRecorded(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord) error {
 	return k.writeStep(ctx, step, evts, func(tx store.TxStore) error {
+		if _, err := authorizedExecution(ctx, tx, step.ExecutionID); err != nil {
+			return err
+		}
 		return tx.CheckLease(ctx, step.ExecutionID, lease)
 	})
 }
@@ -494,7 +497,7 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
-	exec, err := k.d.Executions.GetExecution(ctx, step.ExecutionID)
+	exec, err := authorizedExecution(ctx, k.d.Executions, step.ExecutionID)
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
@@ -551,7 +554,7 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
-	exec, err := k.d.Executions.GetExecution(ctx, step.ExecutionID)
+	exec, err := authorizedExecution(ctx, k.d.Executions, step.ExecutionID)
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
@@ -590,9 +593,19 @@ func (k *Kernel) failStepInternal(ctx context.Context, lease domain.Lease, step 
 }
 
 func (k *Kernel) GetStep(ctx context.Context, stepID string) (domain.Step, error) {
-	return k.d.Steps.GetStep(ctx, stepID)
+	step, err := k.d.Steps.GetStep(ctx, stepID)
+	if err != nil {
+		return domain.Step{}, err
+	}
+	if _, err := k.GetExecution(ctx, step.ExecutionID); err != nil {
+		return domain.Step{}, err
+	}
+	return step, nil
 }
 
 func (k *Kernel) ListSteps(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {
+	if _, err := k.GetExecution(ctx, execID); err != nil {
+		return nil, err
+	}
 	return k.d.Steps.ListByExecution(ctx, execID)
 }

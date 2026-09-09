@@ -10,16 +10,19 @@ details}` envelope.
 
 - **Client and admin routes** use a bearer token: `Authorization: Bearer <token>`.
   Set it with `--bearer-token` / `REBUNO_BEARER_TOKEN` (required in server mode).
-  The dev kernel disables auth.
+  The dev kernel disables bearer authentication.
 - **Agent routes** use HMAC. The agent sends `Rebuno-Agent-Id` and
   `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`, computed over the raw
-  request body with the agent's registered secret.
-- **Agent routes that write** also send `Rebuno-Dispatch-Id` and
+  request body with the agent's registered secret. Agents can access only their
+  assigned executions (`403 forbidden` otherwise).
+- **Agent routes that change durable state** also send `Rebuno-Dispatch-Id` and
   `Rebuno-Dispatch-Attempt`, copied from the webhook that delivered the run. A
   call from an attempt the kernel has already re-delivered gets
   `409 lease_superseded`.
 - A few routes (fetching execution input and steps) take either one: bearer for
   clients, HMAC for the agent.
+- Step routes require the step to belong to the execution in the URL. A
+  mismatched execution and step returns `404 not_found`.
 - `/v0/health`, `/v0/ready`, and `/metrics` are unauthenticated.
 
 ---
