@@ -19,7 +19,7 @@ make tidy    # go mod tidy
 ```
 
 Set `DATABASE_URL` to run the tests that need Postgres; they skip without it.
-Running the production kernel is covered in [docs/deployment.md](docs/deployment.md).
+Running the production kernel is covered in [docs/deployment.mdx](docs/deployment.mdx).
 
 Documentation lives in [docs/](docs/). If you change kernel behavior, API
 surface, events, or the policy format, update the corresponding doc.

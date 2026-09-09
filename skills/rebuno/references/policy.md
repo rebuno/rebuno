@@ -73,5 +73,5 @@ Confirm the same execution completes and earlier tool-body logs appear once.
 Keep the in-memory dev kernel running.
 
 For rate limits, budgets, advanced predicates, and historical policy comparison,
-read [policy](https://github.com/rebuno/rebuno/blob/main/docs/policy.md) and
-[CLI](https://github.com/rebuno/rebuno/blob/main/docs/cli.md) only when needed.
+read [policy](https://github.com/rebuno/rebuno/blob/main/docs/policy.mdx) and
+[CLI](https://github.com/rebuno/rebuno/blob/main/docs/cli.mdx) only when needed.

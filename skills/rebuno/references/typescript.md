@@ -47,7 +47,7 @@ The handler takes one input object and returns JSON data. `Agent`'s optional
   policy evaluation and invocation.
 - **MCP:** `wrapMcpTools(descriptors, { call, prefix })` uses a
   `call(toolName, args)` adapter and records targets `<prefix>_<name>`.
-  See [tool adapters](https://github.com/rebuno/rebuno/blob/main/docs/sdk/typescript/tools.md)
+  See [tool adapters](https://github.com/rebuno/rebuno/blob/main/docs/sdk/typescript/tools.mdx)
   for schema and session details.
 
 ## Model interception
@@ -66,7 +66,7 @@ Preserve a custom fetch with `createRebunoFetch({ fetch: existingFetch })`.
 Interception records string JSON bodies using `model` as the target; other
 bodies and calls outside an execution pass through without recording.
 For streaming and transport details, consult
-[LLM calls](https://github.com/rebuno/rebuno/blob/main/docs/sdk/typescript/llm-calls.md).
+[LLM calls](https://github.com/rebuno/rebuno/blob/main/docs/sdk/typescript/llm-calls.mdx).
 
 ## Runtime details
 

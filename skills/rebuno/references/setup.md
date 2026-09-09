@@ -72,5 +72,5 @@ reachable from their callers, including container networking and mount prefixes.
 Hosting must keep handler work alive after the webhook response.
 
 For production/Postgres configuration, consult
-[deployment](https://github.com/rebuno/rebuno/blob/main/docs/deployment.md).
-Other commands: [CLI](https://github.com/rebuno/rebuno/blob/main/docs/cli.md).
+[deployment](https://github.com/rebuno/rebuno/blob/main/docs/deployment.mdx).
+Other commands: [CLI](https://github.com/rebuno/rebuno/blob/main/docs/cli.mdx).

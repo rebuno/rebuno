@@ -5,7 +5,7 @@ run as external services over signed webhooks. The SDK implementations and
 dashboard are separate repositories; their user documentation lives here.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup and commands, and
-[docs/architecture.md](docs/architecture.md) before changing runtime behavior.
+[docs/architecture.mdx](docs/architecture.mdx) before changing runtime behavior.
 
 ## Development and validation
 

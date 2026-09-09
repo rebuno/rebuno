@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://rebuno.io">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="logo/rebuno-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="logo/rebuno-light.svg">
-      <img src="logo/rebuno-dark.svg" alt="rebuno" width="280">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/rebuno-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/rebuno-light.svg">
+      <img src="docs/assets/brand/rebuno-dark.svg" alt="rebuno" width="280">
     </picture>
   </a>
 </p>
@@ -51,23 +51,23 @@ rebuno exec watch <id>
 
 Start here:
 
-- [Getting Started](docs/getting-started.md): run the kernel and your first agent.
-- [Architecture](docs/architecture.md): the domain model, state machines, and how durability works.
+- [Quickstart](docs/getting-started.mdx): run the kernel and your first agent.
+- [Architecture](docs/architecture.mdx): the domain model, state machines, and how durability works.
 
 Reference:
 
-- [Agents](docs/agents.md): how an agent process receives work and drives its effects.
-- [Tools](docs/tools.md): effects, step identity, and idempotency.
-- [LLM calls](docs/llm-calls.md): intercepting LLM requests so they replay durably.
-- [Streaming](docs/streaming.md): live token deltas while a step is running.
-- [Policy](docs/policy.md): the YAML rule language for allow / deny / require-approval.
-- [Events](docs/events.md): the event types and their payloads.
-- [HTTP API](docs/api.md): the `/v0` client, agent, and admin endpoints.
-- [CLI](docs/cli.md): the `rebuno` binary and its commands.
-- [Deployment](docs/deployment.md): running the production kernel, config, and Docker.
-- [Python SDK](docs/sdk/python): building with Python
-- [TypeScript SDK](docs/sdk/typescript): building with TypeScript
-- [Dashboard](docs/dashboard.md): web UI to view executions, steps, events, and agent activity.
+- [Agents](docs/agents.mdx): how an agent process receives work and drives its effects.
+- [Tools](docs/tools.mdx): effects, step identity, and idempotency.
+- [LLM calls](docs/llm-calls.mdx): intercepting LLM requests so they replay durably.
+- [Streaming](docs/streaming.mdx): live token deltas while a step is running.
+- [Policy](docs/policy.mdx): the YAML rule language for allow / deny / require-approval.
+- [Events](docs/events.mdx): the event types and their payloads.
+- [HTTP API](docs/api.mdx): the kernel's HTTP endpoints under `/v0`.
+- [CLI](docs/cli.mdx): the `rebuno` binary and its commands.
+- [Deployment](docs/deployment.mdx): running the production kernel, config, and Docker.
+- [Python SDK](docs/sdk/python/overview.mdx): building with Python
+- [TypeScript SDK](docs/sdk/typescript/overview.mdx): building with TypeScript
+- [Dashboard](docs/dashboard.mdx): web UI to view executions, steps, events, and agent activity.
 
 ## License
 

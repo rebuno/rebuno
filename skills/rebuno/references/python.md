@@ -43,7 +43,7 @@ validates input; a single `dict` parameter receives it directly. Return JSON dat
   `transform_args` changes arguments before both policy evaluation and invocation.
 - **MCP:** `rebuno.mcp.wrap_mcp_tools` takes descriptors and a
   `call(tool_name, args)` adapter. `prefix` produces targets `<prefix>_<name>`.
-  See [tool adapters](https://github.com/rebuno/rebuno/blob/main/docs/sdk/python/tools.md)
+  See [tool adapters](https://github.com/rebuno/rebuno/blob/main/docs/sdk/python/tools.mdx)
   for schema and session details.
 
 ## Model interception
@@ -66,7 +66,7 @@ process-wide `httpx2.alias_httpx()`.
 The transport records JSON requests using `model` as the target. Outside an
 execution, or for non-JSON requests, it passes through without recording.
 For custom transports and streaming, consult
-[LLM calls](https://github.com/rebuno/rebuno/blob/main/docs/sdk/python/llm-calls.md).
+[LLM calls](https://github.com/rebuno/rebuno/blob/main/docs/sdk/python/llm-calls.mdx).
 
 ## Runtime details
 
