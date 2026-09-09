@@ -1,0 +1,173 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Rebuno",
+  "description": "An open-source execution runtime for production agents.",
+  "colors": {
+    "primary": "#0697F3",
+    "light": "#0697F3",
+    "dark": "#0478C3"
+  },
+  "logo": {
+    "light": "/assets/brand/rebuno.svg",
+    "dark": "/assets/brand/rebuno.svg",
+    "href": "/"
+  },
+  "favicon": "/assets/favicon.svg",
+  "appearance": {
+    "default": "dark"
+  },
+  "background": {
+    "color": {
+      "light": "#FFFFFF",
+      "dark": "#080B12"
+    }
+  },
+  "fonts": {
+    "family": "Geist"
+  },
+  "styling": {
+    "codeblocks": {
+      "theme": {
+        "light": "min-light",
+        "dark": "material-theme-ocean"
+      }
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "claude",
+      "chatgpt"
+    ]
+  },
+  "thumbnails": {
+    "appearance": "dark"
+  },
+  "search": {
+    "prompt": "Search the Rebuno docs"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "icon": "book",
+        "groups": [
+          {
+            "group": "Get started",
+            "icon": "rocket",
+            "expanded": true,
+            "pages": [
+              "index",
+              "getting-started"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "icon": "cube",
+            "pages": [
+              "architecture",
+              "agents",
+              "tools",
+              "llm-calls",
+              "policy",
+              "events",
+              "streaming"
+            ]
+          },
+          {
+            "group": "Operations",
+            "icon": "server",
+            "pages": [
+              "api",
+              "cli",
+              "dashboard",
+              "deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Python SDK",
+        "icon": "python",
+        "groups": [
+          {
+            "group": "Get started",
+            "icon": "rocket",
+            "expanded": true,
+            "pages": [
+              "sdk/python/overview",
+              "sdk/python/getting-started"
+            ]
+          },
+          {
+            "group": "Writing agents",
+            "icon": "cube",
+            "pages": [
+              "sdk/python/agents",
+              "sdk/python/tools",
+              "sdk/python/llm-calls",
+              "sdk/python/steps"
+            ]
+          },
+          {
+            "group": "Reference",
+            "icon": "book",
+            "pages": [
+              "sdk/python/client",
+              "sdk/python/errors",
+              "sdk/python/internals"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "TypeScript SDK",
+        "icon": "js",
+        "groups": [
+          {
+            "group": "Get started",
+            "icon": "rocket",
+            "expanded": true,
+            "pages": [
+              "sdk/typescript/overview",
+              "sdk/typescript/getting-started"
+            ]
+          },
+          {
+            "group": "Writing agents",
+            "icon": "cube",
+            "pages": [
+              "sdk/typescript/agents",
+              "sdk/typescript/tools",
+              "sdk/typescript/llm-calls",
+              "sdk/typescript/steps"
+            ]
+          },
+          {
+            "group": "Reference",
+            "icon": "book",
+            "pages": [
+              "sdk/typescript/client",
+              "sdk/typescript/errors",
+              "sdk/typescript/internals"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/rebuno/rebuno"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/rebuno/rebuno",
+      "x": "https://x.com/rebunoio"
+    }
+  }
+}

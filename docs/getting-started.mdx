@@ -1,0 +1,97 @@
+---
+title: "Quickstart"
+description: "Run the kernel and your first agent"
+---
+
+## Before you begin
+
+Install Go 1.26+, plus Python 3.11+ or Node 22+ to run the agent.
+
+<Steps>
+  <Step title="Start the dev kernel">
+    Point the dev kernel at a config to register agents on boot:
+
+    ```bash
+    go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
+    ```
+
+    Each entry gives an agent's `webhook_url`, its HMAC `secret`, and optionally a
+    `policy` block or a `policy_file` path.
+
+    ```yaml
+    agents:
+      - id: hello
+        webhook_url: http://localhost:5000/webhook
+        secret: hello-secret
+    ```
+
+    <Warning>
+      Without a policy, an agent runs unrestricted. See [Policy](/policy) for the
+      rule language.
+    </Warning>
+  </Step>
+
+  <Step title="Run an agent">
+    An agent is an HTTP service that speaks the kernel's [protocol](/agents). The
+    `hello` example listens on `:5000` and calls back to the kernel on `:8080`. In a
+    second terminal, start it:
+
+    <CodeGroup>
+      ```bash Python
+      pip install rebuno
+      python examples/python/hello.py
+      ```
+
+      ```bash TypeScript
+      npm install rebuno
+      npx tsx examples/typescript/hello.ts
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Create an execution">
+    In a third terminal:
+
+    ```bash
+    rebuno exec create hello '{"query": "hello world"}'
+      created 01a05eb7-e102-78e9 (pending); follow with 'rebuno exec watch 01a05eb7-e102-78e9'
+    rebuno exec watch 01a05eb7-e102-78e9
+    rebuno exec events 01a05eb7-e102-78e9
+    ```
+
+    `exec watch` tails events until the run finishes. `exec events` prints the whole
+    log with payloads. See [CLI](/cli).
+  </Step>
+</Steps>
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    The domain model, state machines, and how durability works.
+  </Card>
+
+  <Card title="Agents" icon="robot" href="/agents">
+    The webhook protocol and the dispatch and replay lifecycle.
+  </Card>
+
+  <Card title="Policy" icon="shield-halved" href="/policy">
+    Allow, deny, or hold a step for human approval.
+  </Card>
+
+  <Card title="HTTP API" icon="code" href="/api">
+    The `/v0` client, agent, and admin endpoints.
+  </Card>
+
+  <Card title="Python SDK" icon="python" href="/sdk/python/overview">
+    Build agents and clients in Python.
+  </Card>
+
+  <Card title="TypeScript SDK" icon="js" href="/sdk/typescript/overview">
+    Build agents and clients in TypeScript.
+  </Card>
+
+  <Card title="Deployment" icon="server" href="/deployment">
+    Running the production kernel, its config, and Docker.
+  </Card>
+</Columns>

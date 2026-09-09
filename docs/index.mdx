@@ -1,0 +1,79 @@
+---
+title: "Overview"
+sidebarTitle: "Overview"
+mode: "wide"
+---
+
+Rebuno is an open-source execution runtime for production agents.
+
+It records every tool call and LLM call as a durable step. 
+Interrupted runs resume from the last recorded step instead of starting over. 
+Any step can be allowed, denied, or held for human approval.
+
+<Card title="Quickstart" icon="rocket" href="/getting-started" horizontal>
+  Start the dev kernel, run an agent, and create your first execution.
+</Card>
+
+## Concepts
+
+<Columns cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    The domain model, state machines, and how durability works.
+  </Card>
+
+  <Card title="Agents" icon="robot" href="/agents">
+    The webhook protocol and the dispatch and replay lifecycle.
+  </Card>
+
+  <Card title="Tools and effects" icon="wrench" href="/tools">
+    Step identity, idempotency modes, and local steps.
+  </Card>
+
+  <Card title="LLM calls" icon="brain" href="/llm-calls">
+    Intercepting provider requests so they replay durably.
+  </Card>
+
+  <Card title="Policy" icon="shield-halved" href="/policy">
+    The rule language for allow, deny, and require-approval.
+  </Card>
+
+  <Card title="Events" icon="list-timeline" href="/events">
+    The event taxonomy and payloads behind every projection.
+  </Card>
+
+  <Card title="Live streaming" icon="bars-staggered" href="/streaming">
+    Token deltas while a step is still running.
+  </Card>
+</Columns>
+
+## SDKs
+
+<Columns cols={2}>
+  <Card title="Python SDK" icon="python" href="/sdk/python/overview">
+    Building with Python
+  </Card>
+
+  <Card title="TypeScript SDK" icon="js" href="/sdk/typescript/overview">
+    Building with TypeScript
+  </Card>
+</Columns>
+
+## Reference
+
+<Columns cols={2}>
+  <Card title="HTTP API" icon="code" href="/api">
+    The kernel's HTTP endpoints under `/v0`.
+  </Card>
+
+  <Card title="CLI" icon="terminal" href="/cli">
+    The `rebuno` binary and its commands.
+  </Card>
+
+  <Card title="Deployment" icon="server" href="/deployment">
+    The production kernel, its config, and Docker.
+  </Card>
+
+  <Card title="Dashboard" icon="gauge" href="/dashboard">
+    Web UI for executions, steps, events, and agents.
+  </Card>
+</Columns>
