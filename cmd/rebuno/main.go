@@ -3,11 +3,18 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
 
 var Version = "dev"
+
+func init() {
+	if info, ok := debug.ReadBuildInfo(); ok && Version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		Version = info.Main.Version
+	}
+}
 
 func main() {
 	root := &cobra.Command{
