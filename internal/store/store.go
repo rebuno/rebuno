@@ -85,3 +85,13 @@ type EventRecord struct {
 	Type    string
 	Payload any
 }
+
+// RotateAPIKey replaces a live key's hash only if it still matches oldHash.
+// Rotation and revocation must serialize so rotation cannot revive a revoked key.
+type APIKeyStore interface {
+	CreateAPIKey(context.Context, domain.APIKey) error
+	GetAPIKey(context.Context, string) (domain.APIKey, error)
+	ListAPIKeys(context.Context) ([]domain.APIKey, error)
+	RotateAPIKey(ctx context.Context, id string, oldHash, newHash []byte) error
+	RevokeAPIKey(ctx context.Context, id string, at time.Time) error
+}

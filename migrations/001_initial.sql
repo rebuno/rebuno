@@ -102,3 +102,12 @@ CREATE TABLE rate_buckets (
     updated_at     TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX rate_buckets_updated_idx ON rate_buckets (updated_at);
+
+CREATE TABLE api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    scopes JSONB NOT NULL,
+    secret_hash BYTEA NOT NULL CHECK (octet_length(secret_hash) = 32),
+    created_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ
+);

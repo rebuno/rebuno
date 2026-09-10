@@ -9,8 +9,8 @@ rebuno server --db-url DB_URL --bearer-token TOKEN
 rebuno version
 ```
 
-Replace `DB_URL` with a Postgres connection string and `TOKEN` with the bearer
-token clients and admins present.
+Replace `DB_URL` with a Postgres connection string and `TOKEN` with the
+full-access bootstrap token.
 
 Both `dev` and `server` take `--config <config.yaml>` to register agents and
 policies at boot, plus `--listen-addr`, `--log-level`, and `--log-format`. See
@@ -24,13 +24,28 @@ Build it with `make build`, which writes `bin/rebuno`, or run from source with
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REBUNO_URL` | `http://localhost:8080` | Kernel base URL. Override per command with `--url`. |
-| `REBUNO_API_KEY` | none | Bearer token. Required against a kernel started with `rebuno server`. |
+| `REBUNO_API_KEY` | none | Scoped API key or bootstrap bearer token. Required against `rebuno server`. |
 
 ```bash
 export REBUNO_URL=https://rebuno.internal
 export REBUNO_API_KEY=…
 rebuno exec ls
 ```
+
+## API keys
+
+Set `REBUNO_API_KEY` to the bootstrap token or a key with `api_keys:manage`.
+
+```bash
+rebuno key create reader --scope executions:read
+rebuno key ls
+rebuno key rotate <id>
+rebuno key revoke <id>
+```
+
+Output is JSON. Repeat `--scope` or use commas for multiple
+[scopes](/api#authentication). Save issued tokens; they are shown once.
+See [API keys](/api#api-keys) for rotation and revocation.
 
 ## Agents
 

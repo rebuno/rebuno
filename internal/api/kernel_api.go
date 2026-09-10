@@ -109,3 +109,23 @@ func (k *KernelAPI) GrantApproval(ctx context.Context, id uuid.UUID, req kernel.
 func (k *KernelAPI) DenyApproval(ctx context.Context, id uuid.UUID, req kernel.DenyApprovalRequest) error {
 	return k.Inner.DenyApproval(ctx, id, req)
 }
+
+func (k *KernelAPI) CreateAPIKey(ctx context.Context, req kernel.CreateAPIKeyRequest) (kernel.IssuedAPIKey, error) {
+	return k.Inner.CreateAPIKey(ctx, req)
+}
+
+func (k *KernelAPI) ListAPIKeys(ctx context.Context) ([]domain.APIKey, error) {
+	return k.Inner.ListAPIKeys(ctx)
+}
+
+func (k *KernelAPI) RotateAPIKey(ctx context.Context, id string) (kernel.IssuedAPIKey, error) {
+	return k.Inner.RotateAPIKey(ctx, id)
+}
+
+func (k *KernelAPI) RevokeAPIKey(ctx context.Context, id string) error {
+	return k.Inner.RevokeAPIKey(ctx, id)
+}
+
+func (k *KernelAPI) AuthenticateAPIKey(ctx context.Context, token string) (domain.APIKey, error) {
+	return k.Inner.AuthenticateAPIKey(ctx, token)
+}

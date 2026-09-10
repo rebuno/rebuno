@@ -58,7 +58,8 @@ func TestCancelExpiredExecutions(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", ExecutionDeadlineTimeout: 1 * time.Millisecond}
 	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		APIKeys: ms,
+		Events:  ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
 		Policy: policy.PermissiveEngine{},
 	})
 	ctx := auth.WithAdmin(context.Background())

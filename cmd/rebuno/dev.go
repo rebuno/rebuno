@@ -51,6 +51,7 @@ func runDev(cfg config.Config, configPath string) error {
 
 	s := memstore.NewStore()
 	deps := kernel.Deps{
+		APIKeys:     s,
 		Events:      s,
 		Steps:       s,
 		Executions:  s,

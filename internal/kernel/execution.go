@@ -48,6 +48,7 @@ func DefaultConfig() Config {
 }
 
 type Deps struct {
+	APIKeys     store.APIKeyStore
 	Events      store.EventStore
 	Steps       store.StepStore
 	Executions  store.ExecutionStore
@@ -71,6 +72,7 @@ type Kernel struct {
 
 func New(cfg Config, d Deps) *Kernel {
 	for name, dep := range map[string]any{
+		"APIKeys":    d.APIKeys,
 		"Events":     d.Events,
 		"Steps":      d.Steps,
 		"Executions": d.Executions,

@@ -16,7 +16,7 @@ func main() {
 	}
 	root.AddCommand(versionCmd(), serverCmd(), devCmd(),
 		bindKernelURL(policyCmd()), bindKernelURL(agentCmd()),
-		bindKernelURL(execCmd()), bindKernelURL(approvalCmd()))
+		bindKernelURL(execCmd()), bindKernelURL(approvalCmd()), bindKernelURL(keyCmd()))
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

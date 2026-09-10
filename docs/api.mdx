@@ -9,8 +9,9 @@ details}` envelope.
 ## Authentication
 
 - **Client and admin routes** use a bearer token: `Authorization: Bearer <token>`.
-  Set it with `--bearer-token` / `REBUNO_BEARER_TOKEN` (required in server mode).
-  The dev kernel disables bearer authentication.
+  Scoped keys limit permissions; `--bearer-token` / `REBUNO_BEARER_TOKEN` sets
+  the full-access bootstrap token required in server mode. Tokens are
+  case-sensitive. Dev mode allows anonymous access but checks supplied tokens.
 - **Agent routes** use HMAC. The agent sends `Rebuno-Agent-Id` and
   `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`, computed over the raw
   request body with the agent's registered secret. Agents can access only their
@@ -24,6 +25,20 @@ details}` envelope.
 - Step routes require the step to belong to the execution in the URL. A
   mismatched execution and step returns `404 not_found`.
 - `/v0/health`, `/v0/ready`, and `/metrics` are unauthenticated.
+
+Scopes apply deployment-wide; write does not include read. Insufficient scope
+returns `403 forbidden`; invalid or revoked keys return `401 unauthorized`.
+
+| Scope | Access |
+|-------|--------|
+| `executions:read` | Read executions, steps, events, and streams. |
+| `executions:write` | Create and cancel executions. |
+| `approvals:read` | List and inspect approvals. |
+| `approvals:write` | Grant and deny approvals. |
+| `agents:read` | Read agents and their policies. |
+| `agents:write` | Register, update, or delete agents. |
+| `policies:write` | Set policies; testing also requires `executions:read`. |
+| `api_keys:manage` | Manage keys with any scopes. |
 
 ---
 
@@ -169,6 +184,21 @@ stalled.
 
 ## Admin API
 
+### API keys
+
+Require `api_keys:manage` or the bootstrap token.
+
+| Endpoint | Result |
+|----------|--------|
+| `POST /v0/api-keys` | Create from `{"name":"reader","scopes":["executions:read"]}` → `201`. |
+| `GET /v0/api-keys` | List metadata, including revoked keys. |
+| `POST /v0/api-keys/{id}/rotate` | Replace the secret, keeping ID and scopes → `200`. |
+| `DELETE /v0/api-keys/{id}` | Revoke; repeatable → `204`. |
+
+Creation and rotation return `{id, name, scopes, created_at, token}`; save the
+token, which is shown once. Rotation invalidates the old token; rotating a
+revoked key returns `409 conflict`. Existing requests and streams may finish.
+
 ### Agents
 
 `POST /v0/agents` · bearer registers or upserts an agent. Body
@@ -207,11 +237,9 @@ did not match. See [Testing a bundle](/policy#testing-a-bundle).
 `POST /v0/approvals/{id}/deny` · bearer takes `{ "decided_by", "rationale?" }`
 → `204`. The resumed loop sees a policy error at that step.
 
-Both return `403 forbidden` when the approval lists `approvers` and `decided_by`
-is not one of them. The kernel takes `decided_by` at face value, because the
-bearer token carries no identity. The check stops someone off the list from
-deciding. It cannot stop someone who types another person's name into the field.
-See [Approvals](/policy#approvals).
+Both return `403 forbidden` if `decided_by` is absent from a configured
+`approvers` list. The caller supplies this name; bearer credentials do not verify
+human identity. See [Approvals](/policy#approvals).
 
 ---
 

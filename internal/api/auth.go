@@ -17,30 +17,44 @@ type agentLookup interface {
 	GetAgent(ctx context.Context, id string) (domain.Agent, error)
 }
 
-func bearerAuthMiddleware(token string) func(http.Handler) http.Handler {
+func bearerAuthMiddleware(token string, keys APIKeyKernel, scopes ...domain.Scope) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if token == "" {
-				next.ServeHTTP(w, r.WithContext(auth.WithAdmin(r.Context())))
-				return
-			}
 			header := r.Header.Get("Authorization")
-			if !strings.HasPrefix(header, "Bearer ") {
-				WriteError(w, domain.ErrUnauthorized)
-				return
+			ctx := r.Context()
+			if token == "" && header == "" {
+				ctx = auth.WithAdmin(ctx)
+			} else {
+				if !strings.HasPrefix(header, "Bearer ") {
+					WriteError(w, domain.ErrUnauthorized)
+					return
+				}
+				supplied := strings.TrimPrefix(header, "Bearer ")
+				if token != "" && subtle.ConstantTimeCompare([]byte(supplied), []byte(token)) == 1 {
+					ctx = auth.WithAdmin(ctx)
+				} else {
+					key, err := keys.AuthenticateAPIKey(ctx, supplied)
+					if err != nil {
+						WriteError(w, err)
+						return
+					}
+					ctx = auth.WithClient(ctx, key.Scopes)
+				}
 			}
-			if !strings.EqualFold(strings.TrimPrefix(header, "Bearer "), token) {
-				WriteError(w, domain.ErrUnauthorized)
-				return
+			for _, scope := range scopes {
+				if !auth.HasScope(ctx, scope) {
+					WriteError(w, domain.ErrForbidden)
+					return
+				}
 			}
-			next.ServeHTTP(w, r.WithContext(auth.WithAdmin(r.Context())))
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
 // For routes an agent must reach without a bearer token, e.g. fetching input.
-func bearerOrHMAC(token string, lookup agentLookup) func(http.Handler) http.Handler {
-	bearer := bearerAuthMiddleware(token)
+func bearerOrHMAC(token string, lookup AdminKernel) func(http.Handler) http.Handler {
+	bearer := bearerAuthMiddleware(token, lookup, domain.ScopeExecutionsRead)
 	hmacMW := hmacAuthMiddleware(lookup)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -20,6 +20,9 @@ import (
 )
 
 func memDeps(ms *memstore.Store, d kernel.Deps) kernel.Deps {
+	if d.APIKeys == nil {
+		d.APIKeys = ms
+	}
 	if d.Events == nil {
 		d.Events = ms
 	}
@@ -242,6 +245,7 @@ func TestPolicyDeny(t *testing.T) {
 	k, ctx := setup(t)
 	d := k.Deps()
 	k2 := kernel.New(kernel.DefaultConfig(), kernel.Deps{
+		APIKeys:    d.APIKeys,
 		Events:     d.Events,
 		Steps:      d.Steps,
 		Executions: d.Executions,
@@ -957,7 +961,8 @@ func TestCancelExecutionPropagatesDispatchError(t *testing.T) {
 	uow := &failingUnitOfWork{Store: ms, dispatchErr: dispatchErr}
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}
 	k := kernel.New(cfg, kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: &failingQueue{Store: ms, dispatchErr: dispatchErr}, Locker: ms, UnitOfWork: uow,
+		APIKeys: ms,
+		Events:  ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: &failingQueue{Store: ms, dispatchErr: dispatchErr}, Locker: ms, UnitOfWork: uow,
 		Policy: approvalLLMEngine(t, time.Hour),
 	})
 	ctx := auth.WithAdmin(context.Background())

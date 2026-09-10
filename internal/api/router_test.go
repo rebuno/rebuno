@@ -29,7 +29,8 @@ func setupKernel(t *testing.T) (*api.KernelAPI, *kernel.Kernel) {
 	t.Helper()
 	ms := memstore.NewStore()
 	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
-		Events: ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
+		APIKeys: ms,
+		Events:  ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
 		Policy: policy.NewBundleResolver(ms, policy.PermissiveEngine{}),
 	})
 	agent := domain.Agent{ID: testAgentID, WebhookURL: "http://localhost", Secret: testAgentSecret}

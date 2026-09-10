@@ -25,7 +25,8 @@ deadlines, cleanup) is leader-elected through a Postgres advisory lock.
 
 ## Authentication
 
-All client and admin routes require the bearer token:
+Client and admin routes accept scoped API keys or the full-access bootstrap
+bearer token:
 
 ```bash
 curl -X POST http://localhost:8080/v0/executions \

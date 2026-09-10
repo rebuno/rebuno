@@ -10,6 +10,7 @@ import (
 
 func NewStore() *Store {
 	return &Store{
+		apiKeys:    make(map[string]domain.APIKey),
 		agents:     make(map[string]domain.Agent),
 		executions: make(map[uuid.UUID]domain.Execution),
 		events:     make(map[uuid.UUID][]domain.Event),
@@ -23,6 +24,7 @@ func NewStore() *Store {
 
 type Store struct {
 	mu         sync.RWMutex
+	apiKeys    map[string]domain.APIKey
 	agents     map[string]domain.Agent
 	executions map[uuid.UUID]domain.Execution
 	events     map[uuid.UUID][]domain.Event
