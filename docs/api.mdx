@@ -141,7 +141,7 @@ running. Best-effort, never persisted, and separate from the event log. See
 `POST /v0/executions/{id}/cancel` · bearer → `204`
 
 Records `execution.cancelled`, moves the execution to a terminal state, and stops
-further dispatch.
+further dispatch. An execution that is already terminal returns `409 conflict`.
 
 ---
 

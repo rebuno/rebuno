@@ -3,6 +3,8 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -189,7 +191,11 @@ func (k *Kernel) ListExecutions(ctx context.Context, filter domain.ExecutionFilt
 }
 
 func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
-	return k.cancelExecution(ctx, id, domain.ReasonClientCancelled)
+	err := k.cancelExecution(ctx, id, domain.ReasonClientCancelled)
+	if errors.Is(err, domain.ErrExecutionTerminal) {
+		return fmt.Errorf("%w: execution is already terminal", domain.ErrConflict)
+	}
+	return err
 }
 
 func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason string) error {

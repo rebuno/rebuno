@@ -902,6 +902,19 @@ func TestCancelExecutionCancelsInFlightSteps(t *testing.T) {
 	assertSingleTerminalStepEvent(t, k, ctx, exec.ID, domain.EventStepCancelled)
 }
 
+func TestCancelExecutionOfTerminalExecutionIsAConflict(t *testing.T) {
+	k, ctx := setup(t)
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
+	if err := k.CancelExecution(ctx, exec.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	err := k.CancelExecution(ctx, exec.ID)
+	if !errors.Is(err, domain.ErrConflict) || errors.Is(err, domain.ErrExecutionTerminal) {
+		t.Fatalf("second cancel = %v, want a conflict without the agent-protocol terminal error", err)
+	}
+}
+
 func TestCancelExecutionCancelsPendingApprovals(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", DefaultApprovalTimeout: time.Hour}

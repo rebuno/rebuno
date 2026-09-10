@@ -44,6 +44,9 @@ kernel's error code) and `.status_code`. An unmapped code raises a plain
 
 `PolicyError` also carries `.rule_id`, naming the rule that denied the call.
 
+A `Client` call against an already-terminal execution, such as cancelling one
+that has finished, raises `ConflictError`.
+
 ### `ToolError`
 
 Raised when a tool's effect body throws, and when an `at_most_once` step comes
@@ -63,8 +66,7 @@ unwind a dispatch cleanly.
   code just submitted or an earlier one that already parked the execution. The
   kernel re-dispatches once the approval is resolved.
 - `Terminated` means the execution went terminal partway through the dispatch,
-  usually a cancel. `Client` calls against an already-terminal execution raise
-  it too.
+  usually a cancel.
 - `LeaseSuperseded` means a newer delivery attempt owns the dispatch. The kernel
   refuses every mutation from the attempt this handler was sent under, so it
   stops where it stands and leaves the execution to its replacement.
