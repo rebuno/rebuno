@@ -33,6 +33,7 @@ func TestAgentCannotAccessAnotherAgentsExecution(t *testing.T) {
 	base := "/v0/executions/" + exec.ID.String()
 	cases := []struct{ name, method, path, body string }{
 		{"input", "GET", base, ""},
+		{"events", "GET", base + "/events", ""},
 		{"steps", "GET", base + "/steps", ""},
 		{"step", "GET", base + "/steps/other-step", ""},
 		{"submit", "POST", base + "/steps", `{"kind":"tool_call","target":"read","args":{}}`},
@@ -79,6 +80,16 @@ func TestAgentCannotAccessAnotherAgentsExecution(t *testing.T) {
 	}
 	if got.Status != domain.StepExecuting {
 		t.Fatalf("step changed: %s", got.Status)
+	}
+}
+
+func TestEventsRequireExistingExecution(t *testing.T) {
+	mux, _, _ := setupRouter(t)
+	req := httptest.NewRequest("GET", "/v0/executions/00000000-0000-0000-0000-000000000001/events?limit=10", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -140,7 +151,6 @@ func TestAdministrativeRoutesRequireBearer(t *testing.T) {
 	for _, route := range []struct{ method, path string }{
 		{"POST", "/v0/executions"},
 		{"GET", "/v0/executions"},
-		{"GET", "/v0/executions/id/events"},
 		{"POST", "/v0/executions/id/cancel"},
 		{"POST", "/v0/agents"},
 		{"GET", "/v0/agents"},

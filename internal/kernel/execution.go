@@ -279,6 +279,9 @@ func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason strin
 }
 
 func (k *Kernel) GetEvents(ctx context.Context, id uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error) {
+	if _, err := authorizedExecution(ctx, k.d.Executions, id); err != nil {
+		return nil, err
+	}
 	return k.d.Events.GetEvents(ctx, id, afterSeq, limit)
 }
 
