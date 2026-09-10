@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/api"
 	"github.com/rebuno/rebuno/internal/auth"
-	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/identity"
 	"github.com/rebuno/rebuno/internal/kernel"
@@ -48,7 +47,8 @@ func setupRouter(t *testing.T) (http.Handler, *kernel.Kernel, context.Context) {
 
 func signAgentRequest(req *http.Request, body []byte) {
 	req.Header.Set("Rebuno-Agent-Id", testAgentID)
-	req.Header.Set("Rebuno-Signature", "sha256="+dispatcher.SignPayload(testAgentSecret, body))
+	req.Header.Set(auth.HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
+	req.Header.Set("Rebuno-Signature", auth.SignRequest(testAgentSecret, req, body))
 }
 
 func TestCreateExecutionViaHTTP(t *testing.T) {

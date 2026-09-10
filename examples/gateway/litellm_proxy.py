@@ -38,16 +38,29 @@ _http = httpx.AsyncClient(base_url=REBUNO_URL.rstrip("/"), timeout=30)
 async def _post(
     path: str, body: dict, agent_id: str, secret: str, extra: dict | None = None
 ) -> dict:
-    """POST a signed body to the kernel's agent API."""
+    """POST a signed request to the kernel's agent API."""
     raw = json.dumps(body).encode()
-    headers = {
-        "Content-Type": "application/json",
-        "Rebuno-Agent-Id": agent_id,
-        "Rebuno-Signature": "sha256="
-        + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest(),
-        **(extra or {}),
-    }
-    resp = await _http.post(path, content=raw, headers=headers)
+    request = _http.build_request(
+        "POST",
+        path,
+        content=raw,
+        headers={"Content-Type": "application/json", **(extra or {})},
+    )
+    request.headers["Rebuno-Agent-Id"] = agent_id
+    request.headers["Rebuno-Timestamp"] = str(int(time.time()))
+    fields = [
+        "rebuno-request-v1",
+        request.method,
+        request.url.raw_path.decode("ascii"),
+        request.headers["Rebuno-Timestamp"],
+        request.headers.get("Rebuno-Dispatch-Id", ""),
+        request.headers.get("Rebuno-Dispatch-Attempt", ""),
+    ]
+    message = ("\n".join(fields) + "\n").encode() + raw
+    request.headers["Rebuno-Signature"] = (
+        "v1=" + hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+    )
+    resp = await _http.send(request, follow_redirects=False)
     resp.raise_for_status()
     return resp.json() if resp.content else {}
 

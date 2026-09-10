@@ -103,9 +103,9 @@ agent secret.
 - Kernel to agent (the webhook): the kernel signs the body with HMAC-SHA256, and
   the agent verifies `Rebuno-Signature: sha256=...` with `hmac.compare_digest`
   before doing anything. A bad or missing signature gets a `401`.
-- Agent to kernel: `KernelClient` signs every request body the same way and
-  sends `Rebuno-Signature` plus `Rebuno-Agent-Id`. Step submissions also send
-  `Rebuno-Dispatch-Id`, which scopes the kernel's occurrence counter.
+- Agent to kernel: `KernelClient` signs the method, URL path and query, the
+  timestamp, dispatch lease, and body using the
+  [v1 request signature](/api#request-signatures).
 
 [`Client`](/sdk/python/client) uses Bearer auth (`REBUNO_API_KEY`) instead, since it is a
 client caller rather than the agent.

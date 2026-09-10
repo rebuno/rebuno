@@ -7,9 +7,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/rebuno/rebuno/internal/auth"
-	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
@@ -87,8 +87,7 @@ func hmacAuthMiddleware(lookup agentLookup) func(http.Handler) http.Handler {
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
-			wantSig := "sha256=" + dispatcher.SignPayload(agent.Secret, body)
-			if subtle.ConstantTimeCompare([]byte(wantSig), []byte(gotSig)) != 1 {
+			if !auth.VerifyRequest(agent.Secret, r, body, time.Now()) {
 				WriteError(w, domain.ErrUnauthorized)
 				return
 			}

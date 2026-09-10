@@ -12,10 +12,8 @@ details}` envelope.
   Scoped keys limit permissions; `--bearer-token` / `REBUNO_BEARER_TOKEN` sets
   the full-access bootstrap token required in server mode. Tokens are
   case-sensitive. Dev mode allows anonymous access but checks supplied tokens.
-- **Agent routes** use HMAC. The agent sends `Rebuno-Agent-Id` and
-  `Rebuno-Signature: sha256=<HMAC-SHA256(secret, body)>`, computed over the raw
-  request body with the agent's registered secret. Agents can access only their
-  assigned executions (`403 forbidden` otherwise).
+- **Agent routes** use the v1 HMAC signature described below. Agents can access
+  only their assigned executions (`403 forbidden` otherwise).
 - **Agent routes that change durable state** also send `Rebuno-Dispatch-Id` and
   `Rebuno-Dispatch-Attempt`, copied from the webhook that delivered the run. A
   call from an attempt the kernel has already re-delivered gets
@@ -25,6 +23,8 @@ details}` envelope.
 - Step routes require the step to belong to the execution in the URL. A
   mismatched execution and step returns `404 not_found`.
 - `/v0/health`, `/v0/ready`, and `/metrics` are unauthenticated.
+
+### Scopes
 
 Scopes apply deployment-wide; write does not include read. Insufficient scope
 returns `403 forbidden`; invalid or revoked keys return `401 unauthorized`.
@@ -39,6 +39,50 @@ returns `403 forbidden`; invalid or revoked keys return `401 unauthorized`.
 | `agents:write` | Register, update, or delete agents. |
 | `policies:write` | Set policies; testing also requires `executions:read`. |
 | `api_keys:manage` | Manage keys with any scopes. |
+
+### Request signatures
+
+Agent requests send `Rebuno-Agent-Id`, `Rebuno-Timestamp`, and
+`Rebuno-Signature: v1=<lowercase hex HMAC-SHA256(secret, message)>`, using the
+agent's registered secret. Build `message` from these UTF-8 fields, separated by
+LF with a trailing LF, then append the exact raw request body:
+
+```text
+rebuno-request-v1
+HTTP method
+escaped path and raw query (including ? when present)
+Rebuno-Timestamp
+Rebuno-Dispatch-Id (empty if absent)
+Rebuno-Dispatch-Attempt (empty if absent)
+```
+
+`Rebuno-Timestamp` is decimal Unix seconds, within 300 seconds of the kernel's
+clock. The secret binds the request to the agent named in `Rebuno-Agent-Id`.
+Invalid signatures or timestamps return `401 unauthorized`. Sign the final URL on
+each request; proxies must preserve its path and query. Requests can still be
+repeated within the time window. Webhook signatures use `sha256=...`.
+
+A step submission signed with the secret `test-secret`:
+
+```http
+POST /v0/executions/018f3a2b-4c5d-7e6f-8a9b-0c1d2e3f4a5b/steps
+Rebuno-Agent-Id: test-agent
+Rebuno-Timestamp: 1700000000
+Rebuno-Dispatch-Id: 01920000-0000-7000-8000-000000000001
+Rebuno-Dispatch-Attempt: 3
+Content-Type: application/json
+
+{"kind":"tool_call","target":"send_email","args":{"to":"ops@example.com"},"idempotency":"safe_to_retry"}
+```
+
+The message, with the line feeds escaped for print and the body following the
+final one directly:
+
+```text
+rebuno-request-v1\nPOST\n/v0/executions/018f3a2b-4c5d-7e6f-8a9b-0c1d2e3f4a5b/steps\n1700000000\n01920000-0000-7000-8000-000000000001\n3\n{"kind":"tool_call","target":"send_email","args":{"to":"ops@example.com"},"idempotency":"safe_to_retry"}
+```
+
+That gives `Rebuno-Signature: v1=017dff4039ba40e90d3d8d566fdf51db427672f92d45ef41b738672238ea0058`.
 
 ---
 
