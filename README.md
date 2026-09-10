@@ -51,23 +51,23 @@ rebuno exec watch <id>
 
 Start here:
 
-- [Quickstart](docs/getting-started.mdx): run the kernel and your first agent.
-- [Architecture](docs/architecture.mdx): the domain model, state machines, and how durability works.
+- [Quickstart](https://docs.rebuno.io/getting-started): run the kernel and your first agent.
+- [Architecture](https://docs.rebuno.io/architecture): the domain model, state machines, and how durability works.
 
 Reference:
 
-- [Agents](docs/agents.mdx): how an agent process receives work and drives its effects.
-- [Tools](docs/tools.mdx): effects, step identity, and idempotency.
-- [LLM calls](docs/llm-calls.mdx): intercepting LLM requests so they replay durably.
-- [Streaming](docs/streaming.mdx): live token deltas while a step is running.
-- [Policy](docs/policy.mdx): the YAML rule language for allow / deny / require-approval.
-- [Events](docs/events.mdx): the event types and their payloads.
-- [HTTP API](docs/api.mdx): the kernel's HTTP endpoints under `/v0`.
-- [CLI](docs/cli.mdx): the `rebuno` binary and its commands.
-- [Deployment](docs/deployment.mdx): running the production kernel, config, and Docker.
-- [Python SDK](docs/sdk/python/overview.mdx): building with Python
-- [TypeScript SDK](docs/sdk/typescript/overview.mdx): building with TypeScript
-- [Dashboard](docs/dashboard.mdx): web UI to view executions, steps, events, and agent activity.
+- [Agents](https://docs.rebuno.io/agents): how an agent process receives work and drives its effects.
+- [Tools](https://docs.rebuno.io/tools): effects, step identity, and idempotency.
+- [LLM calls](https://docs.rebuno.io/llm-calls): intercepting LLM requests so they replay durably.
+- [Streaming](https://docs.rebuno.io/streaming): live token deltas while a step is running.
+- [Policy](https://docs.rebuno.io/policy): the YAML rule language for allow / deny / require-approval.
+- [Events](https://docs.rebuno.io/events): the event types and their payloads.
+- [HTTP API](https://docs.rebuno.io/api): the kernel's HTTP endpoints under `/v0`.
+- [CLI](https://docs.rebuno.io/cli): the `rebuno` binary and its commands.
+- [Deployment](https://docs.rebuno.io/deployment): running the production kernel, config, and Docker.
+- [Python SDK](https://docs.rebuno.io/sdk/python/overview): building with Python
+- [TypeScript SDK](https://docs.rebuno.io/sdk/typescript/overview): building with TypeScript
+- [Dashboard](https://docs.rebuno.io/dashboard): web UI to view executions, steps, events, and agent activity.
 
 ## License
 
