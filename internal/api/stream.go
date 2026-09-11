@@ -69,6 +69,9 @@ func (rt *Router) streamExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ch, cancel := rt.stream.Subscribe(id)
+	defer cancel()
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -78,9 +81,6 @@ func (rt *Router) streamExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	flusher.Flush()
-
-	ch, cancel := rt.stream.Subscribe(id)
-	defer cancel()
 
 	ka := time.NewTicker(streamKeepAlive)
 	defer ka.Stop()
