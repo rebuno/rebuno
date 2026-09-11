@@ -82,6 +82,16 @@ func TestAgentCannotAccessAnotherAgentsExecution(t *testing.T) {
 	}
 }
 
+func TestEventsRequireExistingExecution(t *testing.T) {
+	mux, _, _ := setupRouter(t)
+	req := httptest.NewRequest("GET", "/v0/executions/00000000-0000-0000-0000-000000000001/events?limit=10", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestStepRoutesRequireMatchingExecution(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
 	first, err := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))

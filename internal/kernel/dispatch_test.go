@@ -1192,7 +1192,7 @@ func TestReclaimedDispatchReplaysFromZero(t *testing.T) {
 // dispatchEvents returns the events of the given type, oldest first.
 func dispatchEvents(t *testing.T, k *kernel.Kernel, execID uuid.UUID, typ string) []map[string]any {
 	t.Helper()
-	events, err := k.GetEvents(context.Background(), execID, 0, 500)
+	events, err := k.GetEvents(auth.WithAdmin(context.Background()), execID, 0, 500)
 	if err != nil {
 		t.Fatal(err)
 	}
