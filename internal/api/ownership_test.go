@@ -33,7 +33,6 @@ func TestAgentCannotAccessAnotherAgentsExecution(t *testing.T) {
 	base := "/v0/executions/" + exec.ID.String()
 	cases := []struct{ name, method, path, body string }{
 		{"input", "GET", base, ""},
-		{"events", "GET", base + "/events", ""},
 		{"steps", "GET", base + "/steps", ""},
 		{"step", "GET", base + "/steps/other-step", ""},
 		{"submit", "POST", base + "/steps", `{"kind":"tool_call","target":"read","args":{}}`},
@@ -151,6 +150,7 @@ func TestAdministrativeRoutesRequireBearer(t *testing.T) {
 	for _, route := range []struct{ method, path string }{
 		{"POST", "/v0/executions"},
 		{"GET", "/v0/executions"},
+		{"GET", "/v0/executions/id/events"},
 		{"POST", "/v0/executions/id/cancel"},
 		{"POST", "/v0/agents"},
 		{"GET", "/v0/agents"},
