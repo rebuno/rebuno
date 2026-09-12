@@ -46,4 +46,5 @@ type StepDecision struct {
 	Error      json.RawMessage `json:"error,omitempty"`
 	ApprovalID *uuid.UUID      `json:"approval_id,omitempty"`
 	Reason     string          `json:"reason,omitempty"`
+	RuleID     string          `json:"rule_id,omitempty"`
 }

@@ -1185,6 +1185,9 @@ func TestIndeterminateRetryIsDenied(t *testing.T) {
 	if refusal == "" {
 		t.Fatal("denial must carry a reason")
 	}
+	if dec.RuleID != domain.RuleIndeterminateRetry {
+		t.Fatalf("denial must name the rule that refused it, got %q", dec.RuleID)
+	}
 
 	if dec := submit(did, `{"to":"b@example.com"}`); dec.Decision != "proceed" {
 		t.Fatalf("a different effect on the same target must proceed, got %s", dec.Decision)

@@ -149,22 +149,26 @@ func (k *Kernel) indeterminateRetry(ctx context.Context, execID uuid.UUID, req S
 		return false, err
 	}
 	for _, s := range steps {
-		if s.Status == domain.StepFailed && s.Kind == req.Kind && s.Target == req.Target &&
-			s.ArgsHash == argsHash && stepErrorReason(s.Error) == domain.ReasonIndeterminate {
+		if s.Status != domain.StepFailed || s.Kind != req.Kind ||
+			s.Target != req.Target || s.ArgsHash != argsHash {
+			continue
+		}
+		if reason, _ := stepError(s.Error); reason == domain.ReasonIndeterminate {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func stepErrorReason(errPayload json.RawMessage) string {
+func stepError(errPayload json.RawMessage) (reason, ruleID string) {
 	var recorded struct {
 		Reason string `json:"reason"`
+		RuleID string `json:"rule_id"`
 	}
 	if err := json.Unmarshal(errPayload, &recorded); err != nil {
-		return ""
+		return "", ""
 	}
-	return recorded.Reason
+	return recorded.Reason, recorded.RuleID
 }
 
 func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, lease domain.Lease, idempotency string) (domain.StepDecision, error) {
@@ -213,11 +217,11 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, lease
 	case domain.StepDenied:
 		// A resumed handler re-proposing a refused effect is told why it was
 		// refused, so it can distinguish a policy rule from a human decision.
-		reason := stepErrorReason(step.Error)
+		reason, ruleID := stepError(step.Error)
 		if reason == "" {
 			reason = domain.ReasonPolicyDenied
 		}
-		return domain.StepDecision{Decision: "denied", Reason: reason}, nil
+		return domain.StepDecision{Decision: "denied", Reason: reason, RuleID: ruleID}, nil
 	default:
 		return k.proceedUnderLiveLease(ctx, step.ExecutionID, lease)
 	}
@@ -389,7 +393,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
 			return domain.StepDecision{}, false, err
 		}
-		return domain.StepDecision{Decision: "denied", Reason: reason}, true, nil
+		return domain.StepDecision{Decision: "denied", Reason: reason, RuleID: pol.RuleID}, true, nil
 
 	case domain.DecisionRequireApproval:
 		approvalID := uuid.Must(uuid.NewV7())
