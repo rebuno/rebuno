@@ -176,6 +176,12 @@ execution, with no connection registry or sticky routing. Two replicas can
 therefore touch one execution at once. Every path that mutates an execution takes
 a Postgres advisory lock on its id first, so those writes serialize.
 
+Each replica queues requests for the same execution in memory before acquiring a
+database connection and the advisory lock. Only one request per execution per
+replica holds a lock connection; local waiters hold none and leave the queue when
+their contexts are cancelled. The advisory lock coordinates writes across
+replicas. The waiting queue is transient; execution state remains in Postgres.
+
 An SSE subscriber stays on the replica that accepted it. Deltas are broadcast to
 every replica, so nothing needs routing. See [Live streaming](/streaming).
 

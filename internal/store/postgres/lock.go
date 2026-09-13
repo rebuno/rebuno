@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,6 +13,24 @@ import (
 var _ store.Locker = (*Store)(nil)
 
 func (s *Store) Acquire(ctx context.Context, key string) (func(), error) {
+	releaseLocal, err := s.locks.acquire(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	releasePG, err := s.acquireAdvisory(ctx, key)
+	if err != nil {
+		releaseLocal()
+		return nil, err
+	}
+
+	return sync.OnceFunc(func() {
+		defer releaseLocal()
+		releasePG()
+	}), nil
+}
+
+func (s *Store) acquireAdvisory(ctx context.Context, key string) (func(), error) {
 	keyInt := hashKey(key)
 
 	conn, err := s.pool.Acquire(ctx)
@@ -24,12 +43,7 @@ func (s *Store) Acquire(ctx context.Context, key string) (func(), error) {
 		return nil, fmt.Errorf("acquire advisory lock: %w", err)
 	}
 
-	released := false
 	return func() {
-		if released {
-			return
-		}
-		released = true
 		releaseAdvisoryLock(conn, keyInt)
 	}, nil
 }

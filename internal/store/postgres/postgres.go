@@ -23,7 +23,8 @@ type Querier interface {
 }
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	locks keyedGate
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
