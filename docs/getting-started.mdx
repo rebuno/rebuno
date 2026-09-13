@@ -9,12 +9,23 @@ Install Go 1.26+, plus Python 3.11+ or Node 22+ to run the agent.
 
 <Steps>
 
+<Step title="Install the CLI">
+
+Install the CLI and clone the repo for the examples:
+
+```bash
+go install github.com/rebuno/rebuno/cmd/rebuno@latest
+git clone https://github.com/rebuno/rebuno && cd rebuno
+```
+
+</Step>
+
 <Step title="Start the dev kernel">
 
 Point the dev kernel at a config to register agents on boot:
 
 ```bash
-go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
+rebuno dev --config examples/rebuno.dev.yaml
 ```
 
 Each entry gives an agent's `webhook_url`, its HMAC `secret`, and optionally a

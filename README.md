@@ -20,10 +20,17 @@ It records every tool call and LLM call as a durable step. Interrupted runs resu
 
 **Prerequisites:** Go 1.26+, Python 3.11+ / Node 22+
 
+Install the CLI and clone the repo for the examples:
+
+```bash
+go install github.com/rebuno/rebuno/cmd/rebuno@latest
+git clone https://github.com/rebuno/rebuno && cd rebuno
+```
+
 Start the dev kernel:
 
 ```bash
-go run ./cmd/rebuno dev --config examples/rebuno.dev.yaml
+rebuno dev --config examples/rebuno.dev.yaml
 ```
 
 Start an agent in another terminal:
