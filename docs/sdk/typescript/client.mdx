@@ -26,6 +26,7 @@ sent as `Authorization: Bearer ...` when present.
 const execution = await client.create(
   "dev-agent",
   { prompt: "hello" },         // optional; the object your handler receives
+  { concurrencyKey: "tenant:acme" },   // optional
 );
 
 await client.get(execution.id);      // current state
@@ -79,7 +80,7 @@ all subclasses of `RebunoError`. See [Errors](/sdk/typescript/errors).
 `Client` returns plain objects with camelCase fields.
 
 - `Execution`: `id`, `agentId`, `input`, `status`, `output`,
-  `failureReason`. `status` is an `ExecutionStatus`, one of `pending`,
+  `failureReason`, `concurrencyKey`. `status` is an `ExecutionStatus`, one of `pending`,
   `running`, `blocked`, `completed`, `failed`, `cancelled`.
 - `Step`: `stepId`, `executionId`, `kind`, `target`, `argsHash`, `occurrence`,
   `status`, `idempotency`, `args`, `result`, `error`.
