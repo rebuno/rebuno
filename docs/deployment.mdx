@@ -89,7 +89,7 @@ Additional environment-only settings:
 | `REBUNO_DEADLINE_CHECK_INTERVAL` | `30s` | How often expired executions are cancelled. Set to `0` to fold this into the `REBUNO_CLEANUP_INTERVAL` sweep. |
 | `REBUNO_APPROVAL_TIMEOUT` | `15m` | Default time an approval can stay pending. On expiry the gated step is denied with `approval_timeout` and the execution resumes. |
 | `REBUNO_CLEANUP_INTERVAL` | `10m` | How often the singleton worker runs approval expiry, deadline cancellation, and the retention sweep. |
-| `REBUNO_RETENTION` | `24h` | How long terminal executions are kept. |
+| `REBUNO_RETENTION` | `24h` | Creation-age cutoff for deleting terminal executions. Pending, running, and blocked executions are retained. |
 | `REBUNO_LEADER_LOCK_KEY` | `rebuno_scheduler_leader` | Advisory-lock key for leader election. |
 
 ## Load balancer

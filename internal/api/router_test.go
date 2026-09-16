@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -425,5 +426,52 @@ func TestRegisterAgentReturnsStoredAgent(t *testing.T) {
 	}
 	if agent.RegisteredAt.IsZero() {
 		t.Error("registered_at is zero")
+	}
+}
+
+func TestConcurrencyKeyViaHTTP(t *testing.T) {
+	mux, k, ctx := setupRouter(t)
+	body := `{"agent_id":"agent-1","input":{},"concurrency_key":"tenant:a/session:1"}`
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v0/executions", strings.NewReader(body)))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
+	}
+	var exec domain.Execution
+	if err := json.Unmarshal(rr.Body.Bytes(), &exec); err != nil {
+		t.Fatal(err)
+	}
+	if exec.Status != domain.ExecutionRunning || exec.ConcurrencyKey != "tenant:a/session:1" {
+		t.Fatalf("execution: %+v", exec)
+	}
+	ds, err := k.Deps().Queue.ListDispatchesByExecution(ctx, exec.ID)
+	if err != nil || len(ds) != 1 {
+		t.Fatalf("dispatches: %+v, %v", ds, err)
+	}
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v0/executions", strings.NewReader(body)))
+	if err := json.Unmarshal(rr.Body.Bytes(), &exec); err != nil {
+		t.Fatal(err)
+	}
+	if exec.Status != domain.ExecutionPending {
+		t.Fatalf("second execution on the key: %+v", exec)
+	}
+	for _, path := range []string{"/v0/executions/" + exec.ID.String(), "/v0/executions?concurrency_key=" + url.QueryEscape(exec.ConcurrencyKey)} {
+		rr = httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"concurrency_key":"tenant:a/session:1"`) {
+			t.Fatalf("get: %d %s", rr.Code, rr.Body.String())
+		}
+	}
+	for _, key := range []string{"   ", strings.Repeat("a", 257), "session\x00invalid"} {
+		body, err := json.Marshal(api.CreateExecutionRequest{AgentID: "agent-1", Input: json.RawMessage(`{}`), ConcurrencyKey: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr = httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v0/executions", bytes.NewReader(body)))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("invalid key: %d %s", rr.Code, rr.Body.String())
+		}
 	}
 }

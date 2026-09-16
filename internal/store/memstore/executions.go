@@ -29,6 +29,9 @@ func (s *Store) listExecutionsLocked(filter domain.ExecutionFilter) domain.Execu
 		if filter.AgentID != "" && e.AgentID != filter.AgentID {
 			continue
 		}
+		if filter.ConcurrencyKey != "" && e.ConcurrencyKey != filter.ConcurrencyKey {
+			continue
+		}
 		if filter.Status != "" && e.Status != filter.Status {
 			continue
 		}
@@ -95,6 +98,14 @@ func (s *Store) updateExecutionStatusLocked(ctx context.Context, id uuid.UUID, s
 	if exec.Status.IsTerminal() {
 		return domain.ErrExecutionTerminal
 	}
+	if exec.ConcurrencyKey != "" && (status == domain.ExecutionRunning || status == domain.ExecutionBlocked) {
+		for _, other := range s.executions {
+			if other.ID != id && other.ConcurrencyKey == exec.ConcurrencyKey &&
+				(other.Status == domain.ExecutionRunning || other.Status == domain.ExecutionBlocked) {
+				return domain.ErrConflict
+			}
+		}
+	}
 	exec.Status = status
 	if len(output) > 0 {
 		exec.Output = output
@@ -138,7 +149,7 @@ func (s *Store) DeleteExecutionsCreatedBefore(ctx context.Context, before time.T
 
 func (s *Store) deleteExecutionsCreatedBeforeLocked(ctx context.Context, before time.Time) {
 	for id, exec := range s.executions {
-		if !exec.CreatedAt.Before(before) {
+		if !exec.Status.IsTerminal() || !exec.CreatedAt.Before(before) {
 			continue
 		}
 		for stepID, step := range s.steps {
@@ -181,4 +192,69 @@ func (tx *txStore) ListExpiredExecutions(ctx context.Context, now time.Time) ([]
 func (tx *txStore) DeleteExecutionsCreatedBefore(ctx context.Context, before time.Time) error {
 	tx.deleteExecutionsCreatedBeforeLocked(ctx, before)
 	return nil
+}
+
+func (s *Store) ListIdleConcurrencyKeys(_ context.Context, now time.Time) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.listIdleConcurrencyKeysLocked(now), nil
+}
+
+func (tx *txStore) ListIdleConcurrencyKeys(_ context.Context, now time.Time) ([]string, error) {
+	return tx.listIdleConcurrencyKeysLocked(now), nil
+}
+
+func (s *Store) listIdleConcurrencyKeysLocked(now time.Time) []string {
+	queued := make(map[string]bool)
+	active := make(map[string]bool)
+	for _, exec := range s.executions {
+		if exec.ConcurrencyKey == "" {
+			continue
+		}
+		switch exec.Status {
+		case domain.ExecutionRunning, domain.ExecutionBlocked:
+			active[exec.ConcurrencyKey] = true
+		case domain.ExecutionPending:
+			if exec.DeadlineAt == nil || exec.DeadlineAt.After(now) {
+				queued[exec.ConcurrencyKey] = true
+			}
+		}
+	}
+	var keys []string
+	for key := range queued {
+		if !active[key] {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (s *Store) NextPendingByKey(_ context.Context, key string, now time.Time) (domain.Execution, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.nextPendingByKeyLocked(key, now)
+}
+
+func (tx *txStore) NextPendingByKey(_ context.Context, key string, now time.Time) (domain.Execution, error) {
+	return tx.nextPendingByKeyLocked(key, now)
+}
+
+func (s *Store) nextPendingByKeyLocked(key string, now time.Time) (domain.Execution, error) {
+	var next domain.Execution
+	for _, exec := range s.executions {
+		if exec.ConcurrencyKey != key || exec.Status != domain.ExecutionPending {
+			continue
+		}
+		if exec.DeadlineAt != nil && !exec.DeadlineAt.After(now) {
+			continue
+		}
+		if next.ID == uuid.Nil || exec.ID.String() < next.ID.String() {
+			next = exec
+		}
+	}
+	if next.ID == uuid.Nil {
+		return domain.Execution{}, domain.ErrNotFound
+	}
+	return next, nil
 }

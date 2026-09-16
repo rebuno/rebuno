@@ -50,6 +50,7 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease 
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionCompleted))
+	k.releaseConcurrencyKey(ctx, exec.ConcurrencyKey)
 	return nil
 }
 
@@ -89,6 +90,7 @@ func (k *Kernel) failExecution(ctx context.Context, execID uuid.UUID, lease doma
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionFailed))
+	k.releaseConcurrencyKey(ctx, exec.ConcurrencyKey)
 	return nil
 }
 

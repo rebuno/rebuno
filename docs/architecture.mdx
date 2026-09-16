@@ -39,16 +39,18 @@ stateDiagram-v2
     direction LR
     [*] --> pending
     pending --> running
+    pending --> cancelled
     running --> blocked
     blocked --> running
     running --> completed
     running --> failed
     running --> cancelled
+    blocked --> cancelled
 ```
 
 `blocked` means the execution is paused waiting on a human approval. It re-enters
 `running` when the approval resolves. A step parked by a rate limit leaves the
-execution `running`.
+execution `running`. `pending` means the execution has not started.
 
 A step moves through these states:
 
@@ -117,6 +119,17 @@ On re-dispatch the kernel finds each step in one of three states:
 The kernel also guarantees a terminal event is never overridden, and that every
 state transition is atomic with the event that caused it. It does not guarantee
 exactly-once side effects.
+
+## Execution concurrency
+
+An execution can carry an immutable `concurrency_key`. Executions sharing a key
+run one at a time; the rest wait in `pending`, with no dispatch or delivery
+attempts. Different keys run concurrently.
+
+An execution holds its key while `running` or `blocked`, so approval waits,
+retry backoff, and rate-limit pauses all keep it, and deadlines include the time
+spent waiting. Reaching a terminal state releases the key and starts the oldest
+execution waiting on it.
 
 ## Dispatch and delivery
 

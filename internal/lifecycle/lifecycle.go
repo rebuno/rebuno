@@ -15,6 +15,7 @@ type Kernel interface {
 	RunDispatcher(ctx context.Context) error
 	ExpireApprovals(ctx context.Context, now time.Time) error
 	CancelExpiredExecutions(ctx context.Context, now time.Time) error
+	AdmitQueued(ctx context.Context) error
 	Cleanup(ctx context.Context, retain time.Duration, now time.Time) error
 }
 
@@ -110,7 +111,10 @@ func (m *Manager) runDispatch(ctx context.Context) {
 // singleton interval.
 func (m *Manager) deadlineTick(ctx context.Context) error {
 	return m.withLeaderLock(ctx, func(ctx context.Context) error {
-		return m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC())
+		if err := m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC()); err != nil {
+			return err
+		}
+		return m.kernel.AdmitQueued(ctx)
 	})
 }
 

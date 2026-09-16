@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/dispatcher"
@@ -125,49 +127,132 @@ func New(cfg Config, d Deps) *Kernel {
 	return &Kernel{cfg: cfg, d: d, log: log}
 }
 
-func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json.RawMessage) (domain.Execution, error) {
+type CreateExecutionOptions struct {
+	ConcurrencyKey string
+}
+
+func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json.RawMessage, options ...CreateExecutionOptions) (domain.Execution, error) {
+	var key string
+	if len(options) > 0 {
+		key = options[0].ConcurrencyKey
+	}
+	if len(key) > 256 || !utf8.ValidString(key) || strings.ContainsRune(key, 0) || (key != "" && strings.TrimSpace(key) == "") {
+		return domain.Execution{}, fmt.Errorf("%w: concurrency_key must be a nonblank UTF-8 string of at most 256 bytes without NUL", domain.ErrValidation)
+	}
 	if _, err := k.d.Agents.GetAgent(ctx, agentID); err != nil {
 		return domain.Execution{}, err
 	}
 	now := time.Now().UTC()
 	exec := domain.Execution{
-		ID:        uuid.Must(uuid.NewV7()),
-		AgentID:   agentID,
-		Input:     input,
-		Status:    domain.ExecutionPending,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:             uuid.Must(uuid.NewV7()),
+		AgentID:        agentID,
+		ConcurrencyKey: key,
+		Input:          input,
+		Status:         domain.ExecutionPending,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	if k.cfg.ExecutionDeadlineTimeout > 0 {
 		deadline := now.Add(k.cfg.ExecutionDeadlineTimeout)
 		exec.DeadlineAt = &deadline
 	}
 	createdPayload := payload.Execution(exec.ID, exec.Status, nil, "")
-	startedPayload := payload.Execution(exec.ID, domain.ExecutionRunning, nil, "")
+	if key != "" {
+		createdPayload["concurrency_key"] = key
+	}
 	if exec.DeadlineAt != nil {
 		createdPayload["deadline_at"] = *exec.DeadlineAt
-		startedPayload["deadline_at"] = *exec.DeadlineAt
 	}
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 		if err := tx.CreateExecution(ctx, exec); err != nil {
 			return err
 		}
-		if _, err := tx.AppendBatch(ctx, exec.ID, []store.EventRecord{
-			{Type: domain.EventExecutionCreated, Payload: createdPayload},
-			{Type: domain.EventExecutionStarted, Payload: startedPayload},
-		}); err != nil {
+		if _, err := tx.Append(ctx, exec.ID, domain.EventExecutionCreated, createdPayload); err != nil {
 			return err
 		}
-		if err := tx.UpdateExecutionStatus(ctx, exec.ID, domain.ExecutionRunning, nil, ""); err != nil {
-			return err
+		if key != "" {
+			return nil
 		}
-		return k.enqueueDispatchTx(ctx, tx, exec.ID, time.Now().UTC())
+		return k.startExecutionTx(ctx, tx, exec)
 	}); err != nil {
 		return domain.Execution{}, err
 	}
 	k.d.Observer.RecordExecutionCreated()
-	exec.Status = domain.ExecutionRunning
+	if key == "" {
+		exec.Status = domain.ExecutionRunning
+		return exec, nil
+	}
+	started, err := k.admitNext(ctx, key)
+	if err != nil {
+		k.log.Warn("admit execution failed", "error", err) // the deadline sweep retries
+	}
+	if started.ID == exec.ID {
+		exec.Status = domain.ExecutionRunning
+	}
 	return exec, nil
+}
+
+func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec domain.Execution) error {
+	started := payload.Execution(exec.ID, domain.ExecutionRunning, nil, "")
+	if exec.DeadlineAt != nil {
+		started["deadline_at"] = *exec.DeadlineAt
+	}
+	if exec.ConcurrencyKey != "" {
+		started["concurrency_key"] = exec.ConcurrencyKey
+	}
+	if err := tx.UpdateExecutionStatus(ctx, exec.ID, domain.ExecutionRunning, nil, ""); err != nil {
+		return err
+	}
+	if _, err := tx.Append(ctx, exec.ID, domain.EventExecutionStarted, started); err != nil {
+		return err
+	}
+	return k.enqueueDispatchTx(ctx, tx, exec.ID, time.Now().UTC())
+}
+
+// admitNext starts the oldest execution queued on key.
+func (k *Kernel) admitNext(ctx context.Context, key string) (domain.Execution, error) {
+	var started domain.Execution
+	err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		exec, err := tx.NextPendingByKey(ctx, key, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if err := k.startExecutionTx(ctx, tx, exec); err != nil {
+			return err
+		}
+		exec.Status = domain.ExecutionRunning
+		started = exec
+		return nil
+	})
+	switch {
+	case errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrExecutionTerminal):
+		return domain.Execution{}, nil
+	case err != nil:
+		return domain.Execution{}, err
+	}
+	return started, nil
+}
+
+func (k *Kernel) releaseConcurrencyKey(ctx context.Context, key string) {
+	if key == "" {
+		return
+	}
+	if _, err := k.admitNext(ctx, key); err != nil {
+		k.log.Warn("admit next execution failed", "error", err) // the deadline sweep retries
+	}
+}
+
+func (k *Kernel) AdmitQueued(ctx context.Context) error {
+	keys, err := k.d.Executions.ListIdleConcurrencyKeys(ctx, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if _, err := k.admitNext(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (k *Kernel) Deps() Deps {
@@ -275,6 +360,7 @@ func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason strin
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionCancelled))
+	k.releaseConcurrencyKey(ctx, exec.ConcurrencyKey)
 	return nil
 }
 

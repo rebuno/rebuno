@@ -99,6 +99,22 @@ That gives `Rebuno-Signature: v1=017dff4039ba40e90d3d8d566fdf51db427672f92d45ef4
 Returns `201` with the created execution. The kernel records `execution.created`
 and enqueues a dispatch.
 
+Add an optional `concurrency_key` to keep executions that share it from running
+at the same time:
+
+```json
+{
+  "agent_id": "researcher",
+  "concurrency_key": "tenant:acme:report:42",
+  "input": { "query": "hello" }
+}
+```
+
+The execution returns `running` when the key is free and `pending` when another
+execution holds it. Keys are global to the kernel, so executions for two
+different agents that share a key also run one at a time. See
+[Execution concurrency](/architecture#execution-concurrency).
+
 ### Get an execution
 
 `GET /v0/executions/{id}` · bearer or HMAC
@@ -113,9 +129,10 @@ and enqueues a dispatch.
 
 ### List executions
 
-`GET /v0/executions?agent_id=&status=&cursor=&limit=` · bearer
+`GET /v0/executions?agent_id=&concurrency_key=&status=&cursor=&limit=` · bearer
 
 Newest first. Keyset paging: pass the returned `next_cursor` back as `cursor`.
+`concurrency_key` filters by exact key.
 
 ```json
 { "executions": [ ... ], "next_cursor": "0192..." }

@@ -32,12 +32,13 @@ the system of record. Executions, steps, and approvals are projections of it.
 ## Execution events
 
 The `execution.*` types cover the lifecycle of the run itself. Payloads carry
-`execution_id` and `status`.
+`execution_id` and `status`, plus `concurrency_key` and `deadline_at` when the
+execution has them.
 
 | Type | When |
 |------|------|
 | `execution.created` | Client created the execution. |
-| `execution.started` | First dispatch acked; the agent is making progress. |
+| `execution.started` | The execution began running and its first dispatch is queued. |
 | `execution.blocked` | Paused on a human approval. |
 | `execution.resumed` | An approval was granted, denied, or expired, and work continues. |
 | `execution.completed` | Terminal, success. Payload carries the `output`. |

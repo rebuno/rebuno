@@ -9,12 +9,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/kernel"
 )
 
 const maxEventsPageLimit = 1000
 
 type ClientKernel interface {
-	CreateExecution(ctx context.Context, agentID string, input json.RawMessage) (domain.Execution, error)
+	CreateExecution(ctx context.Context, agentID string, input json.RawMessage, options ...kernel.CreateExecutionOptions) (domain.Execution, error)
 	GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error)
 	ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error)
 	GetEvents(ctx context.Context, id uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error)
@@ -22,8 +23,9 @@ type ClientKernel interface {
 }
 
 type CreateExecutionRequest struct {
-	AgentID string          `json:"agent_id"`
-	Input   json.RawMessage `json:"input"`
+	AgentID        string          `json:"agent_id"`
+	Input          json.RawMessage `json:"input"`
+	ConcurrencyKey string          `json:"concurrency_key,omitempty"`
 }
 
 func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +34,7 @@ func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input)
+	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{ConcurrencyKey: req.ConcurrencyKey})
 	if err != nil {
 		WriteError(w, err)
 		return
@@ -43,9 +45,10 @@ func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
 func (rt *Router) listExecutions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := domain.ExecutionFilter{
-		AgentID: q.Get("agent_id"),
-		Status:  domain.ExecutionStatus(q.Get("status")),
-		Cursor:  q.Get("cursor"),
+		AgentID:        q.Get("agent_id"),
+		ConcurrencyKey: q.Get("concurrency_key"),
+		Status:         domain.ExecutionStatus(q.Get("status")),
+		Cursor:         q.Get("cursor"),
 	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
