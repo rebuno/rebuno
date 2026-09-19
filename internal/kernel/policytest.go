@@ -45,6 +45,7 @@ func (k *Kernel) TestPolicy(ctx context.Context, agentID string, req PolicyTestR
 	if err := policy.NormalizeCases(cases, agentID); err != nil {
 		return policy.Report{}, fmt.Errorf("%w: %v", domain.ErrValidation, err)
 	}
+	engine.Judge = k.d.Judge
 	return policy.Run(ctx, engine, cases)
 }
 

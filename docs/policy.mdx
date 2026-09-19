@@ -96,11 +96,12 @@ A rule's `then` block carries the decision and its options:
 
 | Field | Meaning |
 |-------|---------|
-| `decision` | `allow`, `deny`, or `require_approval`. Required. |
+| `decision` | `allow`, `deny`, `require_approval`, or `judge`. Required. |
 | `reason` | Human-readable explanation. Recorded in the decision event and returned on deny. |
 | `approval_config` | Who approves, and for how long. Only meaningful with `require_approval`. See [Approvals](#approvals). |
 | `rate_limit` | Caps how often the rule may fire. See [Rate limits](#rate-limits). |
 | `budget` | Caps the LLM tokens the execution may spend. See [Token budgets](#token-budgets). |
+| `judge` | How a model decides the call. Only valid with `judge`. See [Judge](#judge). |
 
 Every policy decision event (`step.allowed`, `step.denied`,
 `step.awaiting_approval`) carries the matched `rule_id` in its payload, which is
@@ -195,6 +196,46 @@ response with no parseable usage never advances the meter, most often an
 OpenAI-style stream requested without `stream_options.include_usage`, and
 `rebuno_llm_usage_missing_total` counts those. If the kernel cannot read the
 execution's usage at all, it lets the step through.
+
+### Judge
+
+A rule that decides `judge` hands the call to TypeSafe's jev model, which picks
+`allow`, `deny`, or `require_approval`. It suits tools whose calls are too varied
+to list as predicates, such as a shell. Text in the arguments can steer the
+model, so put `deny` rules for commands known to be dangerous above it.
+
+```yaml
+  - id: deny-rm-root
+    when:
+      target: bash
+      arguments:
+        command:
+          regex: 'rm\s+-rf\s+/(\s|$)'
+    then:
+      decision: deny
+
+  - id: judge-bash
+    when:
+      target: bash
+    then:
+      decision: judge
+      judge:
+        instructions: commands run in a disposable build container
+        threshold: 0.6              # default 0.6
+        fallback: require_approval  # allow | deny | require_approval (default)
+      approval_config:
+        approvers: ["ops"]
+```
+
+| Field | Meaning |
+|-------|---------|
+| `instructions` | Context about where the call runs, passed to the model with it. Optional. |
+| `threshold` | The probability, from 0 to 1, the model's top choice needs to stand. Default `0.6`. |
+| `fallback` | The decision when no choice reaches `threshold`, or when the model cannot be reached. Default `require_approval`. |
+
+The kernel sends the agent id, tool name, and arguments to TypeSafe, using the
+API key in `REBUNO_TYPESAFE_API_KEY` ([Deployment](/deployment#configuration)).
+Without a key, `judge` rules deny.
 
 ## Testing a bundle
 

@@ -31,7 +31,7 @@ func setupKernel(t *testing.T) (*api.KernelAPI, *kernel.Kernel) {
 	k := kernel.New(kernel.DefaultConfig(), kernel.Deps{
 		APIKeys: ms,
 		Events:  ms, Steps: ms, Executions: ms, Agents: ms, Approvals: ms, Queue: ms, Locker: ms, UnitOfWork: ms,
-		Policy: policy.NewBundleResolver(ms, policy.PermissiveEngine{}),
+		Policy: policy.NewBundleResolver(ms, policy.PermissiveEngine{}, nil),
 	})
 	agent := domain.Agent{ID: testAgentID, WebhookURL: "http://localhost", Secret: testAgentSecret}
 	if err := k.RegisterAgent(context.Background(), agent); err != nil {

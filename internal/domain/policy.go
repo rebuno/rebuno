@@ -9,6 +9,7 @@ const (
 	DecisionAllow           = "allow"
 	DecisionDeny            = "deny"
 	DecisionRequireApproval = "require_approval"
+	DecisionJudge           = "judge"
 )
 
 // RuleIndeterminateRetry marks a denial no rule made: an at_most_once retry
@@ -22,6 +23,13 @@ type PolicyResult struct {
 	ApprovalConfig PolicyApprovalConfig `json:"approval_config,omitempty" yaml:"approval_config,omitempty"`
 	RateLimit      RateLimitConfig      `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
 	Budget         BudgetConfig         `json:"budget,omitempty" yaml:"budget,omitempty"`
+	Judge          JudgeConfig          `json:"judge,omitempty" yaml:"judge,omitempty"`
+}
+
+type JudgeConfig struct {
+	Instructions string  `json:"instructions,omitempty" yaml:"instructions,omitempty"`
+	Threshold    float64 `json:"threshold,omitempty" yaml:"threshold,omitempty"`
+	Fallback     string  `json:"fallback,omitempty" yaml:"fallback,omitempty"`
 }
 
 type BudgetConfig struct {

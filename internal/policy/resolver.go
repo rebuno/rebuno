@@ -10,6 +10,7 @@ import (
 type BundleResolver struct {
 	agents   store.AgentStore
 	fallback Engine
+	judge    *Judge
 	cache    *bundleCache
 }
 
@@ -20,20 +21,22 @@ func bundleDeny(reason string) domain.PolicyResult {
 	return domain.PolicyResult{Decision: domain.DecisionDeny, Reason: reason, RuleID: "bundle-error"}
 }
 
-func NewBundleResolver(agents store.AgentStore, fallback Engine) *BundleResolver {
+func NewBundleResolver(agents store.AgentStore, fallback Engine, judge *Judge) *BundleResolver {
 	return &BundleResolver{
 		agents:   agents,
 		fallback: fallback,
+		judge:    judge,
 		cache:    newBundleCache(defaultBundleCacheSize),
 	}
 }
 
-func compileBundle(bundle string) (*RuleEngine, error) {
-	cfg, err := LoadBundle(bundle)
+func (r *BundleResolver) compile(bundle string) (*RuleEngine, error) {
+	engine, err := NewRuleEngineFromBundle(bundle)
 	if err != nil {
 		return nil, err
 	}
-	return NewRuleEngine(cfg)
+	engine.Judge = r.judge
+	return engine, nil
 }
 
 func (r *BundleResolver) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
@@ -49,7 +52,7 @@ func (r *BundleResolver) Evaluate(ctx context.Context, input domain.PolicyInput)
 		return r.fallback.Evaluate(ctx, input)
 	}
 
-	engine, err := r.cache.getOrCompile(input.AgentID, agent.PolicyBundle, compileBundle)
+	engine, err := r.cache.getOrCompile(input.AgentID, agent.PolicyBundle, r.compile)
 	if err != nil {
 		return bundleDeny("policy_bundle_invalid"), nil
 	}

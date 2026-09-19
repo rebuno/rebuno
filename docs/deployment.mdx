@@ -91,6 +91,7 @@ Additional environment-only settings:
 | `REBUNO_CLEANUP_INTERVAL` | `10m` | How often the singleton worker runs approval expiry, deadline cancellation, and the retention sweep. |
 | `REBUNO_RETENTION` | `24h` | Creation-age cutoff for deleting terminal executions. Pending, running, and blocked executions are retained. |
 | `REBUNO_LEADER_LOCK_KEY` | `rebuno_scheduler_leader` | Advisory-lock key for leader election. |
+| `REBUNO_TYPESAFE_API_KEY` | none | TypeSafe API key for policy rules that decide `judge`. Without it, those rules deny. See [Judge](/policy#judge). |
 
 ## Load balancer
 

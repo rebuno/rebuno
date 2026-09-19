@@ -30,6 +30,7 @@ type Config struct {
 	OTELInsecure           bool
 	DBMaxConns             int
 	DBMinConns             int
+	TypeSafeAPIKey         string
 }
 
 func Default() Config {
@@ -136,6 +137,9 @@ func FromEnv() Config {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.DBMinConns = n
 		}
+	}
+	if v := os.Getenv("REBUNO_TYPESAFE_API_KEY"); v != "" {
+		cfg.TypeSafeAPIKey = v
 	}
 	return cfg
 }

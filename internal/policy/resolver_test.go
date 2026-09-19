@@ -49,7 +49,7 @@ const denyWriteBundle = `rules:
 
 func TestBundleResolverFailsClosedOnGetAgentError(t *testing.T) {
 	// Fallback would allow; a store error must still deny.
-	r := NewBundleResolver(fakeAgentStore{err: errors.New("db down")}, PermissiveEngine{})
+	r := NewBundleResolver(fakeAgentStore{err: errors.New("db down")}, PermissiveEngine{}, nil)
 	res, err := r.Evaluate(context.Background(), domain.PolicyInput{AgentID: "a"})
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestBundleResolverFailsClosedOnGetAgentError(t *testing.T) {
 }
 
 func TestBundleResolverFailsClosedOnUnparsableBundle(t *testing.T) {
-	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a", PolicyBundle: unparsableBundle}}, PermissiveEngine{})
+	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a", PolicyBundle: unparsableBundle}}, PermissiveEngine{}, nil)
 	res, err := r.Evaluate(context.Background(), domain.PolicyInput{AgentID: "a"})
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestBundleResolverFailsClosedOnUnparsableBundle(t *testing.T) {
 }
 
 func TestBundleResolverFailsClosedOnUncompilableBundle(t *testing.T) {
-	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a", PolicyBundle: uncompilableBundle}}, PermissiveEngine{})
+	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a", PolicyBundle: uncompilableBundle}}, PermissiveEngine{}, nil)
 	res, err := r.Evaluate(context.Background(), domain.PolicyInput{AgentID: "a"})
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestBundleResolverFailsClosedOnUncompilableBundle(t *testing.T) {
 }
 
 func TestBundleResolverEmptyBundleUsesFallback(t *testing.T) {
-	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a"}}, PermissiveEngine{})
+	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a"}}, PermissiveEngine{}, nil)
 	res, err := r.Evaluate(context.Background(), domain.PolicyInput{AgentID: "a"})
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestBundleResolverEmptyBundleUsesFallback(t *testing.T) {
 func TestBundleResolverPicksUpBundleChange(t *testing.T) {
 	// Fallback denies, so the initial allow can only come from the bundle.
 	fs := &fakeAgentStore{agent: domain.Agent{ID: "a", PolicyBundle: allowWriteBundle}}
-	r := NewBundleResolver(fs, DenyAllEngine{})
+	r := NewBundleResolver(fs, DenyAllEngine{}, nil)
 	in := domain.PolicyInput{AgentID: "a", Target: "write"}
 
 	res, err := r.Evaluate(context.Background(), in)
@@ -118,7 +118,7 @@ func TestBundleResolverPicksUpBundleChange(t *testing.T) {
 
 func TestBundleResolverValidBundleEvaluates(t *testing.T) {
 	// Fallback denies, so an allow proves the agent's own bundle was evaluated.
-	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a", PolicyBundle: allowWriteBundle}}, DenyAllEngine{})
+	r := NewBundleResolver(fakeAgentStore{agent: domain.Agent{ID: "a", PolicyBundle: allowWriteBundle}}, DenyAllEngine{}, nil)
 	res, err := r.Evaluate(context.Background(), domain.PolicyInput{AgentID: "a", Target: "write"})
 	if err != nil {
 		t.Fatal(err)

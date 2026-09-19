@@ -62,6 +62,7 @@ type Deps struct {
 	Locker      store.Locker
 	UnitOfWork  store.UnitOfWork
 	Policy      policy.Engine
+	Judge       *policy.Judge
 	Dispatcher  *dispatcher.Dispatcher
 	RateLimiter ratelimit.Limiter
 	Logger      *slog.Logger

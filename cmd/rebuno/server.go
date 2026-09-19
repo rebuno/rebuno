@@ -97,6 +97,7 @@ func runServer(cfg config.Config, configPath string) error {
 		logger.Info("agents provisioned from config", "count", len(agents), "path", configPath)
 	}
 
+	judge := policy.NewJudge(cfg.TypeSafeAPIKey)
 	deps := kernel.Deps{
 		APIKeys:     s,
 		Events:      s,
@@ -107,7 +108,8 @@ func runServer(cfg config.Config, configPath string) error {
 		Queue:       s,
 		Locker:      s,
 		UnitOfWork:  s,
-		Policy:      policy.NewBundleResolver(s, policy.PermissiveEngine{}),
+		Policy:      policy.NewBundleResolver(s, policy.PermissiveEngine{}, judge),
+		Judge:       judge,
 		RateLimiter: s,
 		Logger:      logger,
 	}

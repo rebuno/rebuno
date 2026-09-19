@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rebuno/rebuno/internal/api"
+	"github.com/rebuno/rebuno/internal/config"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
@@ -129,6 +130,7 @@ func policyReport(ctx context.Context, bundle, bundlePath string, opts policyTes
 	if err := policy.NormalizeCases(cases, opts.agentID); err != nil {
 		return policy.Report{}, err
 	}
+	engine.Judge = policy.NewJudge(config.FromEnv().TypeSafeAPIKey)
 	return policy.Run(ctx, engine, cases)
 }
 

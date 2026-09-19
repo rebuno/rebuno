@@ -50,6 +50,7 @@ func runDev(cfg config.Config, configPath string) error {
 	defer cancel()
 
 	s := memstore.NewStore()
+	judge := policy.NewJudge(cfg.TypeSafeAPIKey)
 	deps := kernel.Deps{
 		APIKeys:     s,
 		Events:      s,
@@ -60,7 +61,8 @@ func runDev(cfg config.Config, configPath string) error {
 		Queue:       s,
 		Locker:      s,
 		UnitOfWork:  s,
-		Policy:      policy.NewBundleResolver(s, policy.PermissiveEngine{}),
+		Policy:      policy.NewBundleResolver(s, policy.PermissiveEngine{}, judge),
+		Judge:       judge,
 		RateLimiter: ratelimit.NewMemoryLimiter(),
 		Logger:      logger,
 	}

@@ -49,6 +49,7 @@ type Config struct {
 type RuleEngine struct {
 	rules         []Rule
 	defaultResult domain.PolicyResult
+	Judge         *Judge
 }
 
 func NewRuleEngine(cfg Config) (*RuleEngine, error) {
@@ -68,14 +69,21 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 			return nil, fmt.Errorf("rule %q: missing decision", r.ID)
 		}
 		for _, err := range []error{
-			oneOf("decision", r.Then.Decision, domain.DecisionAllow, domain.DecisionDeny, domain.DecisionRequireApproval),
+			oneOf("decision", r.Then.Decision, domain.DecisionAllow, domain.DecisionDeny, domain.DecisionRequireApproval, domain.DecisionJudge),
 			oneOf("per_what", r.Then.RateLimit.PerWhat, domain.PerWhatExecution, domain.PerWhatAgent, domain.PerWhatGlobal),
 			oneOf("on_limiter_error", r.Then.RateLimit.OnLimiterError, domain.LimiterErrorAllow, domain.LimiterErrorDeny),
 			oneOf("on_exceed", r.Then.Budget.OnExceed, domain.DecisionDeny, domain.DecisionRequireApproval),
+			oneOf("fallback", r.Then.Judge.Fallback, domain.DecisionAllow, domain.DecisionDeny, domain.DecisionRequireApproval),
 		} {
 			if err != nil {
 				return nil, fmt.Errorf("rule %q: %w", r.ID, err)
 			}
+		}
+		if r.Then.Judge != (domain.JudgeConfig{}) && r.Then.Decision != domain.DecisionJudge {
+			return nil, fmt.Errorf("rule %q: judge is set but decision is %q", r.ID, r.Then.Decision)
+		}
+		if t := r.Then.Judge.Threshold; t < 0 || t > 1 {
+			return nil, fmt.Errorf("rule %q: threshold %v outside 0 to 1", r.ID, t)
 		}
 	}
 	rules := make([]Rule, len(cfg.Rules))
@@ -136,6 +144,9 @@ func (e *RuleEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (do
 			res := rule.Then
 			if res.RuleID == "" {
 				res.RuleID = rule.ID
+			}
+			if res.Decision == domain.DecisionJudge {
+				res.Decision, res.Reason = e.Judge.decide(ctx, input, res.Judge)
 			}
 			return res, nil
 		}
