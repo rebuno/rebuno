@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -253,7 +254,7 @@ func compileGlob(pattern string) (*regexp.Regexp, error) {
 }
 
 func matchArguments(predicates map[string]ArgPredicate, args []byte) bool {
-	var obj map[string]any
+	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(args, &obj); err != nil {
 		return false
 	}
@@ -262,7 +263,7 @@ func matchArguments(predicates map[string]ArgPredicate, args []byte) bool {
 		if !ok {
 			return false
 		}
-		s := fmt.Sprintf("%v", v)
+		s := argString(v)
 		if pred.Equals != "" && pred.Equals != s {
 			return false
 		}
@@ -279,6 +280,16 @@ func matchArguments(predicates map[string]ArgPredicate, args []byte) bool {
 		}
 	}
 	return true
+}
+
+func argString(v json.RawMessage) string {
+	var s string
+	if v[0] == '"' && json.Unmarshal(v, &s) == nil {
+		return s
+	}
+	var b bytes.Buffer
+	_ = json.Compact(&b, v)
+	return b.String()
 }
 
 type PermissiveEngine struct{}

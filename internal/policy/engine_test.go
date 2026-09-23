@@ -268,3 +268,56 @@ func TestMalformedTargetGlobIsRejectedAtLoad(t *testing.T) {
 		}
 	}
 }
+
+func TestNonStringArgumentsCompareAsJSONText(t *testing.T) {
+	bundle := `
+default_action: allow
+rules:
+  - id: large-amount
+    when:
+      arguments:
+        amount:
+          regex: '^[0-9]{7,}$'
+    then:
+      decision: deny
+  - id: nested
+    when:
+      arguments:
+        opts:
+          equals: '{"force":true}'
+    then:
+      decision: deny
+  - id: null-owner
+    when:
+      arguments:
+        owner:
+          equals: "null"
+    then:
+      decision: deny
+`
+	engine, err := NewRuleEngineFromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		args string
+		want string
+	}{
+		{`{"amount": 5000000}`, domain.DecisionDeny},
+		{`{"amount": 12345678901234567}`, domain.DecisionDeny},
+		{`{"amount": "5000000"}`, domain.DecisionDeny},
+		{`{"amount": 999999}`, domain.DecisionAllow},
+		{`{"opts": { "force": true }}`, domain.DecisionDeny},
+		{`{"owner": null}`, domain.DecisionDeny},
+	}
+	for _, tc := range cases {
+		res, err := engine.Evaluate(context.Background(), domain.PolicyInput{StepKind: domain.StepKindTool, Args: json.RawMessage(tc.args)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Decision != tc.want {
+			t.Errorf("%s: expected %s, got %s", tc.args, tc.want, res.Decision)
+		}
+	}
+}
