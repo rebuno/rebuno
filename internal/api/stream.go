@@ -43,7 +43,12 @@ func (rt *Router) streamStepDelta(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, domain.ErrValidation)
 		return
 	}
-	if _, err := rt.agent.GetStep(r.Context(), id, stepID); err != nil {
+	lease, err := leaseFrom(r)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	if err := rt.agent.AuthorizeStepDelta(r.Context(), id, stepID, lease); err != nil {
 		WriteError(w, err)
 		return
 	}

@@ -223,7 +223,8 @@ records `step.failed`.
 `POST /v0/executions/{id}/steps/{step_id}/stream` · HMAC → `204`
 
 Body `{ "seq": <int64>, "data": "<chunk>" }`. Live output while a step runs,
-delivered best-effort. `data` is opaque to the kernel and capped per batch. See
+delivered best-effort. `data` is opaque to the kernel and capped per batch. A
+step that is no longer executing returns `409 conflict`. See
 [Live streaming](/streaming).
 
 ### Send a heartbeat

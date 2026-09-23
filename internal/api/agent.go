@@ -16,6 +16,7 @@ import (
 type AgentKernel interface {
 	GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error)
 	GetStep(ctx context.Context, execID uuid.UUID, stepID string) (domain.Step, error)
+	AuthorizeStepDelta(ctx context.Context, execID uuid.UUID, stepID string, lease domain.Lease) error
 	ListSteps(ctx context.Context, execID uuid.UUID) ([]domain.Step, error)
 	SubmitStep(ctx context.Context, execID uuid.UUID, req kernel.SubmitStepRequest) (domain.StepDecision, error)
 	CompleteStep(ctx context.Context, execID uuid.UUID, stepID string, req kernel.CompleteStepRequest) (domain.StepDecision, error)

@@ -67,7 +67,8 @@ async def _post(
 
 def _lease_headers(headers: dict) -> dict:
     """The dispatch lease the agent forwarded. The kernel fences every step
-    mutation on it, so a call from a superseded dispatch is refused."""
+    mutation and live delta on it, so a call from a superseded dispatch is
+    refused."""
     return {
         "Rebuno-Dispatch-Id": headers["rebuno-dispatch-id"],
         "Rebuno-Dispatch-Attempt": headers["rebuno-dispatch-attempt"],
@@ -183,6 +184,7 @@ class RebunoInterceptor(CustomLogger):
                         body={"seq": seq, "data": piece},
                         agent_id=headers["rebuno-agent-id"],
                         secret=headers["rebuno-agent-secret"],
+                        extra=_lease_headers(headers),
                     )
                 except Exception:
                     # deltas are best-effort; a client that misses one repaints

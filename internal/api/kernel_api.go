@@ -42,6 +42,10 @@ func (k *KernelAPI) GetStep(ctx context.Context, execID uuid.UUID, stepID string
 	return k.Inner.GetExecutionStep(ctx, execID, stepID)
 }
 
+func (k *KernelAPI) AuthorizeStepDelta(ctx context.Context, execID uuid.UUID, stepID string, lease domain.Lease) error {
+	return k.Inner.AuthorizeStepDelta(ctx, execID, stepID, lease)
+}
+
 func (k *KernelAPI) ListSteps(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {
 	return k.Inner.ListSteps(ctx, execID)
 }

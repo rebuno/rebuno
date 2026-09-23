@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,20 @@ func (k *Kernel) GetExecutionStep(ctx context.Context, execID uuid.UUID, stepID 
 		return domain.Step{}, domain.ErrNotFound
 	}
 	return step, nil
+}
+
+func (k *Kernel) AuthorizeStepDelta(ctx context.Context, execID uuid.UUID, stepID string, lease domain.Lease) error {
+	if !lease.Valid() {
+		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
+	}
+	step, err := k.GetExecutionStep(ctx, execID, stepID)
+	if err != nil {
+		return err
+	}
+	if step.Status != domain.StepExecuting {
+		return fmt.Errorf("%w: cannot stream step in status %s", domain.ErrConflict, step.Status)
+	}
+	return k.d.Queue.CheckLease(ctx, execID, lease)
 }
 
 func (k *Kernel) CompleteExecutionStep(ctx context.Context, execID uuid.UUID, stepID string, req CompleteStepRequest) (domain.StepDecision, error) {

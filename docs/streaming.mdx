@@ -26,6 +26,12 @@ rejected with `400` and nothing is truncated for you, so the agent has to do the
 slicing. The cap leaves headroom under Postgres's 8000-byte NOTIFY limit for the
 envelope the kernel wraps around the delta.
 
+Each delta carries the dispatch lease headers, like the step mutations. The
+kernel accepts a delta only from the current dispatch while the step is
+executing: a superseded attempt gets `409 lease_superseded`, and a step that has
+finished or was never started gets `409 conflict`. Neither check renews the
+lease.
+
 The kernel returns `204` whether or not the delta reached anyone, so an agent
 cannot tell from the response that a client is listening.
 
