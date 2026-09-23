@@ -202,3 +202,69 @@ rules:
 		})
 	}
 }
+
+func TestTargetGlobsMatchAcrossSlash(t *testing.T) {
+	bundle := `
+default_action: allow
+rules:
+  - id: no-mcp-delete
+    when:
+      target: "mcp/*delete"
+    then:
+      decision: deny
+  - id: no-openai
+    when:
+      targets: ["openai/gpt-?.*"]
+    then:
+      decision: deny
+  - id: no-bracket
+    when:
+      target: "fs_[dr]m"
+    then:
+      decision: deny
+  - id: no-escaped-range
+    when:
+      target: 'x[a\-z]'
+    then:
+      decision: deny
+`
+	engine, err := NewRuleEngineFromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		target string
+		want   string
+	}{
+		{"mcp/fs_delete", domain.DecisionDeny},
+		{"mcp/nested/fs_delete", domain.DecisionDeny},
+		{"mcp/fs_read", domain.DecisionAllow},
+		{"openai/gpt-5.4", domain.DecisionDeny},
+		{"openai/gpt-54", domain.DecisionAllow},
+		{"fs_rm", domain.DecisionDeny},
+		{"fs_xm", domain.DecisionAllow},
+		{"x-", domain.DecisionDeny},
+		{"xb", domain.DecisionAllow},
+	}
+	for _, tc := range cases {
+		res, err := engine.Evaluate(context.Background(), domain.PolicyInput{StepKind: domain.StepKindTool, Target: tc.target})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Decision != tc.want {
+			t.Errorf("%s: expected %s, got %s", tc.target, tc.want, res.Decision)
+		}
+	}
+}
+
+func TestMalformedTargetGlobIsRejectedAtLoad(t *testing.T) {
+	for _, bundle := range []string{
+		"rules:\n  - id: a\n    when: { target: \"fs_[\" }\n    then: { decision: deny }\n",
+		"rules:\n  - id: a\n    when: { targets: [ok, \"fs_\\\\\"] }\n    then: { decision: deny }\n",
+	} {
+		if _, err := NewRuleEngineFromBundle(bundle); err == nil {
+			t.Errorf("expected load to fail for malformed glob, bundle:\n%s", bundle)
+		}
+	}
+}

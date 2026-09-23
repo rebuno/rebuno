@@ -31,7 +31,8 @@ or allow that kind generally if intended. The example above does not allow it.
 - First matching rule wins; specific restrictions belong before broad allows.
   Each rule needs a unique `id`; decisions are `allow`, `deny`, `require_approval`.
 - All supplied `when` fields must match. `target` / `targets` support Go
-  `path.Match` globs; `agent_id` / `agent_ids` match agent names.
+  `path.Match` glob syntax, with `*` and `?` matching `/` (`mcp/*`); malformed
+  patterns fail at load. `agent_id` / `agent_ids` match agent names.
   `step_kind` is `tool_call`, `llm_call`, or `local`.
 - `arguments` maps required argument fields to predicates: `equals`,
   `contains`, `one_of`, `regex` (RE2). Values compare as strings, and all

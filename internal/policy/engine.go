@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/rebuno/rebuno/internal/domain"
 )
@@ -31,6 +33,8 @@ type Condition struct {
 	AgentIDs  []string                `yaml:"agent_ids,omitempty"`
 	StepKind  string                  `yaml:"step_kind,omitempty"`
 	Arguments map[string]ArgPredicate `yaml:"arguments,omitempty"`
+	targetRx  *regexp.Regexp
+	targetsRx []*regexp.Regexp
 }
 
 type ArgPredicate struct {
@@ -95,6 +99,21 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 	}
 
 	for i := range rules {
+		when := &rules[i].When
+		if when.Target != "" {
+			rx, err := compileGlob(when.Target)
+			if err != nil {
+				return nil, fmt.Errorf("rule %q target %q: %w", rules[i].ID, when.Target, err)
+			}
+			when.targetRx = rx
+		}
+		for _, p := range when.Targets {
+			rx, err := compileGlob(p)
+			if err != nil {
+				return nil, fmt.Errorf("rule %q target %q: %w", rules[i].ID, p, err)
+			}
+			when.targetsRx = append(when.targetsRx, rx)
+		}
 		for key, pred := range rules[i].When.Arguments {
 			if pred.Equals == "" && pred.Contains == "" && pred.Regex == "" && len(pred.OneOf) == 0 {
 				return nil, fmt.Errorf("rule %q argument %q has no constraint (equals/contains/one_of/regex); an empty predicate matches any value", rules[i].ID, key)
@@ -158,10 +177,12 @@ func (e *RuleEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (do
 }
 
 func matches(cond Condition, input domain.PolicyInput) bool {
-	if cond.Target != "" && !globMatch(cond.Target, input.Target) {
+	if cond.targetRx != nil && !cond.targetRx.MatchString(input.Target) {
 		return false
 	}
-	if len(cond.Targets) > 0 && !globMatchAny(cond.Targets, input.Target) {
+	if len(cond.targetsRx) > 0 && !slices.ContainsFunc(cond.targetsRx, func(rx *regexp.Regexp) bool {
+		return rx.MatchString(input.Target)
+	}) {
 		return false
 	}
 	if cond.AgentID != "" && cond.AgentID != input.AgentID {
@@ -179,24 +200,56 @@ func matches(cond Condition, input domain.PolicyInput) bool {
 	return true
 }
 
-func globMatch(pattern, value string) bool {
-	if pattern == value {
-		return true
+func compileGlob(pattern string) (*regexp.Regexp, error) {
+	if _, err := path.Match(pattern, ""); err != nil {
+		return nil, err
 	}
-	m, err := path.Match(pattern, value)
-	if err != nil {
-		return false
+	var b strings.Builder
+	b.WriteString(`(?s)^`)
+	next := func(i int) (string, int) {
+		if pattern[i] == '\\' {
+			i++
+		}
+		r, n := utf8.DecodeRuneInString(pattern[i:])
+		if r < utf8.RuneSelf && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return `\` + string(r), i + n
+		}
+		return string(r), i + n
 	}
-	return m
-}
-
-func globMatchAny(patterns []string, value string) bool {
-	for _, p := range patterns {
-		if globMatch(p, value) {
-			return true
+	for i := 0; i < len(pattern); {
+		switch pattern[i] {
+		case '*':
+			b.WriteString(`.*`)
+			i++
+		case '?':
+			b.WriteString(`.`)
+			i++
+		case '[':
+			b.WriteByte('[')
+			i++
+			if pattern[i] == '^' {
+				b.WriteByte('^')
+				i++
+			}
+			for first := true; first || pattern[i] != ']'; first = false {
+				var lit string
+				lit, i = next(i)
+				b.WriteString(lit)
+				if pattern[i] == '-' {
+					lit, i = next(i + 1)
+					b.WriteString("-" + lit)
+				}
+			}
+			b.WriteByte(']')
+			i++
+		default:
+			var lit string
+			lit, i = next(i)
+			b.WriteString(lit)
 		}
 	}
-	return false
+	b.WriteString(`$`)
+	return regexp.Compile(b.String())
 }
 
 func matchArguments(predicates map[string]ArgPredicate, args []byte) bool {

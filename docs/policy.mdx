@@ -58,7 +58,7 @@ not checked.
 
 | Field | Matches |
 |-------|---------|
-| `target` | The step target (tool name or model id). Supports glob patterns via Go's `path.Match` (`web_*`). |
+| `target` | The step target (tool name or model id). Supports glob patterns in Go's `path.Match` syntax (`web_*`, `mcp/*`), where `*` and `?` match any character including `/`. Malformed patterns fail at load. |
 | `targets` | A list of targets/globs; matches if any matches. |
 | `agent_id` | The submitting agent's id. |
 | `agent_ids` | A list of agent ids; matches if the agent is in it. |
