@@ -111,10 +111,10 @@ func (m *Manager) runDispatch(ctx context.Context) {
 // singleton interval.
 func (m *Manager) deadlineTick(ctx context.Context) error {
 	return m.withLeaderLock(ctx, func(ctx context.Context) error {
-		if err := m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC()); err != nil {
-			return err
-		}
-		return m.kernel.AdmitQueued(ctx)
+		return errors.Join(
+			m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC()),
+			m.kernel.AdmitQueued(ctx),
+		)
 	})
 }
 
@@ -141,13 +141,11 @@ func (m *Manager) withLeaderLock(ctx context.Context, fn func(context.Context) e
 
 func (m *Manager) runSingletons(ctx context.Context) error {
 	now := time.Now().UTC()
-	if err := m.kernel.ExpireApprovals(ctx, now); err != nil {
-		return err
-	}
-	if err := m.kernel.CancelExpiredExecutions(ctx, now); err != nil {
-		return err
-	}
-	return m.kernel.Cleanup(ctx, m.Retention, now)
+	return errors.Join(
+		m.kernel.ExpireApprovals(ctx, now),
+		m.kernel.CancelExpiredExecutions(ctx, now),
+		m.kernel.Cleanup(ctx, m.Retention, now),
+	)
 }
 
 func (m *Manager) loop(ctx context.Context, name string, interval time.Duration, fn func(context.Context) error) {

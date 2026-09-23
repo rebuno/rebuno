@@ -248,12 +248,13 @@ func (k *Kernel) AdmitQueued(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, key := range keys {
 		if _, err := k.admitNext(ctx, key); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("admit concurrency key %q: %w", key, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (k *Kernel) Deps() Deps {

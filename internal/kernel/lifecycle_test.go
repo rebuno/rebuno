@@ -54,6 +54,49 @@ func TestApprovalExpiry(t *testing.T) {
 	}
 }
 
+func TestExpireApprovalsContinuesPastFailingApproval(t *testing.T) {
+	ms := memstore.NewStore()
+	pe, _ := policy.NewRuleEngine(policy.Config{
+		Rules: []policy.Rule{{
+			ID:   "approve-write",
+			When: policy.Condition{Target: "write"},
+			Then: domain.PolicyResult{
+				Decision:       domain.DecisionRequireApproval,
+				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: 1 * time.Millisecond},
+			},
+		}},
+	})
+	k := kernel.New(kernel.Config{ReplicaID: "test"}, memDeps(ms, kernel.Deps{Policy: pe}))
+	ctx := auth.WithAdmin(context.Background())
+	_ = k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"})
+	for range 4 {
+		exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
+		if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "write", Args: json.RawMessage(`{}`), Lease: leaseOf(t, k, exec.ID)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(10 * time.Millisecond)
+	now := time.Now().UTC()
+	approvals, _ := ms.ListExpiredApprovals(ctx, now)
+	if len(approvals) != 4 {
+		t.Fatalf("expected 4 expired approvals, got %d", len(approvals))
+	}
+	poisoned := approvals[0]
+	step, _ := ms.GetStep(ctx, poisoned.StepID)
+	step.Status = domain.StepExecuting
+	if err := ms.Upsert(ctx, step); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := k.ExpireApprovals(ctx, now); err == nil {
+		t.Fatal("expected error from the poisoned approval")
+	}
+	remaining, _ := ms.ListExpiredApprovals(ctx, now)
+	if len(remaining) != 1 || remaining[0].ID != poisoned.ID {
+		t.Fatalf("expected only the poisoned approval to remain pending, got %+v", remaining)
+	}
+}
+
 func TestCancelExpiredExecutions(t *testing.T) {
 	ms := memstore.NewStore()
 	cfg := kernel.Config{ReplicaID: "test", ExecutionDeadlineTimeout: 1 * time.Millisecond}

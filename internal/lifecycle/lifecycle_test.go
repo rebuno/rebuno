@@ -19,6 +19,7 @@ type fakeKernel struct {
 	cancelExpiredExecutions int32
 	cleanups                int32
 	cancelErr               error
+	expireErr               error
 }
 
 func (f *fakeKernel) RunDispatcher(ctx context.Context) error {
@@ -29,7 +30,7 @@ func (f *fakeKernel) RunDispatcher(ctx context.Context) error {
 
 func (f *fakeKernel) ExpireApprovals(ctx context.Context, now time.Time) error {
 	atomic.AddInt32(&f.expireApprovals, 1)
-	return nil
+	return f.expireErr
 }
 
 func (f *fakeKernel) CancelExpiredExecutions(ctx context.Context, now time.Time) error {
@@ -116,6 +117,24 @@ func TestDeadlineTickPropagatesError(t *testing.T) {
 
 	if got := atomic.LoadInt32(&k.cancelExpiredExecutions); got == 0 {
 		t.Fatal("expected deadline loop to fire despite errors")
+	}
+}
+
+func TestSingletonTickCleansUpDespiteExpiryError(t *testing.T) {
+	k := &fakeKernel{expireErr: errors.New("boom"), cancelErr: errors.New("boom")}
+	mgr := lifecycle.NewManagerWithLocker(
+		k, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		10*time.Millisecond,
+		nil,
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	mgr.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	mgr.Stop()
+
+	if got := atomic.LoadInt32(&k.cleanups); got == 0 {
+		t.Fatal("expected cleanup to run despite expiry errors")
 	}
 }
 

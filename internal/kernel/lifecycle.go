@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rebuno/rebuno/internal/domain"
@@ -17,12 +18,13 @@ func (k *Kernel) ExpireApprovals(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, approval := range approvals {
 		if err := k.expireApproval(ctx, approval, now); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("expire approval %s: %w", approval.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (k *Kernel) CancelExpiredExecutions(ctx context.Context, now time.Time) error {
@@ -30,15 +32,14 @@ func (k *Kernel) CancelExpiredExecutions(ctx context.Context, now time.Time) err
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, exec := range executions {
-		if err := k.cancelExecution(ctx, exec.ID, domain.ReasonDeadlineExceeded); err != nil {
-			if errors.Is(err, domain.ErrExecutionTerminal) || errors.Is(err, domain.ErrNotFound) {
-				continue
-			}
-			return err
+		err := k.cancelExecution(ctx, exec.ID, domain.ReasonDeadlineExceeded)
+		if err != nil && !errors.Is(err, domain.ErrExecutionTerminal) && !errors.Is(err, domain.ErrNotFound) {
+			errs = append(errs, fmt.Errorf("cancel expired execution %s: %w", exec.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (k *Kernel) Cleanup(ctx context.Context, retain time.Duration, now time.Time) error {
