@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Store) RegisterAgent(ctx context.Context, agent domain.Agent) error {
-	return registerAgent(ctx, s.pool, agent)
+	return registerAgent(ctx, s.q(ctx), agent)
 }
 
 func (q querier) RegisterAgent(ctx context.Context, agent domain.Agent) error {
@@ -39,7 +39,7 @@ func registerAgent(ctx context.Context, q Querier, agent domain.Agent) error {
 }
 
 func (s *Store) GetAgent(ctx context.Context, id string) (domain.Agent, error) {
-	return getAgent(ctx, s.pool, id)
+	return getAgent(ctx, s.q(ctx), id)
 }
 
 func (q querier) GetAgent(ctx context.Context, id string) (domain.Agent, error) {
@@ -57,7 +57,7 @@ func getAgent(ctx context.Context, q Querier, id string) (domain.Agent, error) {
 }
 
 func (s *Store) ListAgents(ctx context.Context) ([]domain.Agent, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.q(ctx).Query(ctx, `
 		SELECT id, webhook_url, secret, registered_at, policy_bundle, lease_timeout_seconds
 		FROM agents
 		ORDER BY id
@@ -81,7 +81,7 @@ func (s *Store) ListAgents(ctx context.Context) ([]domain.Agent, error) {
 }
 
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
-	return deleteAgent(ctx, s.pool, id)
+	return deleteAgent(ctx, s.q(ctx), id)
 }
 
 func (q querier) DeleteAgent(ctx context.Context, id string) error {

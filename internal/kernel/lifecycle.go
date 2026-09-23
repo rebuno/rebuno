@@ -55,53 +55,51 @@ func (k *Kernel) Cleanup(ctx context.Context, retain time.Duration, now time.Tim
 }
 
 func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, now time.Time) error {
-	release, err := k.d.Locker.Acquire(ctx, lockKey(approval.ExecutionID))
-	if err != nil {
-		return err
-	}
-	defer release()
+	expired := false
+	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(approval.ExecutionID), func(ctx context.Context) error {
+		approval, _ = k.d.Approvals.GetApproval(ctx, approval.ID)
+		if approval.Status != domain.ApprovalPending || approval.TimeoutAt.After(now) {
+			return nil
+		}
+		expired = true
+		approval.Status = domain.ApprovalExpired
+		approval.DecidedAt = &now
+		approval.Rationale = "timeout"
 
-	approval, _ = k.d.Approvals.GetApproval(ctx, approval.ID)
-	if approval.Status != domain.ApprovalPending || approval.TimeoutAt.After(now) {
-		return nil
-	}
-	approval.Status = domain.ApprovalExpired
-	approval.DecidedAt = &now
-	approval.Rationale = "timeout"
-
-	errPayload, _ := json.Marshal(map[string]string{"reason": domain.ReasonApprovalTimeout})
-	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		step, err := tx.GetStep(ctx, approval.StepID)
-		if err != nil {
-			return err
-		}
-		if err := requireAwaitingApproval(step); err != nil {
-			return err
-		}
-		evts := []store.EventRecord{
-			{Type: domain.EventApprovalExpired, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
-			{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
-			{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
-		}
-		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
-			return err
-		}
-		step.Status = domain.StepDenied
-		step.Error = errPayload
-		step.CompletedAt = &now
-		if err := tx.Upsert(ctx, step); err != nil {
-			return err
-		}
-		if err := tx.UpdateApproval(ctx, approval); err != nil {
-			return err
-		}
-		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
-			return err
-		}
-		// An approval nobody answered is a refusal like any other: resume and
-		// let the handler decide what to do without it.
-		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
-	}); err != nil {
+		errPayload, _ := json.Marshal(map[string]string{"reason": domain.ReasonApprovalTimeout})
+		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			step, err := tx.GetStep(ctx, approval.StepID)
+			if err != nil {
+				return err
+			}
+			if err := requireAwaitingApproval(step); err != nil {
+				return err
+			}
+			evts := []store.EventRecord{
+				{Type: domain.EventApprovalExpired, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
+				{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
+				{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
+			}
+			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
+				return err
+			}
+			step.Status = domain.StepDenied
+			step.Error = errPayload
+			step.CompletedAt = &now
+			if err := tx.Upsert(ctx, step); err != nil {
+				return err
+			}
+			if err := tx.UpdateApproval(ctx, approval); err != nil {
+				return err
+			}
+			if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
+				return err
+			}
+			// An approval nobody answered is a refusal like any other: resume and
+			// let the handler decide what to do without it.
+			return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
+		})
+	}); err != nil || !expired {
 		return err
 	}
 	k.d.Observer.RecordApprovalOutcome("expired")

@@ -285,78 +285,76 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 }
 
 func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason string) error {
-	release, err := k.d.Locker.Acquire(ctx, lockKey(id))
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	exec, err := k.d.Executions.GetExecution(ctx, id)
-	if err != nil {
-		return err
-	}
-	if exec.Status.IsTerminal() {
-		return domain.ErrExecutionTerminal
-	}
-	now := time.Now().UTC()
-	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if _, err := tx.Append(ctx, id, domain.EventExecutionCancelled, payload.Execution(id, domain.ExecutionCancelled, nil, reason)); err != nil {
-			return err
-		}
-		if err := tx.UpdateExecutionStatus(ctx, id, domain.ExecutionCancelled, nil, reason); err != nil {
-			return err
-		}
-		if err := releaseDispatchesLocked(ctx, tx, id); err != nil {
-			return err
-		}
-		pending, err := allPendingApprovalsLocked(ctx, tx, id)
+	var exec domain.Execution
+	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(id), func(ctx context.Context) error {
+		var err error
+		exec, err = k.d.Executions.GetExecution(ctx, id)
 		if err != nil {
 			return err
 		}
-		errPayload, _ := json.Marshal(map[string]string{"reason": "execution_cancelled"})
-		for _, a := range pending {
-			step, err := tx.GetStep(ctx, a.StepID)
+		if exec.Status.IsTerminal() {
+			return domain.ErrExecutionTerminal
+		}
+		now := time.Now().UTC()
+		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			if _, err := tx.Append(ctx, id, domain.EventExecutionCancelled, payload.Execution(id, domain.ExecutionCancelled, nil, reason)); err != nil {
+				return err
+			}
+			if err := tx.UpdateExecutionStatus(ctx, id, domain.ExecutionCancelled, nil, reason); err != nil {
+				return err
+			}
+			if err := releaseDispatchesLocked(ctx, tx, id); err != nil {
+				return err
+			}
+			pending, err := allPendingApprovalsLocked(ctx, tx, id)
 			if err != nil {
 				return err
 			}
-			if _, err := tx.AppendBatch(ctx, id, []store.EventRecord{
-				{Type: domain.EventApprovalExpired, Payload: payload.Approval(a.ID, a.StepID, id, domain.ApprovalExpired, "", "execution_cancelled")},
-				{Type: domain.EventStepDenied, Payload: payload.StepDenied(a.StepID, step.Kind, step.Target, "", errPayload)},
-			}); err != nil {
+			errPayload, _ := json.Marshal(map[string]string{"reason": "execution_cancelled"})
+			for _, a := range pending {
+				step, err := tx.GetStep(ctx, a.StepID)
+				if err != nil {
+					return err
+				}
+				if _, err := tx.AppendBatch(ctx, id, []store.EventRecord{
+					{Type: domain.EventApprovalExpired, Payload: payload.Approval(a.ID, a.StepID, id, domain.ApprovalExpired, "", "execution_cancelled")},
+					{Type: domain.EventStepDenied, Payload: payload.StepDenied(a.StepID, step.Kind, step.Target, "", errPayload)},
+				}); err != nil {
+					return err
+				}
+				step.Status = domain.StepDenied
+				step.Error = errPayload
+				step.CompletedAt = &now
+				if err := tx.Upsert(ctx, step); err != nil {
+					return err
+				}
+				a.Status = domain.ApprovalExpired
+				a.DecidedAt = &now
+				a.Rationale = "execution_cancelled"
+				if err := tx.UpdateApproval(ctx, a); err != nil {
+					return err
+				}
+			}
+			steps, err := tx.ListByExecution(ctx, id)
+			if err != nil {
 				return err
 			}
-			step.Status = domain.StepDenied
-			step.Error = errPayload
-			step.CompletedAt = &now
-			if err := tx.Upsert(ctx, step); err != nil {
-				return err
+			for _, s := range steps {
+				if s.Status != domain.StepExecuting {
+					continue
+				}
+				if _, err := tx.Append(ctx, id, domain.EventStepCancelled, payload.StepError(s.StepID, s.Kind, s.Target, errPayload)); err != nil {
+					return err
+				}
+				s.Status = domain.StepCancelled
+				s.Error = errPayload
+				s.CompletedAt = &now
+				if err := tx.Upsert(ctx, s); err != nil {
+					return err
+				}
 			}
-			a.Status = domain.ApprovalExpired
-			a.DecidedAt = &now
-			a.Rationale = "execution_cancelled"
-			if err := tx.UpdateApproval(ctx, a); err != nil {
-				return err
-			}
-		}
-		steps, err := tx.ListByExecution(ctx, id)
-		if err != nil {
-			return err
-		}
-		for _, s := range steps {
-			if s.Status != domain.StepExecuting {
-				continue
-			}
-			if _, err := tx.Append(ctx, id, domain.EventStepCancelled, payload.StepError(s.StepID, s.Kind, s.Target, errPayload)); err != nil {
-				return err
-			}
-			s.Status = domain.StepCancelled
-			s.Error = errPayload
-			s.CompletedAt = &now
-			if err := tx.Upsert(ctx, s); err != nil {
-				return err
-			}
-		}
-		return nil
+			return nil
+		})
 	}); err != nil {
 		return err
 	}

@@ -31,7 +31,7 @@ func (s *Store) CreateAPIKey(ctx context.Context, k domain.APIKey) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO api_keys (id, name, scopes, secret_hash, created_at, revoked_at) VALUES ($1,$2,$3,$4,$5,$6)`, k.ID, k.Name, string(scopes), k.SecretHash, k.CreatedAt, k.RevokedAt)
+	_, err = s.q(ctx).Exec(ctx, `INSERT INTO api_keys (id, name, scopes, secret_hash, created_at, revoked_at) VALUES ($1,$2,$3,$4,$5,$6)`, k.ID, k.Name, string(scopes), k.SecretHash, k.CreatedAt, k.RevokedAt)
 	if isUniqueViolation(err) {
 		return domain.ErrConflict
 	}
@@ -39,11 +39,11 @@ func (s *Store) CreateAPIKey(ctx context.Context, k domain.APIKey) error {
 }
 
 func (s *Store) GetAPIKey(ctx context.Context, id string) (domain.APIKey, error) {
-	return scanAPIKey(s.pool.QueryRow(ctx, "SELECT "+apiKeyColumns+" FROM api_keys WHERE id=$1", id))
+	return scanAPIKey(s.q(ctx).QueryRow(ctx, "SELECT "+apiKeyColumns+" FROM api_keys WHERE id=$1", id))
 }
 
 func (s *Store) ListAPIKeys(ctx context.Context) ([]domain.APIKey, error) {
-	rows, err := s.pool.Query(ctx, "SELECT "+apiKeyColumns+" FROM api_keys ORDER BY id")
+	rows, err := s.q(ctx).Query(ctx, "SELECT "+apiKeyColumns+" FROM api_keys ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (s *Store) ListAPIKeys(ctx context.Context) ([]domain.APIKey, error) {
 }
 
 func (s *Store) RotateAPIKey(ctx context.Context, id string, oldHash, newHash []byte) error {
-	res, err := s.pool.Exec(ctx, `UPDATE api_keys SET secret_hash=$3 WHERE id=$1 AND secret_hash=$2 AND revoked_at IS NULL`, id, oldHash, newHash)
+	res, err := s.q(ctx).Exec(ctx, `UPDATE api_keys SET secret_hash=$3 WHERE id=$1 AND secret_hash=$2 AND revoked_at IS NULL`, id, oldHash, newHash)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func (s *Store) RotateAPIKey(ctx context.Context, id string, oldHash, newHash []
 }
 
 func (s *Store) RevokeAPIKey(ctx context.Context, id string, at time.Time) error {
-	res, err := s.pool.Exec(ctx, `UPDATE api_keys SET revoked_at=COALESCE(revoked_at,$2) WHERE id=$1`, id, at)
+	res, err := s.q(ctx).Exec(ctx, `UPDATE api_keys SET revoked_at=COALESCE(revoked_at,$2) WHERE id=$1`, id, at)
 	if err != nil {
 		return err
 	}

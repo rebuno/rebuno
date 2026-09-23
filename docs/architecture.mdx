@@ -186,12 +186,20 @@ consistent, and the projection never lags.
 
 The HTTP API is stateless. Any replica serves any request and dispatches any
 execution, with no connection registry or sticky routing. Two replicas can
-therefore touch one execution at once. Every path that mutates an execution takes
-a Postgres advisory lock on its id first, so those writes serialize.
+therefore touch one execution at once. Every path that mutates an execution runs
+in one transaction that first takes a transaction-scoped Postgres advisory lock
+on its id, so those writes serialize. Postgres releases the lock when the
+transaction commits or rolls back, and a lost connection rolls back the work
+done under it.
+
+Every read and write in a locked path, including policy lookups and rate
+limiting, uses that transaction's connection, so a request holds at most one
+connection. Policy evaluation runs inside the transaction, so a step that
+reaches a [judge](/policy#judge) rule keeps it open for the judge call.
 
 Each replica queues requests for the same execution in memory before acquiring a
 database connection and the advisory lock. Only one request per execution per
-replica holds a lock connection; local waiters hold none and leave the queue when
+replica holds a connection; local waiters hold none and leave the queue when
 their contexts are cancelled. The advisory lock coordinates writes across
 replicas. The waiting queue is transient; execution state remains in Postgres.
 

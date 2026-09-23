@@ -21,7 +21,7 @@ func (s *Store) Allow(ctx context.Context, key ratelimit.Key, cfg domain.RateLim
 	}
 	now := time.Now().UTC()
 	var tokens float64
-	err := s.pool.QueryRow(ctx, `
+	err := s.q(ctx).QueryRow(ctx, `
 		INSERT INTO rate_buckets AS rb (key, tokens, max_tokens, window_seconds, updated_at)
 		VALUES ($1, $2::float8 - 1, $2, $3, $4)
 		ON CONFLICT (key) DO UPDATE
@@ -50,7 +50,7 @@ func (s *Store) Allow(ctx context.Context, key ratelimit.Key, cfg domain.RateLim
 }
 
 func (s *Store) ReapBefore(ctx context.Context, cutoff time.Time) error {
-	if _, err := s.pool.Exec(ctx, `DELETE FROM rate_buckets WHERE updated_at < $1`, cutoff); err != nil {
+	if _, err := s.q(ctx).Exec(ctx, `DELETE FROM rate_buckets WHERE updated_at < $1`, cutoff); err != nil {
 		return fmt.Errorf("reap rate buckets: %w", err)
 	}
 	return nil

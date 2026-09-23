@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Store) CreateApproval(ctx context.Context, approval domain.Approval) error {
-	return createApproval(ctx, s.pool, approval)
+	return createApproval(ctx, s.q(ctx), approval)
 }
 
 func (q querier) CreateApproval(ctx context.Context, approval domain.Approval) error {
@@ -53,7 +53,7 @@ func createApproval(ctx context.Context, q Querier, approval domain.Approval) er
 }
 
 func (s *Store) GetApproval(ctx context.Context, id uuid.UUID) (domain.Approval, error) {
-	return getApproval(ctx, s.pool, id)
+	return getApproval(ctx, s.q(ctx), id)
 }
 
 func (q querier) GetApproval(ctx context.Context, id uuid.UUID) (domain.Approval, error) {
@@ -74,7 +74,7 @@ func getApproval(ctx context.Context, q Querier, id uuid.UUID) (domain.Approval,
 }
 
 func (s *Store) UpdateApproval(ctx context.Context, approval domain.Approval) error {
-	return updateApproval(ctx, s.pool, approval)
+	return updateApproval(ctx, s.q(ctx), approval)
 }
 
 func (q querier) UpdateApproval(ctx context.Context, approval domain.Approval) error {
@@ -114,7 +114,7 @@ func updateApproval(ctx context.Context, q Querier, approval domain.Approval) er
 }
 
 func (s *Store) ListPendingApprovals(ctx context.Context) ([]domain.Approval, error) {
-	return listPendingApprovals(ctx, s.pool)
+	return listPendingApprovals(ctx, s.q(ctx))
 }
 
 func (q querier) ListPendingApprovals(ctx context.Context) ([]domain.Approval, error) {
@@ -136,7 +136,7 @@ func listPendingApprovals(ctx context.Context, q Querier) ([]domain.Approval, er
 }
 
 func (s *Store) ListPendingApprovalsByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Approval, error) {
-	return listPendingApprovalsByExecution(ctx, s.pool, execID)
+	return listPendingApprovalsByExecution(ctx, s.q(ctx), execID)
 }
 
 func (q querier) ListPendingApprovalsByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Approval, error) {
@@ -158,7 +158,7 @@ func listPendingApprovalsByExecution(ctx context.Context, q Querier, execID uuid
 }
 
 func (s *Store) ListExpiredApprovals(ctx context.Context, now time.Time) ([]domain.Approval, error) {
-	return listExpiredApprovals(ctx, s.pool, now)
+	return listExpiredApprovals(ctx, s.q(ctx), now)
 }
 
 func (q querier) ListExpiredApprovals(ctx context.Context, now time.Time) ([]domain.Approval, error) {

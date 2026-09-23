@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-func (s *Store) Acquire(ctx context.Context, key string) (func(), error) {
+func (s *Store) acquire(ctx context.Context, key string) (func(), error) {
 	s.lockMtx.Lock()
 	ch, ok := s.lockers[key]
 	if !ok {
@@ -21,5 +21,5 @@ func (s *Store) Acquire(ctx context.Context, key string) (func(), error) {
 }
 
 func (s *Store) TryAcquire(ctx context.Context, key string) (func(), error) {
-	return s.Acquire(ctx, key)
+	return s.acquire(ctx, key)
 }

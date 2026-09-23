@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Store) Upsert(ctx context.Context, step domain.Step) error {
-	return upsertStep(ctx, s.pool, step)
+	return upsertStep(ctx, s.q(ctx), step)
 }
 
 func (q querier) Upsert(ctx context.Context, step domain.Step) error {
@@ -63,7 +63,7 @@ func upsertStep(ctx context.Context, q Querier, step domain.Step) error {
 }
 
 func (s *Store) GetStep(ctx context.Context, stepID string) (domain.Step, error) {
-	return getStep(ctx, s.pool, stepID)
+	return getStep(ctx, s.q(ctx), stepID)
 }
 
 func (q querier) GetStep(ctx context.Context, stepID string) (domain.Step, error) {
@@ -86,7 +86,7 @@ func getStep(ctx context.Context, q Querier, stepID string) (domain.Step, error)
 }
 
 func (s *Store) DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
-	return dispatchOccurrence(ctx, s.pool, dispatchID, kind, target, argsHash)
+	return dispatchOccurrence(ctx, s.q(ctx), dispatchID, kind, target, argsHash)
 }
 
 func (q querier) DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
@@ -109,7 +109,7 @@ func dispatchOccurrence(ctx context.Context, q Querier, dispatchID uuid.UUID, ki
 }
 
 func (s *Store) AdvanceDispatchOccurrence(ctx context.Context, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
-	return advanceDispatchOccurrence(ctx, s.pool, execID, lease, kind, target, argsHash, consumed)
+	return advanceDispatchOccurrence(ctx, s.q(ctx), execID, lease, kind, target, argsHash, consumed)
 }
 
 func (q querier) AdvanceDispatchOccurrence(ctx context.Context, execID uuid.UUID, lease domain.Lease, kind domain.StepKind, target, argsHash string, consumed int) error {
@@ -139,7 +139,7 @@ func advanceDispatchOccurrence(ctx context.Context, q Querier, execID uuid.UUID,
 }
 
 func (s *Store) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {
-	return listStepsByExecution(ctx, s.pool, execID)
+	return listStepsByExecution(ctx, s.q(ctx), execID)
 }
 
 func (q querier) ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error) {
@@ -177,7 +177,7 @@ func executionUsage(ctx context.Context, q Querier, execID uuid.UUID) (int, erro
 }
 
 func (s *Store) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error) {
-	return executionUsage(ctx, s.pool, execID)
+	return executionUsage(ctx, s.q(ctx), execID)
 }
 
 func (q querier) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error) {

@@ -65,14 +65,19 @@ type JobQueue interface {
 }
 
 type Locker interface {
-	Acquire(ctx context.Context, key string) (release func(), err error)
 	TryAcquire(ctx context.Context, key string) (release func(), err error)
 }
 
-// The TxStore passed to fn is backed by one transaction, so everything fn does
-// commits or rolls back together.
+// The TxStore passed to RunInTx's fn is backed by one transaction, so
+// everything fn does commits or rolls back together.
+//
+// RunLocked runs fn in one transaction that holds an exclusive lock on key
+// until it commits or rolls back. Store calls made with fn's context join that
+// transaction, and a RunInTx inside it rolls back on its own as a savepoint.
+// fn's context must not be used concurrently or after fn returns.
 type UnitOfWork interface {
 	RunInTx(ctx context.Context, fn func(TxStore) error) error
+	RunLocked(ctx context.Context, key string, fn func(ctx context.Context) error) error
 }
 
 type TxStore interface {

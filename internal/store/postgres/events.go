@@ -100,7 +100,7 @@ func appendBatch(ctx context.Context, q Querier, execID uuid.UUID, records []sto
 }
 
 func (s *Store) GetEvents(ctx context.Context, execID uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error) {
-	return getEvents(ctx, s.pool, execID, afterSeq, limit)
+	return getEvents(ctx, s.q(ctx), execID, afterSeq, limit)
 }
 
 func (q querier) GetEvents(ctx context.Context, execID uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error) {
@@ -154,7 +154,7 @@ func scanEvents(rows pgx.Rows, execID uuid.UUID) ([]domain.Event, error) {
 }
 
 func (s *Store) GetLatestSequence(ctx context.Context, execID uuid.UUID) (int64, error) {
-	return getLatestSequence(ctx, s.pool, execID)
+	return getLatestSequence(ctx, s.q(ctx), execID)
 }
 
 func (q querier) GetLatestSequence(ctx context.Context, execID uuid.UUID) (int64, error) {
@@ -171,7 +171,7 @@ func getLatestSequence(ctx context.Context, q Querier, execID uuid.UUID) (int64,
 }
 
 func (s *Store) CountByType(ctx context.Context, execID uuid.UUID, eventType string) (int, error) {
-	return countByType(ctx, s.pool, execID, eventType)
+	return countByType(ctx, s.q(ctx), execID, eventType)
 }
 
 func (q querier) CountByType(ctx context.Context, execID uuid.UUID, eventType string) (int, error) {

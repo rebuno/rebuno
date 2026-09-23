@@ -124,8 +124,8 @@ func runServer(cfg config.Config, configPath string) error {
 	return serve(ctx, cfg, deps, logger, replicaID, pool.Ping, hub)
 }
 
-// buildPool sizes for dispatch workers' lock and transaction connections,
-// with headroom for other database work.
+// buildPool sizes for dispatch workers with headroom for API requests and
+// other database work.
 func buildPool(ctx context.Context, cfg config.Config, logger *slog.Logger) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.DBURL)
 	if err != nil {

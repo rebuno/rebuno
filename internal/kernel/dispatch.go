@@ -22,30 +22,28 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease 
 	if !lease.Valid() {
 		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
 	}
-	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	exec, err := authorizedExecution(ctx, k.d.Executions, execID)
-	if err != nil {
-		return err
-	}
-	if exec.Status.IsTerminal() {
-		return domain.ErrExecutionTerminal
-	}
-	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
+	var exec domain.Execution
+	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(execID), func(ctx context.Context) error {
+		var err error
+		exec, err = authorizedExecution(ctx, k.d.Executions, execID)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Append(ctx, execID, domain.EventExecutionCompleted, payload.Execution(execID, domain.ExecutionCompleted, output, "")); err != nil {
-			return err
+		if exec.Status.IsTerminal() {
+			return domain.ErrExecutionTerminal
 		}
-		if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionCompleted, output, ""); err != nil {
-			return err
-		}
-		return releaseDispatchesLocked(ctx, tx, execID)
+		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			if err := renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
+				return err
+			}
+			if _, err := tx.Append(ctx, execID, domain.EventExecutionCompleted, payload.Execution(execID, domain.ExecutionCompleted, output, "")); err != nil {
+				return err
+			}
+			if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionCompleted, output, ""); err != nil {
+				return err
+			}
+			return releaseDispatchesLocked(ctx, tx, execID)
+		})
 	}); err != nil {
 		return err
 	}
@@ -62,30 +60,28 @@ func (k *Kernel) FailExecution(ctx context.Context, execID uuid.UUID, lease doma
 }
 
 func (k *Kernel) failExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error {
-	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
-	if err != nil {
-		return err
-	}
-	defer release()
-
-	exec, err := authorizedExecution(ctx, k.d.Executions, execID)
-	if err != nil {
-		return err
-	}
-	if exec.Status.IsTerminal() {
-		return domain.ErrExecutionTerminal
-	}
-	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
+	var exec domain.Execution
+	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(execID), func(ctx context.Context) error {
+		var err error
+		exec, err = authorizedExecution(ctx, k.d.Executions, execID)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Append(ctx, execID, domain.EventExecutionFailed, payload.Execution(execID, domain.ExecutionFailed, nil, reason)); err != nil {
-			return err
+		if exec.Status.IsTerminal() {
+			return domain.ErrExecutionTerminal
 		}
-		if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionFailed, nil, reason); err != nil {
-			return err
-		}
-		return releaseDispatchesLocked(ctx, tx, execID)
+		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			if err := renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
+				return err
+			}
+			if _, err := tx.Append(ctx, execID, domain.EventExecutionFailed, payload.Execution(execID, domain.ExecutionFailed, nil, reason)); err != nil {
+				return err
+			}
+			if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionFailed, nil, reason); err != nil {
+				return err
+			}
+			return releaseDispatchesLocked(ctx, tx, execID)
+		})
 	}); err != nil {
 		return err
 	}
@@ -102,13 +98,10 @@ func (k *Kernel) Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.L
 	if !lease.Valid() {
 		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
 	}
-	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
-	if err != nil {
-		return err
-	}
-	defer release()
-	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		return renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC())
+	return k.d.UnitOfWork.RunLocked(ctx, lockKey(execID), func(ctx context.Context) error {
+		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			return renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC())
+		})
 	})
 }
 

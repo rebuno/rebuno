@@ -9,6 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rebuno/rebuno/internal/domain"
+	"github.com/rebuno/rebuno/internal/ratelimit"
+	"github.com/rebuno/rebuno/internal/store"
 )
 
 func advisoryLockCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
@@ -20,7 +23,7 @@ func advisoryLockCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool) in
 	return n
 }
 
-func TestAdvisoryLockReleasedAfterContextCancel(t *testing.T) {
+func TestRunLockedReleasesLockAfterContextCancel(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
 	s := NewStore(pool)
@@ -28,26 +31,26 @@ func TestAdvisoryLockReleasedAfterContextCancel(t *testing.T) {
 	before := advisoryLockCount(t, ctx, pool)
 
 	lockCtx, cancel := context.WithCancel(ctx)
-	release, err := s.Acquire(lockCtx, "leak-test-key")
-	if err != nil {
-		t.Fatalf("acquire: %v", err)
+	err := s.RunLocked(lockCtx, "leak-test-key", func(context.Context) error {
+		cancel()
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected commit with a canceled context to fail")
 	}
-	cancel()  // caller context dies before release, as in a cancelled request
-	release() // must still free the lock despite the dead context
 
 	if after := advisoryLockCount(t, ctx, pool); after != before {
-		t.Fatalf("advisory lock leaked: count was %d before, %d after release", before, after)
+		t.Fatalf("advisory lock leaked: count was %d before, %d after", before, after)
 	}
 }
 
 func TestTryAcquireReportsHeldLock(t *testing.T) {
 	ctx := context.Background()
-	pool := testPool(t)
-	s := NewStore(pool)
+	s := NewStore(testPool(t))
 
-	release, err := s.Acquire(ctx, "contended-key")
-	if err != nil {
-		t.Fatalf("acquire: %v", err)
+	release, err := s.TryAcquire(ctx, "contended-key")
+	if err != nil || release == nil {
+		t.Fatalf("try acquire: release=%v err=%v", release != nil, err)
 	}
 	defer release()
 
@@ -61,10 +64,10 @@ func TestTryAcquireReportsHeldLock(t *testing.T) {
 	}
 }
 
-func smallPoolStore(t *testing.T, cfg *pgxpool.Config) *Store {
+func smallPoolStore(t *testing.T, cfg *pgxpool.Config, maxConns int32) *Store {
 	t.Helper()
 	cfg = cfg.Copy()
-	cfg.MaxConns = 3
+	cfg.MaxConns = maxConns
 	cfg.MinConns = 0
 	cfg.MinIdleConns = 0
 	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
@@ -95,17 +98,39 @@ func waitForLockWaiters(t *testing.T, ctx context.Context, s *Store, key string,
 	}
 }
 
+// holdLock holds key through another store until the returned release is called.
+func holdLock(t *testing.T, ctx context.Context, s *Store, key string) func() {
+	t.Helper()
+	held := make(chan struct{})
+	done := make(chan struct{})
+	finished := make(chan error, 1)
+	go func() {
+		finished <- s.RunLocked(ctx, key, func(context.Context) error {
+			close(held)
+			<-done
+			return nil
+		})
+	}()
+	select {
+	case <-held:
+	case err := <-finished:
+		t.Fatalf("hold lock: %v", err)
+	}
+	return sync.OnceFunc(func() {
+		close(done)
+		if err := <-finished; err != nil {
+			t.Errorf("release held lock: %v", err)
+		}
+	})
+}
+
 func TestContendedLockLeavesPoolAvailable(t *testing.T) {
 	otherReplica := NewStore(testPool(t))
-	s := smallPoolStore(t, otherReplica.pool.Config())
+	s := smallPoolStore(t, otherReplica.pool.Config(), 3)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	key := uuid.NewString()
-	release, err := otherReplica.Acquire(ctx, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
+	release := holdLock(t, ctx, otherReplica, key)
 
 	waiters := int(s.pool.Config().MaxConns) + 1
 	results := make(chan error, waiters)
@@ -117,27 +142,24 @@ func TestContendedLockLeavesPoolAvailable(t *testing.T) {
 	}()
 	for range waiters {
 		wg.Go(func() {
-			release, err := s.Acquire(ctx, key)
-			if err == nil {
-				err = s.pool.Ping(ctx)
-				release()
-			}
-			results <- err
+			results <- s.RunLocked(ctx, key, func(ctx context.Context) error {
+				_, err := s.GetExecution(ctx, uuid.New())
+				if errors.Is(err, domain.ErrNotFound) {
+					return nil
+				}
+				return err
+			})
 		})
 	}
 	waitForLockWaiters(t, ctx, s, key, waiters)
 
 	probeCtx, stop := context.WithTimeout(ctx, time.Second)
 	defer stop()
-	releaseOther, err := s.Acquire(probeCtx, uuid.NewString())
-	if err != nil {
-		t.Fatalf("acquire unrelated lock: %v", err)
-	}
-	defer releaseOther()
-	if err := s.pool.Ping(probeCtx); err != nil {
+	if err := s.RunLocked(probeCtx, uuid.NewString(), func(context.Context) error {
+		return s.pool.Ping(probeCtx)
+	}); err != nil {
 		t.Fatalf("database work under unrelated lock: %v", err)
 	}
-	releaseOther()
 	select {
 	case err := <-results:
 		t.Fatalf("waiter returned while another replica held the lock: %v", err)
@@ -152,8 +174,8 @@ func TestContendedLockLeavesPoolAvailable(t *testing.T) {
 	}
 }
 
-func TestAcquireFailureReleasesLocalGate(t *testing.T) {
-	s := smallPoolStore(t, testPool(t).Config())
+func TestRunLockedFailureReleasesLocalGate(t *testing.T) {
+	s := smallPoolStore(t, testPool(t).Config(), 3)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	var held []*pgxpool.Conn
@@ -172,21 +194,77 @@ func TestAcquireFailureReleasesLocalGate(t *testing.T) {
 	}
 
 	key := uuid.NewString()
+	noop := func(context.Context) error { return nil }
 	waitCtx, stop := context.WithTimeout(ctx, 100*time.Millisecond)
-	release, err := s.Acquire(waitCtx, key)
+	err := s.RunLocked(waitCtx, key, noop)
 	stop()
-	if release != nil {
-		release()
-		t.Fatal("acquired a lock with an exhausted pool")
-	}
 	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("acquire returned %v", err)
+		t.Fatalf("run locked with an exhausted pool returned %v", err)
 	}
 
 	releaseConnections()
-	release, err = s.Acquire(ctx, key)
-	if err != nil {
-		t.Fatalf("acquire after pool recovery: %v", err)
+	if err := s.RunLocked(ctx, key, noop); err != nil {
+		t.Fatalf("run locked after pool recovery: %v", err)
 	}
-	release()
+}
+
+func TestRunLockedStoreCallsShareItsConnection(t *testing.T) {
+	s := smallPoolStore(t, testPool(t).Config(), 1)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	err := s.RunLocked(ctx, uuid.NewString(), func(ctx context.Context) error {
+		if _, err := s.GetExecution(ctx, uuid.New()); !errors.Is(err, domain.ErrNotFound) {
+			return err
+		}
+		cfg := domain.RateLimitConfig{MaxCalls: 1, Window: time.Minute}
+		if _, _, err := s.Allow(ctx, ratelimit.Key(uuid.NewString()), cfg); err != nil {
+			return err
+		}
+		return s.RunInTx(ctx, func(tx store.TxStore) error {
+			_, err := tx.GetExecution(ctx, uuid.New())
+			if errors.Is(err, domain.ErrNotFound) {
+				return nil
+			}
+			return err
+		})
+	})
+	if err != nil {
+		t.Fatalf("locked section on a one-connection pool: %v", err)
+	}
+}
+
+func TestRunInTxInsideRunLockedRollsBackAlone(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(testPool(t))
+	execID := seedExecution(t, ctx, s)
+	exec, err := s.GetExecution(ctx, execID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = s.RunLocked(ctx, uuid.NewString(), func(ctx context.Context) error {
+		err := s.RunInTx(ctx, func(tx store.TxStore) error {
+			if _, err := tx.Append(ctx, execID, "discarded", nil); err != nil {
+				return err
+			}
+			return tx.CreateExecution(ctx, exec)
+		})
+		if !errors.Is(err, domain.ErrConflict) {
+			t.Errorf("nested duplicate create returned %v", err)
+		}
+		_, err = s.Append(ctx, execID, "kept", nil)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("locked section after nested rollback: %v", err)
+	}
+
+	events, err := s.GetEvents(ctx, execID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != "kept" {
+		t.Fatalf("events after nested rollback: %+v", events)
+	}
 }

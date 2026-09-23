@@ -34,54 +34,50 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 	if err != nil {
 		return err
 	}
-	release, err := k.d.Locker.Acquire(ctx, lockKey(approval.ExecutionID))
-	if err != nil {
-		return err
-	}
-	defer release()
+	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(approval.ExecutionID), func(ctx context.Context) error {
+		approval, _ = k.d.Approvals.GetApproval(ctx, id)
+		if approval.Status != domain.ApprovalPending {
+			return domain.ErrConflict
+		}
+		if !approval.AllowsApprover(req.DecidedBy) {
+			return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, req.DecidedBy)
+		}
+		now := time.Now().UTC()
+		approval.Status = domain.ApprovalGranted
+		approval.DecidedBy = req.DecidedBy
+		approval.DecidedAt = &now
+		approval.Rationale = req.Rationale
 
-	approval, _ = k.d.Approvals.GetApproval(ctx, id)
-	if approval.Status != domain.ApprovalPending {
-		return domain.ErrConflict
-	}
-	if !approval.AllowsApprover(req.DecidedBy) {
-		return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, req.DecidedBy)
-	}
-	now := time.Now().UTC()
-	approval.Status = domain.ApprovalGranted
-	approval.DecidedBy = req.DecidedBy
-	approval.DecidedAt = &now
-	approval.Rationale = req.Rationale
-
-	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		step, err := tx.GetStep(ctx, approval.StepID)
-		if err != nil {
-			return err
-		}
-		if err := requireAwaitingApproval(step); err != nil {
-			return err
-		}
-		evts := []store.EventRecord{
-			{Type: domain.EventApprovalGranted, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalGranted, req.DecidedBy, req.Rationale)},
-			{Type: domain.EventStepAllowed, Payload: payload.Step(approval.StepID, step.Kind, step.Target, "")},
-			{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
-		}
-		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
-			return err
-		}
-		// Update the projected step so replay sees it as allowed/ready.
-		step.Status = domain.StepAllowed
-		if err := tx.Upsert(ctx, step); err != nil {
-			return err
-		}
-		if err := tx.UpdateApproval(ctx, approval); err != nil {
-			return err
-		}
-		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
-			return err
-		}
-		// Resume the execution by enqueueing a dispatch atomically.
-		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
+		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			step, err := tx.GetStep(ctx, approval.StepID)
+			if err != nil {
+				return err
+			}
+			if err := requireAwaitingApproval(step); err != nil {
+				return err
+			}
+			evts := []store.EventRecord{
+				{Type: domain.EventApprovalGranted, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalGranted, req.DecidedBy, req.Rationale)},
+				{Type: domain.EventStepAllowed, Payload: payload.Step(approval.StepID, step.Kind, step.Target, "")},
+				{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
+			}
+			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
+				return err
+			}
+			// Update the projected step so replay sees it as allowed/ready.
+			step.Status = domain.StepAllowed
+			if err := tx.Upsert(ctx, step); err != nil {
+				return err
+			}
+			if err := tx.UpdateApproval(ctx, approval); err != nil {
+				return err
+			}
+			if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
+				return err
+			}
+			// Resume the execution by enqueueing a dispatch atomically.
+			return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
+		})
 	}); err != nil {
 		return err
 	}
@@ -94,61 +90,57 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 	if err != nil {
 		return err
 	}
-	release, err := k.d.Locker.Acquire(ctx, lockKey(approval.ExecutionID))
-	if err != nil {
-		return err
-	}
-	defer release()
+	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(approval.ExecutionID), func(ctx context.Context) error {
+		approval, _ = k.d.Approvals.GetApproval(ctx, id)
+		if approval.Status != domain.ApprovalPending {
+			return domain.ErrConflict
+		}
+		if !approval.AllowsApprover(req.DecidedBy) {
+			return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, req.DecidedBy)
+		}
+		now := time.Now().UTC()
+		approval.Status = domain.ApprovalDenied
+		approval.DecidedBy = req.DecidedBy
+		approval.DecidedAt = &now
+		approval.Rationale = req.Rationale
 
-	approval, _ = k.d.Approvals.GetApproval(ctx, id)
-	if approval.Status != domain.ApprovalPending {
-		return domain.ErrConflict
-	}
-	if !approval.AllowsApprover(req.DecidedBy) {
-		return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, req.DecidedBy)
-	}
-	now := time.Now().UTC()
-	approval.Status = domain.ApprovalDenied
-	approval.DecidedBy = req.DecidedBy
-	approval.DecidedAt = &now
-	approval.Rationale = req.Rationale
-
-	reason := req.Rationale
-	if reason == "" {
-		reason = "approval_denied"
-	}
-	errPayload, _ := json.Marshal(map[string]string{"reason": reason})
-	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		step, err := tx.GetStep(ctx, approval.StepID)
-		if err != nil {
-			return err
+		reason := req.Rationale
+		if reason == "" {
+			reason = "approval_denied"
 		}
-		if err := requireAwaitingApproval(step); err != nil {
-			return err
-		}
-		evts := []store.EventRecord{
-			{Type: domain.EventApprovalDenied, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
-			{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
-			{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
-		}
-		if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
-			return err
-		}
-		if err := tx.UpdateApproval(ctx, approval); err != nil {
-			return err
-		}
-		step.Status = domain.StepDenied
-		step.Error = errPayload
-		step.CompletedAt = &now
-		if err := tx.Upsert(ctx, step); err != nil {
-			return err
-		}
-		if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
-			return err
-		}
-		// Resume rather than fail: a refusal is something the handler is told,
-		// like any other denied step, so it can report or route around it.
-		return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
+		errPayload, _ := json.Marshal(map[string]string{"reason": reason})
+		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			step, err := tx.GetStep(ctx, approval.StepID)
+			if err != nil {
+				return err
+			}
+			if err := requireAwaitingApproval(step); err != nil {
+				return err
+			}
+			evts := []store.EventRecord{
+				{Type: domain.EventApprovalDenied, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
+				{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
+				{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
+			}
+			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
+				return err
+			}
+			if err := tx.UpdateApproval(ctx, approval); err != nil {
+				return err
+			}
+			step.Status = domain.StepDenied
+			step.Error = errPayload
+			step.CompletedAt = &now
+			if err := tx.Upsert(ctx, step); err != nil {
+				return err
+			}
+			if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
+				return err
+			}
+			// Resume rather than fail: a refusal is something the handler is told,
+			// like any other denied step, so it can report or route around it.
+			return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
+		})
 	}); err != nil {
 		return err
 	}

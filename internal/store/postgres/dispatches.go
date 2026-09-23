@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Store) Enqueue(ctx context.Context, d domain.Dispatch) error {
-	return enqueueDispatch(ctx, s.pool, d)
+	return enqueueDispatch(ctx, s.q(ctx), d)
 }
 
 func (q querier) Enqueue(ctx context.Context, d domain.Dispatch) error {
@@ -51,7 +51,7 @@ func enqueueDispatch(ctx context.Context, q Querier, d domain.Dispatch) error {
 }
 
 func (s *Store) Claim(ctx context.Context, replica string, batch int, now time.Time) ([]domain.Dispatch, error) {
-	return claimDispatches(ctx, s.pool, replica, batch, now)
+	return claimDispatches(ctx, s.q(ctx), replica, batch, now)
 }
 
 func (q querier) Claim(ctx context.Context, replica string, batch int, now time.Time) ([]domain.Dispatch, error) {
@@ -91,7 +91,7 @@ func claimDispatches(ctx context.Context, q Querier, replica string, batch int, 
 }
 
 func (s *Store) Ack(ctx context.Context, id uuid.UUID, attempt int, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
-	return ackDispatch(ctx, s.pool, id, attempt, status, nextAttemptAt)
+	return ackDispatch(ctx, s.q(ctx), id, attempt, status, nextAttemptAt)
 }
 
 func (q querier) Ack(ctx context.Context, id uuid.UUID, attempt int, status domain.DispatchStatus, nextAttemptAt *time.Time) error {
@@ -119,7 +119,7 @@ func ackDispatch(ctx context.Context, q Querier, id uuid.UUID, attempt int, stat
 }
 
 func (s *Store) Retire(ctx context.Context, id uuid.UUID) error {
-	return retireDispatch(ctx, s.pool, id)
+	return retireDispatch(ctx, s.q(ctx), id)
 }
 
 func (q querier) Retire(ctx context.Context, id uuid.UUID) error {
@@ -146,7 +146,7 @@ func retireDispatch(ctx context.Context, q Querier, id uuid.UUID) error {
 }
 
 func (s *Store) GetDispatch(ctx context.Context, id uuid.UUID) (domain.Dispatch, error) {
-	return getDispatch(ctx, s.pool, id)
+	return getDispatch(ctx, s.q(ctx), id)
 }
 
 func (q querier) GetDispatch(ctx context.Context, id uuid.UUID) (domain.Dispatch, error) {
@@ -171,7 +171,7 @@ func getDispatch(ctx context.Context, q Querier, id uuid.UUID) (domain.Dispatch,
 }
 
 func (s *Store) ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error) {
-	return listDispatchesByExecution(ctx, s.pool, execID)
+	return listDispatchesByExecution(ctx, s.q(ctx), execID)
 }
 
 func (q querier) ListDispatchesByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Dispatch, error) {
@@ -194,7 +194,7 @@ func listDispatchesByExecution(ctx context.Context, q Querier, execID uuid.UUID)
 }
 
 func (s *Store) RenewLease(ctx context.Context, execID uuid.UUID, lease domain.Lease, now time.Time) error {
-	return renewLease(ctx, s.pool, execID, lease, now)
+	return renewLease(ctx, s.q(ctx), execID, lease, now)
 }
 
 func (q querier) RenewLease(ctx context.Context, execID uuid.UUID, lease domain.Lease, now time.Time) error {
@@ -217,7 +217,7 @@ func renewLease(ctx context.Context, q Querier, execID uuid.UUID, lease domain.L
 }
 
 func (s *Store) CheckLease(ctx context.Context, execID uuid.UUID, lease domain.Lease) error {
-	return checkLease(ctx, s.pool, execID, lease)
+	return checkLease(ctx, s.q(ctx), execID, lease)
 }
 
 func (q querier) CheckLease(ctx context.Context, execID uuid.UUID, lease domain.Lease) error {
@@ -241,7 +241,7 @@ func checkLease(ctx context.Context, q Querier, execID uuid.UUID, lease domain.L
 }
 
 func (s *Store) ReclaimStalled(ctx context.Context, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {
-	return reclaimStalled(ctx, s.pool, now, defaultLeaseTimeout, batch)
+	return reclaimStalled(ctx, s.q(ctx), now, defaultLeaseTimeout, batch)
 }
 
 func (q querier) ReclaimStalled(ctx context.Context, now time.Time, defaultLeaseTimeout time.Duration, batch int) ([]domain.Dispatch, error) {

@@ -42,49 +42,49 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 		return domain.StepDecision{}, fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
 	}
 
-	release, err := k.d.Locker.Acquire(ctx, lockKey(execID))
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-	defer release()
-
-	exec, err := authorizedExecution(ctx, k.d.Executions, execID)
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-	if exec.Status.IsTerminal() {
-		return domain.StepDecision{Decision: "execution_terminal"}, nil
-	}
-
-	// Renewing is also the fence: it fails unless this attempt still owns the
-	// dispatch for this execution.
-	if err := k.d.Queue.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
-		return domain.StepDecision{}, err
-	}
-
-	argsHash, err := identity.ComputeArgsHash(req.Args)
-	if err != nil {
-		return domain.StepDecision{}, fmt.Errorf("%w: invalid args: %v", domain.ErrValidation, err)
-	}
-
-	occurrence, err := k.d.Steps.DispatchOccurrence(ctx, req.Lease.DispatchID, req.Kind, req.Target, argsHash)
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-	stepID := identity.ComputeStepID(execID, req.Kind, req.Target, argsHash, occurrence)
-
-	dec, recorded, err := k.decideStep(ctx, exec, stepID, req, argsHash, occurrence)
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-
-	if recorded {
-		if err := k.d.Steps.AdvanceDispatchOccurrence(ctx, execID, req.Lease, req.Kind, req.Target, argsHash, occurrence); err != nil {
-			return domain.StepDecision{}, err
+	var dec domain.StepDecision
+	err := k.d.UnitOfWork.RunLocked(ctx, lockKey(execID), func(ctx context.Context) error {
+		exec, err := authorizedExecution(ctx, k.d.Executions, execID)
+		if err != nil {
+			return err
 		}
-		dec.StepID = stepID
-	}
-	return dec, nil
+		if exec.Status.IsTerminal() {
+			dec = domain.StepDecision{Decision: "execution_terminal"}
+			return nil
+		}
+
+		// Renewing is also the fence: it fails unless this attempt still owns the
+		// dispatch for this execution.
+		if err := k.d.Queue.RenewLease(ctx, execID, req.Lease, time.Now().UTC()); err != nil {
+			return err
+		}
+
+		argsHash, err := identity.ComputeArgsHash(req.Args)
+		if err != nil {
+			return fmt.Errorf("%w: invalid args: %v", domain.ErrValidation, err)
+		}
+
+		occurrence, err := k.d.Steps.DispatchOccurrence(ctx, req.Lease.DispatchID, req.Kind, req.Target, argsHash)
+		if err != nil {
+			return err
+		}
+		stepID := identity.ComputeStepID(execID, req.Kind, req.Target, argsHash, occurrence)
+
+		var recorded bool
+		dec, recorded, err = k.decideStep(ctx, exec, stepID, req, argsHash, occurrence)
+		if err != nil {
+			return err
+		}
+
+		if recorded {
+			if err := k.d.Steps.AdvanceDispatchOccurrence(ctx, execID, req.Lease, req.Kind, req.Target, argsHash, occurrence); err != nil {
+				return err
+			}
+			dec.StepID = stepID
+		}
+		return nil
+	})
+	return dec, err
 }
 
 func (k *Kernel) decideStep(
@@ -490,53 +490,54 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
-	release, err := k.d.Locker.Acquire(ctx, lockKey(step.ExecutionID))
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-	defer release()
-
-	// Re-fetch under the lock to avoid a TOCTOU with CancelExecution.
-	step, err = k.d.Steps.GetStep(ctx, stepID)
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-	exec, err := authorizedExecution(ctx, k.d.Executions, step.ExecutionID)
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-
-	if exec.Status.IsTerminal() {
-		return domain.StepDecision{Decision: "execution_terminal"}, nil
-	}
-	if step.Status.IsTerminal() {
-		return domain.StepDecision{Decision: "replay", Result: step.Result}, nil
-	}
-	if err := requireExecuting(step); err != nil {
-		return domain.StepDecision{}, err
-	}
-	now := time.Now().UTC()
-	step.Status = domain.StepSucceeded
-	step.Result = req.Result
-	step.CompletedAt = &now
-
-	var tokens usage.Tokens
-	if step.Kind == domain.StepKindLLM {
-		tokens = usage.Parse(req.Result)
-		if !tokens.Found() {
-			k.d.Observer.RecordUsageMissing()
+	var dec domain.StepDecision
+	err = k.d.UnitOfWork.RunLocked(ctx, lockKey(step.ExecutionID), func(ctx context.Context) error {
+		// Re-fetch under the lock to avoid a TOCTOU with CancelExecution.
+		step, err := k.d.Steps.GetStep(ctx, stepID)
+		if err != nil {
+			return err
 		}
-		step.UsageInput = tokens.Input
-		step.UsageOutput = tokens.Output
-	}
+		exec, err := authorizedExecution(ctx, k.d.Executions, step.ExecutionID)
+		if err != nil {
+			return err
+		}
 
-	evts := []store.EventRecord{
-		{Type: domain.EventStepSucceeded, Payload: payload.StepResult(stepID, step.Kind, step.Target, tokens)},
-	}
-	if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
-		return domain.StepDecision{}, err
-	}
-	return domain.StepDecision{Decision: "recorded"}, nil
+		if exec.Status.IsTerminal() {
+			dec = domain.StepDecision{Decision: "execution_terminal"}
+			return nil
+		}
+		if step.Status.IsTerminal() {
+			dec = domain.StepDecision{Decision: "replay", Result: step.Result}
+			return nil
+		}
+		if err := requireExecuting(step); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		step.Status = domain.StepSucceeded
+		step.Result = req.Result
+		step.CompletedAt = &now
+
+		var tokens usage.Tokens
+		if step.Kind == domain.StepKindLLM {
+			tokens = usage.Parse(req.Result)
+			if !tokens.Found() {
+				k.d.Observer.RecordUsageMissing()
+			}
+			step.UsageInput = tokens.Input
+			step.UsageOutput = tokens.Output
+		}
+
+		evts := []store.EventRecord{
+			{Type: domain.EventStepSucceeded, Payload: payload.StepResult(stepID, step.Kind, step.Target, tokens)},
+		}
+		if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
+			return err
+		}
+		dec = domain.StepDecision{Decision: "recorded"}
+		return nil
+	})
+	return dec, err
 }
 
 func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepRequest) (domain.StepDecision, error) {
@@ -547,42 +548,43 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 	if err != nil {
 		return domain.StepDecision{}, err
 	}
-	release, err := k.d.Locker.Acquire(ctx, lockKey(step.ExecutionID))
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-	defer release()
+	var dec domain.StepDecision
+	err = k.d.UnitOfWork.RunLocked(ctx, lockKey(step.ExecutionID), func(ctx context.Context) error {
+		// Re-fetch under the lock to avoid a TOCTOU with CancelExecution.
+		step, err := k.d.Steps.GetStep(ctx, stepID)
+		if err != nil {
+			return err
+		}
+		exec, err := authorizedExecution(ctx, k.d.Executions, step.ExecutionID)
+		if err != nil {
+			return err
+		}
 
-	// Re-fetch under the lock to avoid a TOCTOU with CancelExecution.
-	step, err = k.d.Steps.GetStep(ctx, stepID)
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-	exec, err := authorizedExecution(ctx, k.d.Executions, step.ExecutionID)
-	if err != nil {
-		return domain.StepDecision{}, err
-	}
-
-	if exec.Status.IsTerminal() {
-		return domain.StepDecision{Decision: "execution_terminal"}, nil
-	}
-	if step.Status.IsTerminal() {
-		return domain.StepDecision{Decision: "replay", Error: step.Error}, nil
-	}
-	if err := requireExecuting(step); err != nil {
-		return domain.StepDecision{}, err
-	}
-	now := time.Now().UTC()
-	step.Status = domain.StepFailed
-	step.Error = req.Error
-	step.CompletedAt = &now
-	evts := []store.EventRecord{
-		{Type: domain.EventStepFailed, Payload: payload.StepError(stepID, step.Kind, step.Target, req.Error)},
-	}
-	if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
-		return domain.StepDecision{}, err
-	}
-	return domain.StepDecision{Decision: "recorded"}, nil
+		if exec.Status.IsTerminal() {
+			dec = domain.StepDecision{Decision: "execution_terminal"}
+			return nil
+		}
+		if step.Status.IsTerminal() {
+			dec = domain.StepDecision{Decision: "replay", Error: step.Error}
+			return nil
+		}
+		if err := requireExecuting(step); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		step.Status = domain.StepFailed
+		step.Error = req.Error
+		step.CompletedAt = &now
+		evts := []store.EventRecord{
+			{Type: domain.EventStepFailed, Payload: payload.StepError(stepID, step.Kind, step.Target, req.Error)},
+		}
+		if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
+			return err
+		}
+		dec = domain.StepDecision{Decision: "recorded"}
+		return nil
+	})
+	return dec, err
 }
 
 func (k *Kernel) failStepInternal(ctx context.Context, lease domain.Lease, step domain.Step, errPayload []byte) error {

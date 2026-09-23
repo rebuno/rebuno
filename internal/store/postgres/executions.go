@@ -14,7 +14,7 @@ const executionColumns = `id, agent_id, input, status, output, failure_reason,
 	created_at, updated_at, deadline_at, COALESCE(concurrency_key, '')`
 
 func (s *Store) CreateExecution(ctx context.Context, exec domain.Execution) error {
-	return createExecution(ctx, s.pool, exec)
+	return createExecution(ctx, s.q(ctx), exec)
 }
 
 func (q querier) CreateExecution(ctx context.Context, exec domain.Execution) error {
@@ -50,7 +50,7 @@ func createExecution(ctx context.Context, q Querier, exec domain.Execution) erro
 }
 
 func (s *Store) GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error) {
-	return getExecution(ctx, s.pool, id)
+	return getExecution(ctx, s.q(ctx), id)
 }
 
 func (q querier) GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error) {
@@ -71,7 +71,7 @@ func getExecution(ctx context.Context, q Querier, id uuid.UUID) (domain.Executio
 }
 
 func (s *Store) ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error) {
-	return listExecutions(ctx, s.pool, filter)
+	return listExecutions(ctx, s.q(ctx), filter)
 }
 
 func (q querier) ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error) {
@@ -122,7 +122,7 @@ func listExecutions(ctx context.Context, q Querier, filter domain.ExecutionFilte
 }
 
 func (s *Store) UpdateExecutionStatus(ctx context.Context, id uuid.UUID, status domain.ExecutionStatus, output []byte, reason string) error {
-	return updateExecutionStatus(ctx, s.pool, id, status, output, reason)
+	return updateExecutionStatus(ctx, s.q(ctx), id, status, output, reason)
 }
 
 func (q querier) UpdateExecutionStatus(ctx context.Context, id uuid.UUID, status domain.ExecutionStatus, output []byte, reason string) error {
@@ -161,7 +161,7 @@ func updateExecutionStatus(ctx context.Context, q Querier, id uuid.UUID, status 
 }
 
 func (s *Store) ListExpiredExecutions(ctx context.Context, now time.Time) ([]domain.Execution, error) {
-	return listExpiredExecutions(ctx, s.pool, now)
+	return listExpiredExecutions(ctx, s.q(ctx), now)
 }
 
 func (q querier) ListExpiredExecutions(ctx context.Context, now time.Time) ([]domain.Execution, error) {
@@ -194,7 +194,7 @@ func listExpiredExecutions(ctx context.Context, q Querier, now time.Time) ([]dom
 }
 
 func (s *Store) DeleteExecutionsCreatedBefore(ctx context.Context, before time.Time) error {
-	return deleteExecutionsCreatedBefore(ctx, s.pool, before)
+	return deleteExecutionsCreatedBefore(ctx, s.q(ctx), before)
 }
 
 func (q querier) DeleteExecutionsCreatedBefore(ctx context.Context, before time.Time) error {
@@ -233,7 +233,7 @@ func scanExecution(row pgx.Row) (domain.Execution, error) {
 }
 
 func (s *Store) ListIdleConcurrencyKeys(ctx context.Context, now time.Time) ([]string, error) {
-	return listIdleConcurrencyKeys(ctx, s.pool, now)
+	return listIdleConcurrencyKeys(ctx, s.q(ctx), now)
 }
 
 func (q querier) ListIdleConcurrencyKeys(ctx context.Context, now time.Time) ([]string, error) {
@@ -272,7 +272,7 @@ func listIdleConcurrencyKeys(ctx context.Context, q Querier, now time.Time) ([]s
 }
 
 func (s *Store) NextPendingByKey(ctx context.Context, key string, now time.Time) (domain.Execution, error) {
-	return nextPendingByKey(ctx, s.pool, key, now)
+	return nextPendingByKey(ctx, s.q(ctx), key, now)
 }
 
 func (q querier) NextPendingByKey(ctx context.Context, key string, now time.Time) (domain.Execution, error) {
