@@ -20,6 +20,14 @@ func Step(stepID string, kind domain.StepKind, target, ruleID string) map[string
 	return m
 }
 
+func StepDecided(stepID string, kind domain.StepKind, target, ruleID, reason string) map[string]any {
+	m := Step(stepID, kind, target, ruleID)
+	if reason != "" {
+		m["reason"] = reason
+	}
+	return m
+}
+
 func StepResult(stepID string, kind domain.StepKind, target string, tokens usage.Tokens) map[string]any {
 	payload := map[string]any{
 		"step_id":   stepID,

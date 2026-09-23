@@ -1043,6 +1043,26 @@ rules:
 	if gap := approval.TimeoutAt.Sub(before); gap > 6*time.Minute {
 		t.Errorf("timeout_at is %v out; the rule's 5m was dropped in favour of the default", gap)
 	}
+
+	events, err := k.GetEvents(ctx, exec.ID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	for _, ev := range events {
+		if ev.Type == domain.EventStepAwaitingApproval {
+			var p struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(ev.Payload, &p); err != nil {
+				t.Fatal(err)
+			}
+			reason = p.Reason
+		}
+	}
+	if reason != "filesystem writes need approval" {
+		t.Errorf("%s reason: got %q", domain.EventStepAwaitingApproval, reason)
+	}
 }
 
 func blockedApproval(t *testing.T, approvalConfig string) (*kernel.Kernel, uuid.UUID) {

@@ -370,7 +370,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		step.Status = domain.StepExecuting
 		step.StartedAt = &now
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepAllowed, Payload: payload.Step(stepID, req.Kind, req.Target, pol.RuleID)},
+			store.EventRecord{Type: domain.EventStepAllowed, Payload: payload.StepDecided(stepID, req.Kind, req.Target, pol.RuleID, pol.Reason)},
 			store.EventRecord{Type: domain.EventStepExecuting, Payload: payload.Step(stepID, req.Kind, req.Target, "")},
 		)
 		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
@@ -415,7 +415,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		}
 		step.Status = domain.StepAwaitingApproval
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepAwaitingApproval, Payload: payload.Step(stepID, req.Kind, req.Target, pol.RuleID)},
+			store.EventRecord{Type: domain.EventStepAwaitingApproval, Payload: payload.StepDecided(stepID, req.Kind, req.Target, pol.RuleID, pol.Reason)},
 			store.EventRecord{Type: domain.EventApprovalRequested, Payload: payload.Approval(approvalID, stepID, execID, domain.ApprovalPending, "", "")},
 		)
 		blockPayload := payload.Execution(execID, domain.ExecutionBlocked, nil, "")
