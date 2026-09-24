@@ -1,0 +1,72 @@
+default_action: deny
+rules:
+  - id: allow-llm
+    when:
+      step_kind: llm_call
+    then:
+      decision: allow
+
+  - id: allow-search
+    when:
+      target: executor_search
+    then:
+      decision: allow
+
+  - id: github-read
+    when:
+      target: executor_invoke
+      arguments:
+        tool:
+          one_of:
+            - tools.github_com_openapi.user.github.issues.listForRepo
+            - tools.github_com_openapi.user.github.issues.get
+            - tools.github_com_openapi.user.github.issues.listComments
+            - tools.github_com_openapi.user.github.pulls.list
+            - tools.github_com_openapi.user.github.pulls.get
+        arguments.owner:
+          equals: acme
+        arguments.repo:
+          equals: app
+    then:
+      decision: allow
+
+  - id: github-write
+    when:
+      target: executor_invoke
+      arguments:
+        tool:
+          one_of:
+            - tools.github_com_openapi.user.github.issues.create
+            - tools.github_com_openapi.user.github.issues.createComment
+        arguments.owner:
+          equals: acme
+        arguments.repo:
+          equals: app
+    then:
+      decision: require_approval
+      reason: writes need approval
+
+  - id: slack-read
+    when:
+      target: executor_invoke
+      arguments:
+        tool:
+          one_of:
+            - tools.slack_com_openapi.user.slack.conversations.conversationsHistory
+            - tools.slack_com_openapi.user.slack.conversations.conversationsReplies
+        arguments.channel:
+          equals: C0123456789
+    then:
+      decision: allow
+
+  - id: slack-post
+    when:
+      target: executor_invoke
+      arguments:
+        tool:
+          equals: tools.slack_com_openapi.user.slack.chat.chatPostMessage
+        arguments.body.channel:
+          equals: C0123456789
+    then:
+      decision: require_approval
+      reason: posts need approval
