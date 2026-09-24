@@ -1,0 +1,139 @@
+---
+title: "Claude Agent SDK"
+description: "Durable execution, policy, and approvals for Claude Agent SDK agents in Python"
+---
+
+A Claude Agent SDK agent runs on Rebuno with two seams. Model calls go through a
+Rebuno-aware gateway, which records each one as an `llm_call` step, and tools
+are served from an in-process MCP server that calls `@tool` functions, so every
+tool call is recorded as a `tool_call` step. On a re-dispatch the agent runs
+from the top and recorded steps replay instead of calling the model or the tool
+again.
+
+## Install
+
+```bash
+pip install rebuno claude-agent-sdk
+```
+
+## Model calls
+
+The SDK runs the Claude Code CLI as a subprocess, and the CLI makes the model
+calls from its own process, so `http_client()` can't be passed in. Instead,
+point the CLI at a gateway that implements the
+[LLM call contract](/llm-calls#implement-interception) through its environment,
+and forward the dispatch in `ANTHROPIC_CUSTOM_HEADERS` so the gateway can record
+the call under it:
+
+```python
+import os
+
+from rebuno import execution
+
+ctx = execution()
+lease = {
+    "rebuno-execution-id": ctx.id,
+    "rebuno-dispatch-id": ctx.dispatch_id,
+    "rebuno-dispatch-attempt": str(ctx.dispatch_attempt),
+    "rebuno-agent-id": ctx.agent_id,
+    "rebuno-agent-secret": os.environ["REBUNO_AGENT_SECRET"],
+}
+env = {
+    "ANTHROPIC_BASE_URL": os.environ["GATEWAY_URL"],
+    "ANTHROPIC_AUTH_TOKEN": os.environ["GATEWAY_KEY"],
+    "ANTHROPIC_CUSTOM_HEADERS": "\n".join(f"{k}: {v}" for k, v in lease.items()),
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+}
+```
+
+`execution()` reads the current dispatch, so build the environment inside the
+handler.
+[`examples/gateway/litellm_proxy.py`](https://github.com/rebuno/rebuno/blob/main/examples/gateway/litellm_proxy.py)
+is a LiteLLM proxy callback that implements the gateway.
+
+## Tools
+
+The CLI's built-in tools, such as `Bash` and `Edit`, run inside the CLI where
+the kernel can't see them. Turn them off with `tools=[]`, and serve your own
+tools from an SDK MCP server whose handlers call `@tool` functions:
+
+```python
+import json
+
+from claude_agent_sdk import create_sdk_mcp_server
+from claude_agent_sdk import tool as claude_tool
+from rebuno import tool
+
+
+@tool("send_email", idempotency="at_most_once")
+async def send_email(body: str) -> dict:
+    """Email the support summary."""
+    ...
+
+
+@claude_tool("send_email", "Email the support summary.", {"body": str})
+async def send_email_mcp(args):
+    result = await send_email(**args)
+    return {"content": [{"type": "text", "text": json.dumps(result)}]}
+
+
+support = create_sdk_mcp_server("support", tools=[send_email_mcp])
+```
+
+The MCP server runs in your process, so the `@tool` call records against the
+current execution. Mark anything with a side effect, such as sending an email or
+creating a ticket, `at_most_once`. See
+[idempotency](/sdk/python/tools#idempotency).
+
+## The agent
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query as claude_query
+from rebuno import Agent
+
+
+async def process(query: str) -> dict:
+    options = ClaudeAgentOptions(
+        model="claude-sonnet-5",
+        system_prompt="You investigate customer issues and email support summaries.",
+        tools=[],
+        mcp_servers={"support": support},
+        allowed_tools=["mcp__support__send_email"],
+        setting_sources=[],
+        env=env,  # the gateway environment above
+    )
+    answer = None
+    async for message in claude_query(prompt=query, options=options):
+        if isinstance(message, ResultMessage):
+            if message.is_error:
+                raise RuntimeError(message.result or message.subtype)
+            answer = message.result
+    return {"answer": answer}
+
+
+agent = Agent("support")
+
+if __name__ == "__main__":
+    agent.run(process)
+```
+
+`setting_sources=[]` keeps the CLI from loading settings files from the
+machine, so the tools and permissions are the ones set here.
+
+## What Rebuno adds
+
+- **Policy.** Every model and tool call is checked against [policy](/policy)
+  before it runs. A denied tool returns the rule's reason to the model as the
+  tool result, so the agent can take a different path.
+- **Approvals.** A tool that requires approval parks the execution. Once it's
+  approved, the agent is dispatched again, the earlier steps replay, and the
+  approved call runs.
+- **Recovery.** If the worker dies partway through, the next dispatch replays
+  every completed step and continues from the first one that didn't finish.
+  Model calls that already ran are not paid for twice.
+
+## Full example
+
+[`examples/frameworks/python/claude_agent_sdk_agent.py`](https://github.com/rebuno/rebuno/blob/main/examples/frameworks/python/claude_agent_sdk_agent.py)
+is a support agent that investigates a customer issue, creates a ticket, and
+emails a summary after approval.

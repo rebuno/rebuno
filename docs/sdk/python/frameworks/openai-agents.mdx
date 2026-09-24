@@ -1,0 +1,132 @@
+---
+title: "OpenAI Agents SDK"
+description: "Durable execution, policy, and approvals for OpenAI Agents SDK agents in Python"
+---
+
+An OpenAI Agents SDK agent runs on Rebuno unchanged apart from two seams. The
+OpenAI client under the model takes a Rebuno HTTP client, so every model call is
+recorded as an `llm_call` step, and tools are declared with `@tool`, so every
+tool call is recorded as a `tool_call` step. On a re-dispatch the agent runs
+from the top and recorded steps replay instead of calling the model or the tool
+again.
+
+## Install
+
+```bash
+pip install rebuno openai-agents
+```
+
+## Model calls
+
+Build the `AsyncOpenAI` client yourself with `http_client()`, and hand it to the
+model:
+
+```python
+from agents import OpenAIResponsesModel
+from openai import AsyncOpenAI
+from rebuno import http_client
+
+client = AsyncOpenAI(http_client=http_client())
+model = OpenAIResponsesModel("gpt-5.5", client)
+```
+
+See [LLM calls](/sdk/python/llm-calls) for the OpenAI SDK versions that accept
+the client.
+
+### Prompt cache key
+
+Against `api.openai.com`, the `Runner` generates a random `prompt_cache_key` for
+each run. The key is part of the request body, so every model call would get a
+new [step identity](/tools#step-identity) on resume and run again instead of
+replaying. Set the key to the execution id:
+
+```python
+from agents import ModelSettings, RunConfig
+from rebuno import execution
+
+config = RunConfig(
+    model_settings=ModelSettings(extra_args={"prompt_cache_key": str(execution().id)})
+)
+```
+
+## Tools
+
+`@tool` keeps the function's signature and docstring, so `function_tool` builds
+the tool schema from it as usual:
+
+```python
+from agents import function_tool
+from rebuno import tool
+
+
+@tool("lookup_orders", idempotency="safe_to_retry")
+async def lookup_orders(customer_id: str) -> dict:
+    """Look up a customer's recent orders."""
+    ...
+
+
+@tool("send_email", idempotency="at_most_once")
+async def send_email(body: str) -> dict:
+    """Email the support summary."""
+    ...
+
+
+tools = [function_tool(fn, failure_error_function=None) for fn in [lookup_orders, send_email]]
+```
+
+By default `function_tool` turns a tool's exception into an error message for
+the model. A tool held for approval raises to park the execution, so pass
+`failure_error_function=None` to let it unwind the run instead. A denied tool
+still returns the rule's reason to the model, since a denial doesn't raise.
+
+Mark anything with a side effect, such as sending an email or creating a
+ticket, `at_most_once`. See [idempotency](/sdk/python/tools#idempotency).
+
+## The agent
+
+The SDK's `Agent` and Rebuno's `Agent` share a name, so import one under an
+alias:
+
+```python
+from agents import Agent as OpenAIAgent
+from agents import Runner
+from rebuno import Agent
+
+
+async def process(query: str) -> dict:
+    client = AsyncOpenAI(http_client=http_client())
+    specialist = OpenAIAgent(
+        name="support specialist",
+        model=OpenAIResponsesModel("gpt-5.5", client),
+        tools=[function_tool(fn, failure_error_function=None) for fn in [lookup_orders, send_email]],
+    )
+    config = RunConfig(
+        model_settings=ModelSettings(extra_args={"prompt_cache_key": str(execution().id)})
+    )
+    result = await Runner.run(specialist, query, run_config=config)
+    return {"answer": result.final_output}
+
+
+agent = Agent("support")
+
+if __name__ == "__main__":
+    agent.run(process)
+```
+
+## What Rebuno adds
+
+- **Policy.** Every model and tool call is checked against [policy](/policy)
+  before it runs. A denied tool returns the rule's reason to the model as the
+  tool result, so the agent can take a different path.
+- **Approvals.** A tool that requires approval parks the execution. Once it's
+  approved, the agent is dispatched again, the earlier steps replay, and the
+  approved call runs.
+- **Recovery.** If the worker dies partway through, the next dispatch replays
+  every completed step and continues from the first one that didn't finish.
+  Model calls that already ran are not paid for twice.
+
+## Full example
+
+[`examples/frameworks/python/openai_agents_agent.py`](https://github.com/rebuno/rebuno/blob/main/examples/frameworks/python/openai_agents_agent.py)
+is a support agent that investigates a customer issue, creates a ticket, and
+emails a summary after approval.

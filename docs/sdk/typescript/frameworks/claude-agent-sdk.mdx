@@ -1,0 +1,169 @@
+---
+title: "Claude Agent SDK"
+description: "Durable execution, policy, and approvals for Claude Agent SDK agents in TypeScript"
+---
+
+A Claude Agent SDK agent runs on Rebuno with two seams. Model calls go through a
+Rebuno-aware gateway, which records each one as an `llm_call` step, and tools
+are served from an in-process MCP server that calls `defineTool` tools, so every
+tool call is recorded as a `tool_call` step. On a re-dispatch the agent runs
+from the top and recorded steps replay instead of calling the model or the tool
+again.
+
+## Install
+
+```bash
+npm install rebuno @anthropic-ai/claude-agent-sdk zod
+```
+
+## Model calls
+
+The SDK runs the Claude Code CLI as a subprocess, and the CLI makes the model
+calls from its own process, so `rebunoFetch` can't be passed in. Instead, point
+the CLI at a gateway that implements the
+[LLM call contract](/llm-calls#implement-interception) through its environment,
+and forward the dispatch in `ANTHROPIC_CUSTOM_HEADERS` so the gateway can record
+the call under it:
+
+```ts
+import { env } from "node:process";
+import { execution } from "rebuno";
+
+const ctx = execution();
+const lease = {
+  "rebuno-execution-id": ctx.id,
+  "rebuno-dispatch-id": ctx.dispatchId,
+  "rebuno-dispatch-attempt": String(ctx.dispatchAttempt),
+  "rebuno-agent-id": ctx.agentId,
+  "rebuno-agent-secret": env.REBUNO_AGENT_SECRET!,
+};
+const cliEnv = {
+  ...env,
+  ANTHROPIC_BASE_URL: env.GATEWAY_URL,
+  ANTHROPIC_AUTH_TOKEN: env.GATEWAY_KEY,
+  ANTHROPIC_CUSTOM_HEADERS: Object.entries(lease).map(([k, v]) => `${k}: ${v}`).join("\n"),
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+};
+```
+
+`execution()` reads the current dispatch, so build the environment inside the
+handler.
+[`examples/gateway/litellm_proxy.py`](https://github.com/rebuno/rebuno/blob/main/examples/gateway/litellm_proxy.py)
+is a LiteLLM proxy callback that implements the gateway.
+
+## Tools
+
+The CLI's built-in tools, such as `Bash` and `Edit`, run inside the CLI where
+the kernel can't see them. Turn them off with `tools: []`, and serve your own
+tools from an SDK MCP server whose handlers call `defineTool` tools:
+
+```ts
+import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
+import { defineTool } from "rebuno";
+import { z } from "zod";
+
+const sendEmail = defineTool({
+  name: "send_email",
+  idempotency: "at_most_once",
+  execute: async ({ body }: { body: string }) => mail.send("ops@acme.com", body),
+});
+
+const support = createSdkMcpServer({
+  name: "support",
+  tools: [
+    tool("send_email", "Email the support summary.", { body: z.string() }, async (args) => {
+      const result = await sendEmail(args);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }),
+  ],
+});
+```
+
+The MCP server runs in your process, so the `defineTool` call records against
+the current execution. Mark anything with a side effect, such as sending an
+email or creating a ticket, `at_most_once`. See
+[idempotency](/sdk/typescript/tools#idempotency).
+
+## Stopping on approval
+
+When a tool is held for approval, it throws. The CLI passes a tool error back to
+the model and keeps retrying the model call, and every retry is refused. Abort
+the run on the first tool error instead: catch it in the MCP handler, abort the
+`AbortController` passed as `abortController`, and rethrow `halt.signal.reason`
+from around the loop so the original error reaches the handler boundary. The
+agent below does this.
+
+## The agent
+
+```ts
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { Agent } from "rebuno";
+
+async function process(input: { query: string }) {
+  const halt = new AbortController();
+  const support = createSdkMcpServer({
+    name: "support",
+    tools: [
+      tool("send_email", "Email the support summary.", { body: z.string() }, async (args) => {
+        try {
+          const result = await sendEmail(args);
+          return { content: [{ type: "text", text: JSON.stringify(result) }] };
+        } catch (error) {
+          halt.abort(error);
+          throw error;
+        }
+      }),
+    ],
+  });
+
+  let answer: string | undefined;
+  try {
+    for await (const message of query({
+      prompt: input.query,
+      options: {
+        abortController: halt,
+        model: "claude-sonnet-5",
+        systemPrompt: "You investigate customer issues and email support summaries.",
+        tools: [],
+        mcpServers: { support },
+        allowedTools: ["mcp__support__send_email"],
+        settingSources: [],
+        env: cliEnv,  // the gateway environment above
+      },
+    })) {
+      if (message.type !== "result") continue;
+      if (message.subtype !== "success" || message.is_error) {
+        throw new Error("result" in message ? message.result : message.subtype);
+      }
+      answer = message.result;
+    }
+  } catch (error) {
+    throw halt.signal.reason ?? error;
+  }
+  return { answer };
+}
+
+const agent = new Agent("support");
+await agent.serve({ port: 5000 }, process);
+```
+
+`settingSources: []` keeps the CLI from loading settings files from the machine,
+so the tools and permissions are the ones set here.
+
+## What Rebuno adds
+
+- **Policy.** Every model and tool call is checked against [policy](/policy)
+  before it runs. A denied tool returns the rule's reason to the model as the
+  tool result, so the agent can take a different path.
+- **Approvals.** A tool that requires approval parks the execution. Once it's
+  approved, the agent is dispatched again, the earlier steps replay, and the
+  approved call runs.
+- **Recovery.** If the worker dies partway through, the next dispatch replays
+  every completed step and continues from the first one that didn't finish.
+  Model calls that already ran are not paid for twice.
+
+## Full example
+
+[`examples/frameworks/typescript/claude_agent_sdk_agent.ts`](https://github.com/rebuno/rebuno/blob/main/examples/frameworks/typescript/claude_agent_sdk_agent.ts)
+is a support agent that investigates a customer issue, creates a ticket, and
+emails a summary after approval.

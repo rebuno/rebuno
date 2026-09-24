@@ -1,0 +1,170 @@
+---
+title: "Executor"
+description: "Durable execution for agents calling integrations through Executor"
+---
+
+[Executor](https://executor.sh) is an integration gateway. It turns OpenAPI
+specs, MCP servers, and GraphQL endpoints into one catalog of tools, handles
+their authentication, and serves the catalog to an agent over MCP.
+
+An agent reaches the catalog through two MCP tools: `search` finds tools by
+description, and `invoke` calls one by id. Routing both through Rebuno records
+every integration call as a `tool_call` step in the same execution as the
+agent's model calls. On a re-dispatch, completed calls replay instead of
+reaching the integration again, so a worker that dies partway through a run
+doesn't repeat a write it already made. The kernel's [policy](/policy) applies
+to each call as well.
+
+## Connect to Executor
+
+Load Executor's MCP tools with the client your framework uses. With LangChain:
+
+```python
+import os
+
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+executor = MultiServerMCPClient(
+    {
+        "executor": {
+            "transport": "streamable_http",
+            "url": os.environ["EXECUTOR_URL"] + "?mode=passthrough",
+            "headers": {"Authorization": f"Bearer {os.environ['EXECUTOR_API_KEY']}"},
+        }
+    }
+)
+```
+
+## Wrap the tools
+
+Wrap `search` and `invoke` as Rebuno tools inside the handler:
+
+```python
+from rebuno import tool, wrap_tool
+
+
+async def process(query: str) -> dict:
+    mcp = {t.name: t for t in await executor.get_tools()}
+
+    @tool("executor_search")
+    async def search(query: str) -> str:
+        """Search the connected integrations for tools matching a short description."""
+        return await mcp["search"].ainvoke({"query": query})
+
+    invoke = wrap_tool(
+        "executor_invoke",
+        mcp["invoke"].ainvoke,
+        description=mcp["invoke"].description,
+        args_schema=mcp["invoke"].args_schema,
+        idempotency="at_most_once",
+    )
+    ...
+```
+
+`search` is defined with `@tool` so the model sees a schema with only `query`.
+Executor's own `search` also takes optional `integration`, `owner`, and
+`connection` filters, which a model tends to fill with guesses that exclude the
+tool it needs. `invoke` is passed through
+`wrap_tool` as is, keeping Executor's description and its `tool` and
+`arguments` schema, which is the shape the policy matches on.
+
+`search` only reads the catalog, so it keeps the default `safe_to_retry`.
+`invoke` can create an issue or post a message, so it is `at_most_once`. See
+[idempotency](/sdk/python/tools#idempotency).
+
+Pass both to the agent as its tools, and tell the model in its prompt to search
+first and then invoke a result by its id.
+
+## Write the policy
+
+Every integration call is a step with target `executor_invoke`. Its arguments
+carry the integration tool's id in `tool` and that tool's own arguments in
+`arguments`, so [argument predicates](/policy#argument-predicates) can match
+both:
+
+```yaml
+default_action: deny
+rules:
+  - id: allow-llm
+    when:
+      step_kind: llm_call
+    then:
+      decision: allow
+
+  - id: allow-search
+    when:
+      target: executor_search
+    then:
+      decision: allow
+
+  - id: github-read
+    when:
+      target: executor_invoke
+      arguments:
+        tool:
+          one_of:
+            - tools.github_com_openapi.user.github.issues.listForRepo
+            - tools.github_com_openapi.user.github.issues.get
+        arguments.owner:
+          equals: acme
+        arguments.repo:
+          equals: app
+    then:
+      decision: allow
+
+  - id: github-write
+    when:
+      target: executor_invoke
+      arguments:
+        tool:
+          equals: tools.github_com_openapi.user.github.issues.create
+        arguments.owner:
+          equals: acme
+        arguments.repo:
+          equals: app
+    then:
+      decision: require_approval
+      reason: writes need approval
+```
+
+With this policy the agent can read issues in `acme/app`, and needs approval to
+open one there. Any other integration tool, and any other repository, is denied.
+The model sees the denial reason as the tool result and can report it.
+
+Argument paths follow each integration's own schema. A Slack message's channel
+is in the request body, for example, so a rule matches it on
+`arguments.body.channel`.
+
+## Run it
+
+[`examples/integrations/executor`](https://github.com/rebuno/rebuno/tree/main/examples/integrations/executor)
+has the full agent, a policy covering GitHub and Slack, and a dev kernel config.
+
+The example policy uses placeholder values. Before running it, replace the
+repository `acme/app` and the Slack channel id `C0123456789` with your own, and
+the connection names `github` and `slack` in each tool id with the names of your
+Executor connections. A tool id has the form
+`tools.<integration>.<owner>.<connection>.<resource>.<method>`, and `search`
+returns the exact ids for your workspace.
+
+With `EXECUTOR_URL`, `EXECUTOR_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`, and
+`LLM_API_KEY` set, start the kernel and the agent from that directory:
+
+```bash
+cd examples/integrations/executor
+rebuno dev --config rebuno.yaml
+```
+
+```bash
+pip install rebuno langchain langchain-openai langchain-mcp-adapters
+python agent.py
+```
+
+Then create an execution:
+
+```bash
+rebuno exec create executor '{"query": "Summarize the open issues in acme/app"}'
+```
+
+A call held for approval appears in `rebuno exec watch`. See
+[Approvals](/policy#approvals) to approve it.
