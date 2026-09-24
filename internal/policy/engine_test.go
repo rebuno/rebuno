@@ -321,3 +321,57 @@ rules:
 		}
 	}
 }
+
+func TestDottedArgumentPathsMatchNestedFields(t *testing.T) {
+	bundle := `
+default_action: deny
+rules:
+  - id: staging-deploys
+    when:
+      arguments:
+        config.environment:
+          equals: staging
+        config.region.name:
+          one_of: [us-east, eu-west]
+    then:
+      decision: allow
+  - id: nested-object
+    when:
+      arguments:
+        input.opts:
+          equals: '{"force":true}'
+    then:
+      decision: require_approval
+`
+	engine, err := NewRuleEngineFromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		args string
+		want string
+	}{
+		{"nested match", `{"config": {"environment": "staging", "region": {"name": "us-east"}}}`, domain.DecisionAllow},
+		{"nested mismatch", `{"config": {"environment": "production", "region": {"name": "us-east"}}}`, domain.DecisionDeny},
+		{"missing leaf", `{"config": {"environment": "staging"}}`, domain.DecisionDeny},
+		{"intermediate not an object", `{"config": "staging"}`, domain.DecisionDeny},
+		{"intermediate is an array", `{"config": [{"environment": "staging"}]}`, domain.DecisionDeny},
+		{"intermediate is null", `{"config": null}`, domain.DecisionDeny},
+		{"dotted name takes precedence", `{"config.environment": "production", "config": {"environment": "staging", "region": {"name": "us-east"}}}`, domain.DecisionDeny},
+		{"dotted name matched as a whole", `{"config.environment": "staging", "config.region.name": "eu-west"}`, domain.DecisionAllow},
+		{"object leaf compares as JSON text", `{"input": {"opts": { "force": true }}}`, domain.DecisionRequireApproval},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := engine.Evaluate(context.Background(), domain.PolicyInput{StepKind: domain.StepKindTool, Args: json.RawMessage(tc.args)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Decision != tc.want {
+				t.Errorf("expected %s, got %s", tc.want, res.Decision)
+			}
+		})
+	}
+}

@@ -259,7 +259,7 @@ func matchArguments(predicates map[string]ArgPredicate, args []byte) bool {
 		return false
 	}
 	for key, pred := range predicates {
-		v, ok := obj[key]
+		v, ok := lookupArgument(obj, key)
 		if !ok {
 			return false
 		}
@@ -280,6 +280,24 @@ func matchArguments(predicates map[string]ArgPredicate, args []byte) bool {
 		}
 	}
 	return true
+}
+
+// lookupArgument resolves key as an argument name, then as a dotted path
+// through nested objects. A name that contains a dot takes precedence over the
+// path it spells.
+func lookupArgument(obj map[string]json.RawMessage, key string) (json.RawMessage, bool) {
+	if v, ok := obj[key]; ok {
+		return v, true
+	}
+	head, rest, found := strings.Cut(key, ".")
+	if !found {
+		return nil, false
+	}
+	var nested map[string]json.RawMessage
+	if v, ok := obj[head]; !ok || json.Unmarshal(v, &nested) != nil {
+		return nil, false
+	}
+	return lookupArgument(nested, rest)
 }
 
 func argString(v json.RawMessage) string {

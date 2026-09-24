@@ -38,8 +38,9 @@ or allow that kind generally if intended. The example above does not allow it.
   `contains`, `one_of`, `regex` (RE2). Values compare as strings, and all
   constraints must pass. Example under `when`:
   `arguments: { environment: { one_of: [staging, preview] } }`.
-  Unknown fields and empty predicates are rejected; do not invent nested-path
-  or numeric comparison syntax.
+  A dotted key such as `config.environment` reads a field in nested objects;
+  arrays are not traversed. Unknown fields and empty predicates are rejected;
+  do not invent array or numeric comparison syntax.
 - No bundle means unrestricted, including production. A bundle defaults to
   deny, but unmatched `local` steps remain allowed. Govern them explicitly
   with a matching target/kind rule. Unwrapped effects bypass policy entirely.

@@ -90,6 +90,22 @@ when:
 | `one_of` | is one of the listed strings |
 | `regex` | matches the RE2 regular expression |
 
+A key with dots is a path into nested objects, so `config.environment` reads
+`environment` inside the `config` object. The rule does not match when a
+segment is missing or its value is not an object; arrays are not traversed. An
+argument whose own name contains a dot takes precedence over the path it spells.
+
+```yaml
+when:
+  target: deploy
+  arguments:
+    config.environment:
+      equals: staging
+```
+
+A value that is not a string, such as a number or an object, is compared as
+compact JSON text: `{"force": true}` compares as `{"force":true}`.
+
 ## Rule decisions
 
 A rule's `then` block carries the decision and its options:
