@@ -1,0 +1,126 @@
+---
+title: "Vercel AI SDK"
+description: "Durable execution, policy, and approvals for Vercel AI SDK agents"
+---
+
+An AI SDK agent runs on Rebuno unchanged apart from two seams. The provider
+takes `rebunoFetch`, so every model call is recorded as an `llm_call` step, and
+tools run through `defineTool`, so every tool call is recorded as a `tool_call`
+step. On a re-dispatch the agent runs from the top and recorded steps replay
+instead of calling the model or the tool again.
+
+## Install
+
+```bash
+npm install rebuno ai @ai-sdk/openai zod
+```
+
+## Model calls
+
+Every AI SDK provider accepts a custom `fetch`. Pass `rebunoFetch`:
+
+```ts
+import { createOpenAI } from "@ai-sdk/openai";
+import { rebunoFetch } from "rebuno";
+
+const openai = createOpenAI({ fetch: rebunoFetch });
+```
+
+Both `generateText` and `streamText` work. A streamed call is recorded as the
+assembled response and replays as a stream. See
+[LLM calls](/sdk/typescript/llm-calls).
+
+## Tools
+
+Declare the Rebuno side with `defineTool`, and call it from the AI SDK tool's
+`execute`:
+
+```ts
+import { tool } from "ai";
+import { defineTool } from "rebuno";
+import { z } from "zod";
+
+const sendEmail = defineTool({
+  name: "send_email",
+  idempotency: "at_most_once",
+  execute: async ({ body }: { body: string }) => mail.send("ops@acme.com", body),
+});
+
+const tools = {
+  send_email: tool({
+    description: "Email the support summary.",
+    inputSchema: z.object({ body: z.string() }),
+    execute: (args) => sendEmail(args),
+  }),
+};
+```
+
+Mark anything with a side effect, such as sending an email or creating a
+ticket, `at_most_once`. See [idempotency](/sdk/typescript/tools#idempotency).
+
+## Stopping on approval
+
+When a tool is held for approval, it throws. The AI SDK passes a tool error back
+to the model and keeps looping, and every model call after that is refused.
+Abort the loop on the first tool error instead: catch it in the tool's
+`execute`, abort a signal passed as `abortSignal`, and rethrow
+`halt.signal.reason` from around the call so the original error reaches the
+handler boundary. The agent below does this.
+
+## The agent
+
+```ts
+import { generateText, stepCountIs, tool } from "ai";
+import { Agent } from "rebuno";
+
+async function process(input: { query: string }) {
+  const openai = createOpenAI({ fetch: rebunoFetch });
+  const halt = new AbortController();
+  try {
+    const { text } = await generateText({
+      model: openai("gpt-5.5"),
+      prompt: input.query,
+      tools: {
+        send_email: tool({
+          description: "Email the support summary.",
+          inputSchema: z.object({ body: z.string() }),
+          execute: async (args) => {
+            try { return await sendEmail(args); }
+            catch (error) { halt.abort(error); throw error; }
+          },
+        }),
+      },
+      stopWhen: stepCountIs(12),
+      abortSignal: halt.signal,
+    });
+    return { answer: text };
+  } catch (error) {
+    throw halt.signal.reason ?? error;
+  }
+}
+
+const agent = new Agent("support");
+await agent.serve({ port: 5000 }, process);
+```
+
+With `streamText`, errors arrive as stream parts rather than rejections. Iterate
+`fullStream` and throw on `error` and `tool-error` parts, so an incomplete
+response isn't returned as an answer.
+
+## What Rebuno adds
+
+- **Policy.** Every model and tool call is checked against [policy](/policy)
+  before it runs. A denied tool returns the rule's reason to the model as the
+  tool result, so the agent can take a different path.
+- **Approvals.** A tool that requires approval parks the execution. Once it's
+  approved, the agent is dispatched again, the earlier steps replay, and the
+  approved call runs.
+- **Recovery.** If the worker dies partway through, the next dispatch replays
+  every completed step and continues from the first one that didn't finish.
+  Model calls that already ran are not paid for twice.
+
+## Full example
+
+[`examples/frameworks/typescript/aisdk_agent.ts`](https://github.com/rebuno/rebuno/blob/main/examples/frameworks/typescript/aisdk_agent.ts)
+is a support agent that investigates a customer issue, creates a ticket, and
+emails a summary after approval, with both `generateText` and `streamText`.

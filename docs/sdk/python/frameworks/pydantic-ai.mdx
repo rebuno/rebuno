@@ -1,0 +1,100 @@
+---
+title: "Pydantic AI"
+description: "Durable execution, policy, and approvals for Pydantic AI agents"
+---
+
+A Pydantic AI agent runs on Rebuno unchanged apart from two seams. The OpenAI
+client under the model takes a Rebuno HTTP client, so every model call is
+recorded as an `llm_call` step, and tools are declared with `@tool`, so every
+tool call is recorded as a `tool_call` step. On a re-dispatch the agent runs
+from the top and recorded steps replay instead of calling the model or the tool
+again.
+
+## Install
+
+```bash
+pip install rebuno pydantic-ai
+```
+
+## Model calls
+
+Build the `AsyncOpenAI` client yourself with `http_client()`, and hand it to the
+model through `OpenAIProvider`:
+
+```python
+from openai import AsyncOpenAI
+from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.providers.openai import OpenAIProvider
+from rebuno import http_client
+
+client = AsyncOpenAI(http_client=http_client())
+model = OpenAIResponsesModel("gpt-5.5", provider=OpenAIProvider(openai_client=client))
+```
+
+See [LLM calls](/sdk/python/llm-calls) for the OpenAI SDK versions that accept
+the client.
+
+## Tools
+
+`@tool` keeps the function's signature and docstring, so Pydantic AI builds the
+tool schema from it as usual:
+
+```python
+from rebuno import tool
+
+
+@tool("lookup_orders", idempotency="safe_to_retry")
+async def lookup_orders(customer_id: str) -> dict:
+    """Look up a customer's recent orders."""
+    ...
+
+
+@tool("send_email", idempotency="at_most_once")
+async def send_email(body: str) -> dict:
+    """Email the support summary."""
+    ...
+```
+
+Mark anything with a side effect, such as sending an email or creating a
+ticket, `at_most_once`. See [idempotency](/sdk/python/tools#idempotency).
+
+## The agent
+
+Pydantic AI's `Agent` and Rebuno's `Agent` share a name, so import one under an
+alias:
+
+```python
+from pydantic_ai import Agent as PydanticAgent
+from rebuno import Agent
+
+
+async def process(query: str) -> dict:
+    client = AsyncOpenAI(http_client=http_client())
+    model = OpenAIResponsesModel("gpt-5.5", provider=OpenAIProvider(openai_client=client))
+    result = await PydanticAgent(model, tools=[lookup_orders, send_email]).run(query)
+    return {"answer": result.output}
+
+
+agent = Agent("support")
+
+if __name__ == "__main__":
+    agent.run(process)
+```
+
+## What Rebuno adds
+
+- **Policy.** Every model and tool call is checked against [policy](/policy)
+  before it runs. A denied tool returns the rule's reason to the model as the
+  tool result, so the agent can take a different path.
+- **Approvals.** A tool that requires approval parks the execution. Once it's
+  approved, the agent is dispatched again, the earlier steps replay, and the
+  approved call runs.
+- **Recovery.** If the worker dies partway through, the next dispatch replays
+  every completed step and continues from the first one that didn't finish.
+  Model calls that already ran are not paid for twice.
+
+## Full example
+
+[`examples/frameworks/python/pydantic_ai_agent.py`](https://github.com/rebuno/rebuno/blob/main/examples/frameworks/python/pydantic_ai_agent.py)
+is a support agent that investigates a customer issue, creates a ticket, and
+emails a summary after approval.

@@ -112,6 +112,15 @@
             ]
           },
           {
+            "group": "Frameworks",
+            "icon": "puzzle-piece",
+            "pages": [
+              "sdk/python/frameworks/langchain",
+              "sdk/python/frameworks/pydantic-ai",
+              "sdk/python/frameworks/crewai"
+            ]
+          },
+          {
             "group": "Reference",
             "icon": "book",
             "pages": [
@@ -143,6 +152,15 @@
               "sdk/typescript/tools",
               "sdk/typescript/llm-calls",
               "sdk/typescript/steps"
+            ]
+          },
+          {
+            "group": "Frameworks",
+            "icon": "puzzle-piece",
+            "pages": [
+              "sdk/typescript/frameworks/vercel-ai-sdk",
+              "sdk/typescript/frameworks/langchain",
+              "sdk/typescript/frameworks/mastra"
             ]
           },
           {

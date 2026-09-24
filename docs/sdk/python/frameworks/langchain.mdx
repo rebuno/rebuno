@@ -1,0 +1,93 @@
+---
+title: "LangChain"
+description: "Durable execution, policy, and approvals for LangChain agents in Python"
+---
+
+A LangChain agent runs on Rebuno unchanged apart from two seams. The chat model
+takes a Rebuno HTTP client, so every model call is recorded as an `llm_call`
+step, and tools are declared with `@tool`, so every tool call is recorded as a
+`tool_call` step. On a re-dispatch the agent runs from the top and recorded
+steps replay instead of calling the model or the tool again.
+
+## Install
+
+```bash
+pip install rebuno langchain langchain-openai
+```
+
+## Model calls
+
+`ChatOpenAI` accepts an async HTTP client through `http_async_client`. Pass
+`http_client()`:
+
+```python
+from langchain_openai import ChatOpenAI
+from rebuno import http_client
+
+llm = ChatOpenAI(model="gpt-5.5", http_async_client=http_client())
+```
+
+Streaming works the same way. A streamed call is recorded as the assembled
+response and replays as a stream. See [LLM calls](/sdk/python/llm-calls).
+
+## Tools
+
+`@tool` keeps the function's signature and docstring, so LangChain binds it as
+a plain function:
+
+```python
+from rebuno import tool
+
+
+@tool("lookup_orders", idempotency="safe_to_retry")
+async def lookup_orders(customer_id: str) -> dict:
+    """Look up a customer's recent orders."""
+    ...
+
+
+@tool("send_email", idempotency="at_most_once")
+async def send_email(body: str) -> dict:
+    """Email the support summary."""
+    ...
+```
+
+Mark anything with a side effect, such as sending an email or creating a
+ticket, `at_most_once`. See [idempotency](/sdk/python/tools#idempotency).
+
+## The agent
+
+```python
+from langchain.agents import create_agent
+from rebuno import Agent
+
+
+async def process(query: str) -> dict:
+    llm = ChatOpenAI(model="gpt-5.5", http_async_client=http_client())
+    graph = create_agent(model=llm, tools=[lookup_orders, send_email])
+    result = await graph.ainvoke({"messages": [{"role": "user", "content": query}]})
+    return {"answer": result["messages"][-1].content}
+
+
+agent = Agent("support")
+
+if __name__ == "__main__":
+    agent.run(process)
+```
+
+## What Rebuno adds
+
+- **Policy.** Every model and tool call is checked against [policy](/policy)
+  before it runs. A denied tool returns the rule's reason to the model as the
+  tool result, so the agent can take a different path.
+- **Approvals.** A tool that requires approval parks the execution. Once it's
+  approved, the agent is dispatched again, the earlier steps replay, and the
+  approved call runs.
+- **Recovery.** If the worker dies partway through, the next dispatch replays
+  every completed step and continues from the first one that didn't finish.
+  Model calls that already ran are not paid for twice.
+
+## Full example
+
+[`examples/frameworks/python/langchain_agent.py`](https://github.com/rebuno/rebuno/blob/main/examples/frameworks/python/langchain_agent.py)
+is a support agent that investigates a customer issue, creates a ticket, and
+emails a summary after approval.

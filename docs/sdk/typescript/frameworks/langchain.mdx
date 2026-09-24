@@ -1,0 +1,111 @@
+---
+title: "LangChain.js"
+description: "Durable execution, policy, and approvals for LangChain.js agents"
+---
+
+A LangChain.js agent runs on Rebuno unchanged apart from two seams. The chat
+model takes `rebunoFetch`, so every model call is recorded as an `llm_call`
+step, and tools run through `defineTool`, so every tool call is recorded as a
+`tool_call` step. On a re-dispatch the agent runs from the top and recorded
+steps replay instead of calling the model or the tool again.
+
+## Install
+
+```bash
+npm install rebuno langchain @langchain/core @langchain/openai zod
+```
+
+## Model calls
+
+`ChatOpenAI` passes `configuration` through to the OpenAI client, which accepts
+a custom `fetch`. Pass `rebunoFetch`:
+
+```ts
+import { ChatOpenAI } from "@langchain/openai";
+import { rebunoFetch } from "rebuno";
+
+const model = new ChatOpenAI({ model: "gpt-5.5", configuration: { fetch: rebunoFetch } });
+```
+
+See [LLM calls](/sdk/typescript/llm-calls).
+
+## Tools
+
+Declare the Rebuno side with `defineTool`, and call it from a LangChain `tool`:
+
+```ts
+import { tool } from "@langchain/core/tools";
+import { defineTool } from "rebuno";
+import { z } from "zod";
+
+const sendEmail = defineTool({
+  name: "send_email",
+  idempotency: "at_most_once",
+  execute: async ({ body }: { body: string }) => mail.send("ops@acme.com", body),
+});
+
+const sendEmailTool = tool((args) => sendEmail(args), {
+  name: "send_email",
+  description: "Email the support summary.",
+  schema: z.object({ body: z.string() }),
+});
+```
+
+Mark anything with a side effect, such as sending an email or creating a
+ticket, `at_most_once`. See [idempotency](/sdk/typescript/tools#idempotency).
+
+## Stopping on approval
+
+When a tool is held for approval, it throws. The agent loop passes a tool error
+back to the model and keeps looping, and every model call after that is refused.
+Abort the loop on the first tool error instead, by catching it in the tool and
+aborting a signal passed to `invoke`. The agent below does this.
+
+## The agent
+
+```ts
+import { createAgent } from "langchain";
+import { Agent } from "rebuno";
+
+async function process(input: { query: string }) {
+  const model = new ChatOpenAI({ model: "gpt-5.5", configuration: { fetch: rebunoFetch } });
+  const halt = new AbortController();
+  const tools = [
+    tool(
+      async (args) => {
+        try { return await sendEmail(args); }
+        catch (error) { halt.abort(error); throw error; }
+      },
+      { name: "send_email", description: "Email the support summary.", schema: z.object({ body: z.string() }) },
+    ),
+  ];
+
+  const graph = createAgent({ model, tools });
+  const result = await graph.invoke(
+    { messages: [{ role: "user", content: input.query }] },
+    { signal: halt.signal },
+  );
+  return { answer: result.messages.at(-1)?.content };
+}
+
+const agent = new Agent("support");
+await agent.serve({ port: 5000 }, process);
+```
+
+## What Rebuno adds
+
+- **Policy.** Every model and tool call is checked against [policy](/policy)
+  before it runs. A denied tool returns the rule's reason to the model as the
+  tool result, so the agent can take a different path.
+- **Approvals.** A tool that requires approval parks the execution. Once it's
+  approved, the agent is dispatched again, the earlier steps replay, and the
+  approved call runs.
+- **Recovery.** If the worker dies partway through, the next dispatch replays
+  every completed step and continues from the first one that didn't finish.
+  Model calls that already ran are not paid for twice.
+
+## Full example
+
+[`examples/frameworks/typescript/langchain_agent.ts`](https://github.com/rebuno/rebuno/blob/main/examples/frameworks/typescript/langchain_agent.ts)
+is a support agent that investigates a customer issue, creates a ticket, and
+emails a summary after approval.
