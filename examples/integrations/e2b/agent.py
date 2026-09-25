@@ -75,7 +75,7 @@ async def process(task: str, session: str | None = None) -> dict:
     await sandbox.commands.run(
         f"test -d {WORKDIR} || (git clone -q https://github.com/{REPO}.git {WORKDIR}"
         f" && cd {WORKDIR} && git checkout -q -b {branch}"
-        " && git config user.name 'Rebuno Agent' && git config user.email agent@rebuno.io)",
+        " && git config user.name agent && git config user.email agent@example.com)",
         timeout=120,
     )
 
