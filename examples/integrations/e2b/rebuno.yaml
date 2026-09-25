@@ -1,0 +1,5 @@
+agents:
+  - id: e2b
+    webhook_url: http://localhost:5000/webhook
+    secret: e2b-secret
+    policy_file: policy.yaml

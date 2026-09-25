@@ -80,6 +80,7 @@
             "group": "Integrations",
             "icon": "plug",
             "pages": [
+              "integrations/e2b",
               "integrations/executor"
             ]
           },

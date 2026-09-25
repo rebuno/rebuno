@@ -1,0 +1,249 @@
+---
+title: "E2B"
+description: "Guardrails and durable execution for a coding agent working in an E2B sandbox"
+---
+
+[E2B](https://e2b.dev) runs code in isolated cloud sandboxes that can pause and
+resume with their files and memory intact.
+
+A coding agent's tools can run in a sandbox that holds a checkout of the
+repository, while the model loop stays in the Rebuno agent. Routing the tools
+through Rebuno checks each call against [policy](/policy) and records it as a
+`tool_call` step in the same execution as the agent's model calls. The sandbox
+keeps the working files between dispatches and pauses while a call waits for
+approval.
+
+The design follows [Coding agents on Rebuno](https://rebuno.io/blog/coding-agents).
+
+## Find the sandbox
+
+Each task belongs to a session. The agent looks up the session's sandbox by
+metadata, and creates one when there is none:
+
+```python
+from e2b import AsyncSandbox, SandboxQuery, SandboxState
+
+
+async def find_sandbox(session: str) -> str:
+    query = SandboxQuery(
+        metadata={"session": session},
+        state=[SandboxState.RUNNING, SandboxState.PAUSED],
+    )
+    found = await AsyncSandbox.list(query).next_items()
+    if found:
+        return found[0].sandbox_id
+    sandbox = await AsyncSandbox.create(
+        timeout=600, metadata={"session": session}, lifecycle={"on_timeout": "pause"}
+    )
+    return sandbox.sandbox_id
+```
+
+The handler calls it through [`step`](/sdk/python/steps), which records the
+sandbox id:
+
+```python
+sandbox_id = await step("find_sandbox", find_sandbox, {"session": session})
+sandbox = await AsyncSandbox.connect(sandbox_id, timeout=600)
+```
+
+On a re-dispatch the step replays the recorded id and `connect` resumes that
+sandbox, with the files the first attempt changed. If the sandbox no longer
+exists, `connect` fails rather than the agent continuing in an empty one.
+`on_timeout: "pause"` pauses a sandbox whose worker died instead of deleting it
+when its timeout expires.
+
+## Wrap the tools
+
+The tools run inside the sandbox:
+
+```python
+from rebuno import tool
+
+
+@tool("shell")
+async def shell(command: str) -> str:
+    """Run a shell command in the repository and return its exit code and output."""
+    ...
+
+
+@tool("read_file")
+async def read_file(path: str) -> str:
+    """Return a file's contents. The path is relative to the repository root."""
+    return await sandbox.files.read(f"{WORKDIR}/{path}")
+
+
+@tool("write_file")
+async def write_file(path: str, content: str) -> str:
+    """Replace a file's contents, creating it if needed. The path is relative to the repository root."""
+    await sandbox.files.write(f"{WORKDIR}/{path}", content)
+    return f"wrote {path}"
+```
+
+The model uses `shell` for git as well, committing to the session's branch and
+pushing it. All three keep the default `safe_to_retry`. A command that runs again
+after a worker dies affects only the sandbox, and `write_file` replaces the whole
+file, so writing it twice leaves the same result. See
+[idempotency](/sdk/python/tools#idempotency).
+
+## Keep credentials out of the sandbox
+
+Cloning and pushing need a GitHub token. Instead of placing the token in the
+sandbox, the agent adds a network rule that sets the `Authorization` header on
+requests to `github.com` at E2B's egress proxy:
+
+```python
+credentials = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+await sandbox.update_network(
+    {
+        "rules": {
+            "github.com": [
+                {"transform": {"headers": {"Authorization": f"Basic {credentials}"}}}
+            ]
+        }
+    }
+)
+```
+
+git works as usual inside the sandbox, and nothing in it can read the token. The
+agent sets the rule on every connect, so a sandbox resumed later gets the token
+the worker currently holds.
+
+Opening the pull request is a separate tool that calls GitHub's API from the
+agent, outside the sandbox:
+
+```python
+@tool("open_pr", idempotency="at_most_once")
+async def open_pr(title: str, body: str) -> str:
+    """Open a pull request from the pushed branch."""
+    ...
+```
+
+The rule covers only `github.com`, so code in the sandbox can push a branch but
+cannot reach the API to open a pull request, and the policy on `open_pr` holds.
+Pushes are not checked by policy. Protect the default branch with a GitHub
+ruleset that requires a pull request, so a push can only land on other branches.
+
+## Pause while waiting
+
+When a call waits for approval, the handler unwinds with `Blocked`. The agent
+pauses the sandbox on the way out, and again when the run finishes:
+
+```python
+from rebuno import Blocked, execution
+
+result = None
+try:
+    result = await graph.ainvoke({"messages": [*history, {"role": "user", "content": task}]})
+finally:
+    if result is not None or isinstance(execution().suspension, Blocked):
+        await sandbox.pause()
+```
+
+The check reads `execution().suspension` because a framework can catch `Blocked`
+inside its own loop. While the approval is pending, no worker holds the run and
+the sandbox only keeps its storage. Once the approval is decided, the next
+dispatch replays up to the held call and `connect` resumes the sandbox. A
+dispatch that ends because another worker took over the run leaves the sandbox
+running for that worker.
+
+## Sessions
+
+A session carries over between executions: the sandbox, the branch
+`rebuno/<session>`, and the conversation. The handler takes an optional
+`session`, and derives one from the execution id when it's missing:
+
+```python
+async def process(task: str, session: str | None = None) -> dict:
+    session = session or execution().id[-12:]
+```
+
+The derived value is the same on every dispatch of the execution. It uses the
+end of the id, since execution ids are UUIDv7 and their leading characters encode
+the creation time.
+
+The conversation is loaded at the start and saved at the end, both as steps:
+
+```python
+history = await step("load_conversation", load_conversation, {"session": session})
+...
+await step("save_conversation", save_conversation, {"session": session, "messages": messages})
+```
+
+A worker can die after the save and before the execution completes. On the next
+dispatch, a plain load would return a conversation that already contains the
+run, the model requests would no longer match the recorded ones, and nothing
+would replay. As a step, the load replays the conversation the execution started
+from.
+
+The handler returns the session with its answer. A follow-up execution with the
+same `session` resumes the sandbox, continues the conversation, and pushes to
+the same branch, which updates the open pull request.
+
+## Write the policy
+
+```yaml
+default_action: deny
+rules:
+  - id: allow-llm
+    when:
+      step_kind: llm_call
+    then:
+      decision: allow
+
+  - id: allow-sandbox
+    when:
+      targets: [shell, read_file, write_file]
+    then:
+      decision: allow
+
+  - id: open-pr
+    when:
+      target: open_pr
+    then:
+      decision: require_approval
+      reason: opening a pull request needs approval
+```
+
+Everything that runs in the sandbox is allowed, since the sandbox is what
+isolates it. Opening the pull request is the call that reaches other people, so
+it waits for approval. The `local` steps that find the sandbox and load the
+conversation are allowed without a rule.
+
+## Run it
+
+[`examples/integrations/e2b`](https://github.com/rebuno/rebuno/tree/main/examples/integrations/e2b)
+has the full agent, the policy, and a dev kernel config. It stores conversations
+as files in `sessions/` beside the agent.
+
+Set `E2B_API_KEY`, `REPO` (the repository as `owner/name`), `GITHUB_TOKEN`,
+`LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY`. The token needs read and write
+access to the repository's contents and pull requests. Then start the kernel and
+the agent from that directory:
+
+```bash
+cd examples/integrations/e2b
+rebuno dev --config rebuno.yaml
+```
+
+```bash
+pip install rebuno e2b httpx2 langchain langchain-openai
+python agent.py
+```
+
+Then create an execution:
+
+```bash
+rebuno exec create e2b '{"task": "The tests are failing. Fix the bug and open a pull request."}'
+```
+
+The `open_pr` call appears in `rebuno exec watch`. See
+[Approvals](/policy#approvals) to approve it. The execution's output includes
+its `session`. Pass it to continue the same work:
+
+```bash
+rebuno exec create e2b '{"session": "<session>", "task": "Also add a test for the edge case."}'
+```
+
+To see a re-dispatch, stop the agent after a few tool calls and start it again.
+The kernel dispatches the execution once its lease expires, two minutes by
+default. [`lease_timeout_seconds`](/agents) sets a shorter lease for the agent.
