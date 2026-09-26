@@ -13,7 +13,7 @@
     "dark": "/assets/brand/rebuno.svg",
     "href": "/"
   },
-  "favicon": "/assets/brand/favicon.svg",
+  "favicon": "/assets/brand/icon.svg",
   "appearance": {
     "default": "dark"
   },
