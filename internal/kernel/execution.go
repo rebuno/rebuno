@@ -129,37 +129,37 @@ func New(cfg Config, d Deps) *Kernel {
 }
 
 type CreateExecutionOptions struct {
-	ConcurrencyKey string
+	Session string
 }
 
 func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json.RawMessage, options ...CreateExecutionOptions) (domain.Execution, error) {
-	var key string
+	var session string
 	if len(options) > 0 {
-		key = options[0].ConcurrencyKey
+		session = options[0].Session
 	}
-	if len(key) > 256 || !utf8.ValidString(key) || strings.ContainsRune(key, 0) || (key != "" && strings.TrimSpace(key) == "") {
-		return domain.Execution{}, fmt.Errorf("%w: concurrency_key must be a nonblank UTF-8 string of at most 256 bytes without NUL", domain.ErrValidation)
+	if len(session) > 256 || !utf8.ValidString(session) || strings.ContainsRune(session, 0) || (session != "" && strings.TrimSpace(session) == "") {
+		return domain.Execution{}, fmt.Errorf("%w: session must be a nonblank UTF-8 string of at most 256 bytes without NUL", domain.ErrValidation)
 	}
 	if _, err := k.d.Agents.GetAgent(ctx, agentID); err != nil {
 		return domain.Execution{}, err
 	}
 	now := time.Now().UTC()
 	exec := domain.Execution{
-		ID:             uuid.Must(uuid.NewV7()),
-		AgentID:        agentID,
-		ConcurrencyKey: key,
-		Input:          input,
-		Status:         domain.ExecutionPending,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:        uuid.Must(uuid.NewV7()),
+		AgentID:   agentID,
+		Session:   session,
+		Input:     input,
+		Status:    domain.ExecutionPending,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if k.cfg.ExecutionDeadlineTimeout > 0 {
 		deadline := now.Add(k.cfg.ExecutionDeadlineTimeout)
 		exec.DeadlineAt = &deadline
 	}
 	createdPayload := payload.Execution(exec.ID, exec.Status, nil, "")
-	if key != "" {
-		createdPayload["concurrency_key"] = key
+	if session != "" {
+		createdPayload["session"] = session
 	}
 	if exec.DeadlineAt != nil {
 		createdPayload["deadline_at"] = *exec.DeadlineAt
@@ -171,35 +171,46 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 		if _, err := tx.Append(ctx, exec.ID, domain.EventExecutionCreated, createdPayload); err != nil {
 			return err
 		}
-		if key != "" {
+		if session != "" {
 			return nil
 		}
-		return k.startExecutionTx(ctx, tx, exec)
+		return k.startExecutionTx(ctx, tx, &exec)
 	}); err != nil {
 		return domain.Execution{}, err
 	}
 	k.d.Observer.RecordExecutionCreated()
-	if key == "" {
+	if session == "" {
 		exec.Status = domain.ExecutionRunning
 		return exec, nil
 	}
-	started, err := k.admitNext(ctx, key)
+	started, err := k.admitNext(ctx, session)
 	if err != nil {
 		k.log.Warn("admit execution failed", "error", err) // the deadline sweep retries
 	}
 	if started.ID == exec.ID {
-		exec.Status = domain.ExecutionRunning
+		return started, nil
 	}
 	return exec, nil
 }
 
-func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec domain.Execution) error {
+func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec *domain.Execution) error {
 	started := payload.Execution(exec.ID, domain.ExecutionRunning, nil, "")
 	if exec.DeadlineAt != nil {
 		started["deadline_at"] = *exec.DeadlineAt
 	}
-	if exec.ConcurrencyKey != "" {
-		started["concurrency_key"] = exec.ConcurrencyKey
+	if exec.Session != "" {
+		started["session"] = exec.Session
+		head, err := tx.SessionHead(ctx, exec.Session, exec.AgentID)
+		switch {
+		case err == nil:
+			if err := tx.SetExecutionParent(ctx, exec.ID, head.ID); err != nil {
+				return err
+			}
+			exec.ParentExecutionID = &head.ID
+			started["parent_execution_id"] = head.ID.String()
+		case !errors.Is(err, domain.ErrNotFound):
+			return err
+		}
 	}
 	if err := tx.UpdateExecutionStatus(ctx, exec.ID, domain.ExecutionRunning, nil, ""); err != nil {
 		return err
@@ -207,21 +218,21 @@ func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec do
 	if _, err := tx.Append(ctx, exec.ID, domain.EventExecutionStarted, started); err != nil {
 		return err
 	}
+	exec.Status = domain.ExecutionRunning
 	return k.enqueueDispatchTx(ctx, tx, exec.ID, time.Now().UTC())
 }
 
-// admitNext starts the oldest execution queued on key.
-func (k *Kernel) admitNext(ctx context.Context, key string) (domain.Execution, error) {
+// admitNext starts the oldest execution queued in session.
+func (k *Kernel) admitNext(ctx context.Context, session string) (domain.Execution, error) {
 	var started domain.Execution
 	err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		exec, err := tx.NextPendingByKey(ctx, key, time.Now().UTC())
+		exec, err := tx.NextPendingInSession(ctx, session, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		if err := k.startExecutionTx(ctx, tx, exec); err != nil {
+		if err := k.startExecutionTx(ctx, tx, &exec); err != nil {
 			return err
 		}
-		exec.Status = domain.ExecutionRunning
 		started = exec
 		return nil
 	})
@@ -234,24 +245,24 @@ func (k *Kernel) admitNext(ctx context.Context, key string) (domain.Execution, e
 	return started, nil
 }
 
-func (k *Kernel) releaseConcurrencyKey(ctx context.Context, key string) {
-	if key == "" {
+func (k *Kernel) releaseSession(ctx context.Context, session string) {
+	if session == "" {
 		return
 	}
-	if _, err := k.admitNext(ctx, key); err != nil {
+	if _, err := k.admitNext(ctx, session); err != nil {
 		k.log.Warn("admit next execution failed", "error", err) // the deadline sweep retries
 	}
 }
 
 func (k *Kernel) AdmitQueued(ctx context.Context) error {
-	keys, err := k.d.Executions.ListIdleConcurrencyKeys(ctx, time.Now().UTC())
+	sessions, err := k.d.Executions.ListIdleSessions(ctx, time.Now().UTC())
 	if err != nil {
 		return err
 	}
 	var errs []error
-	for _, key := range keys {
-		if _, err := k.admitNext(ctx, key); err != nil {
-			errs = append(errs, fmt.Errorf("admit concurrency key %q: %w", key, err))
+	for _, session := range sessions {
+		if _, err := k.admitNext(ctx, session); err != nil {
+			errs = append(errs, fmt.Errorf("admit session %q: %w", session, err))
 		}
 	}
 	return errors.Join(errs...)
@@ -263,6 +274,24 @@ func (k *Kernel) Deps() Deps {
 
 func (k *Kernel) GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error) {
 	return authorizedExecution(ctx, k.d.Executions, id)
+}
+
+func (k *Kernel) PreviousState(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
+	exec, err := authorizedExecution(ctx, k.d.Executions, id)
+	if err != nil {
+		return nil, err
+	}
+	if exec.ParentExecutionID == nil {
+		return nil, nil
+	}
+	parent, err := k.d.Executions.GetExecution(ctx, *exec.ParentExecutionID)
+	if err != nil {
+		return nil, err
+	}
+	if parent.State != nil {
+		return parent.State, nil
+	}
+	return parent.Output, nil
 }
 
 const MaxListExecutionsLimit = 200
@@ -360,7 +389,7 @@ func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason strin
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionCancelled))
-	k.releaseConcurrencyKey(ctx, exec.ConcurrencyKey)
+	k.releaseSession(ctx, exec.Session)
 	return nil
 }
 

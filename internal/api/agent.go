@@ -22,7 +22,7 @@ type AgentKernel interface {
 	CompleteStep(ctx context.Context, execID uuid.UUID, stepID string, req kernel.CompleteStepRequest) (domain.StepDecision, error)
 	FailStep(ctx context.Context, execID uuid.UUID, stepID string, req kernel.FailStepRequest) (domain.StepDecision, error)
 	Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.Lease) error
-	CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output json.RawMessage) error
+	CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output, state json.RawMessage) error
 	FailExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error
 }
 
@@ -46,6 +46,7 @@ func leaseFrom(r *http.Request) (domain.Lease, error) {
 
 type CompleteExecutionRequest struct {
 	Output json.RawMessage `json:"output"`
+	State  json.RawMessage `json:"state,omitempty"`
 }
 
 type FailExecutionRequest struct {
@@ -200,7 +201,7 @@ func (rt *Router) agentCompleteExecution(w http.ResponseWriter, r *http.Request)
 		WriteError(w, err)
 		return
 	}
-	if err := rt.agent.CompleteExecution(r.Context(), id, lease, req.Output); err != nil {
+	if err := rt.agent.CompleteExecution(r.Context(), id, lease, req.Output, req.State); err != nil {
 		WriteError(w, err)
 		return
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
-func TestOneActiveExecutionPerConcurrencyKey(t *testing.T) {
+func TestOneActiveExecutionPerSession(t *testing.T) {
 	pool := testPool(t)
 	ctx := t.Context()
 	s := NewStore(pool)
@@ -19,7 +19,7 @@ func TestOneActiveExecutionPerConcurrencyKey(t *testing.T) {
 	}
 	first := domain.Execution{
 		ID: uuid.Must(uuid.NewV7()), AgentID: agentID, Input: json.RawMessage(`{}`),
-		Status: domain.ExecutionPending, ConcurrencyKey: uuid.NewString(),
+		Status: domain.ExecutionPending, Session: uuid.NewString(),
 	}
 	second := first
 	second.ID = uuid.Must(uuid.NewV7())
@@ -32,7 +32,7 @@ func TestOneActiveExecutionPerConcurrencyKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.UpdateExecutionStatus(ctx, second.ID, domain.ExecutionRunning, nil, ""); !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("second owner of the key: %v", err)
+		t.Fatalf("second owner of the session: %v", err)
 	}
 	if err := s.UpdateExecutionStatus(ctx, first.ID, domain.ExecutionCompleted, nil, ""); err != nil {
 		t.Fatal(err)

@@ -99,21 +99,21 @@ That gives `Rebuno-Signature: v1=017dff4039ba40e90d3d8d566fdf51db427672f92d45ef4
 Returns `201` with the created execution. The kernel records `execution.created`
 and enqueues a dispatch.
 
-Add an optional `concurrency_key` to keep executions that share it from running
-at the same time:
+Add an optional `session` to continue a chain of executions, such as the turns
+of a conversation:
 
 ```json
 {
   "agent_id": "researcher",
-  "concurrency_key": "tenant:acme:report:42",
+  "session": "chat:u42:c7",
   "input": { "query": "hello" }
 }
 ```
 
-The execution returns `running` when the key is free and `pending` when another
-execution holds it. Keys are global to the kernel, so executions for two
-different agents that share a key also run one at a time. See
-[Execution concurrency](/architecture#execution-concurrency).
+The execution returns `running` when the session is free and `pending` when
+another execution in it is running or blocked. Sessions are global to the
+kernel, so executions for two different agents in one session also run one at a
+time. See [Sessions](/architecture#sessions).
 
 ### Get an execution
 
@@ -122,17 +122,32 @@ different agents that share a key also run one at a time. See
 ```json
 {
   "id": "0192...", "agent_id": "researcher", "status": "completed",
+  "session": "chat:u42:c7", "parent_execution_id": "0191...",
   "input": {...}, "output": {...}, "failure_reason": "",
   "created_at": "...", "updated_at": "...", "deadline_at": null
 }
 ```
 
+`session` and `parent_execution_id` are present when set. The parent is set when
+an execution in a session starts.
+
+### Get the previous state
+
+`GET /v0/executions/{id}/previous` · bearer or HMAC
+
+```json
+{ "state": {...} }
+```
+
+The `state` the execution's parent completed with, or the parent's `output` when
+it recorded no state. `state` is `null` for an execution with no parent.
+
 ### List executions
 
-`GET /v0/executions?agent_id=&concurrency_key=&status=&cursor=&limit=` · bearer
+`GET /v0/executions?agent_id=&session=&status=&cursor=&limit=` · bearer
 
 Newest first. Keyset paging: pass the returned `next_cursor` back as `cursor`.
-`concurrency_key` filters by exact key.
+`session` filters by exact session.
 
 ```json
 { "executions": [ ... ], "next_cursor": "0192..." }
@@ -236,8 +251,10 @@ stalled.
 
 ### Report execution outcome
 
-`POST /v0/executions/{id}/complete` takes `{ "output": {...} }` → `204`. Records
-`execution.completed`.
+`POST /v0/executions/{id}/complete` takes `{ "output": {...}, "state": {...} }` →
+`204`. Records `execution.completed`. `output` goes to callers. The optional
+`state` is kept for the next execution in the session, which reads it from
+`previous`.
 
 `POST /v0/executions/{id}/fail` takes `{ "error": "..." }` → `204`. Records
 `execution.failed`.

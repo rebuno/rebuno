@@ -29,8 +29,11 @@ type ExecutionStore interface {
 	CreateExecution(ctx context.Context, exec domain.Execution) error
 	GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error)
 	ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error)
-	ListIdleConcurrencyKeys(ctx context.Context, now time.Time) ([]string, error)
-	NextPendingByKey(ctx context.Context, key string, now time.Time) (domain.Execution, error)
+	ListIdleSessions(ctx context.Context, now time.Time) ([]string, error)
+	NextPendingInSession(ctx context.Context, session string, now time.Time) (domain.Execution, error)
+	SessionHead(ctx context.Context, session, agentID string) (domain.Execution, error)
+	SetExecutionParent(ctx context.Context, id, parent uuid.UUID) error
+	SetExecutionState(ctx context.Context, id uuid.UUID, state []byte) error
 	UpdateExecutionStatus(ctx context.Context, id uuid.UUID, status domain.ExecutionStatus, output []byte, reason string) error
 	ListExpiredExecutions(ctx context.Context, now time.Time) ([]domain.Execution, error)
 	DeleteExecutionsCreatedBefore(ctx context.Context, before time.Time) error

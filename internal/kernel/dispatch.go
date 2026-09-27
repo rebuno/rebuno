@@ -18,7 +18,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output json.RawMessage) error {
+func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output, state json.RawMessage) error {
 	if !lease.Valid() {
 		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
 	}
@@ -39,6 +39,11 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease 
 			if _, err := tx.Append(ctx, execID, domain.EventExecutionCompleted, payload.Execution(execID, domain.ExecutionCompleted, output, "")); err != nil {
 				return err
 			}
+			if len(state) > 0 && string(state) != "null" {
+				if err := tx.SetExecutionState(ctx, execID, state); err != nil {
+					return err
+				}
+			}
 			if err := tx.UpdateExecutionStatus(ctx, execID, domain.ExecutionCompleted, output, ""); err != nil {
 				return err
 			}
@@ -48,7 +53,7 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease 
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionCompleted))
-	k.releaseConcurrencyKey(ctx, exec.ConcurrencyKey)
+	k.releaseSession(ctx, exec.Session)
 	return nil
 }
 
@@ -86,7 +91,7 @@ func (k *Kernel) failExecution(ctx context.Context, execID uuid.UUID, lease doma
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionFailed))
-	k.releaseConcurrencyKey(ctx, exec.ConcurrencyKey)
+	k.releaseSession(ctx, exec.Session)
 	return nil
 }
 

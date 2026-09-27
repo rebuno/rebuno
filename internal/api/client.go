@@ -17,15 +17,20 @@ const maxEventsPageLimit = 1000
 type ClientKernel interface {
 	CreateExecution(ctx context.Context, agentID string, input json.RawMessage, options ...kernel.CreateExecutionOptions) (domain.Execution, error)
 	GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error)
+	PreviousState(ctx context.Context, id uuid.UUID) (json.RawMessage, error)
 	ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error)
 	GetEvents(ctx context.Context, id uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error)
 	CancelExecution(ctx context.Context, id uuid.UUID) error
 }
 
 type CreateExecutionRequest struct {
-	AgentID        string          `json:"agent_id"`
-	Input          json.RawMessage `json:"input"`
-	ConcurrencyKey string          `json:"concurrency_key,omitempty"`
+	AgentID string          `json:"agent_id"`
+	Input   json.RawMessage `json:"input"`
+	Session string          `json:"session,omitempty"`
+}
+
+type PreviousStateResponse struct {
+	State json.RawMessage `json:"state"`
 }
 
 func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +39,7 @@ func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{ConcurrencyKey: req.ConcurrencyKey})
+	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{Session: req.Session})
 	if err != nil {
 		WriteError(w, err)
 		return
@@ -45,10 +50,10 @@ func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
 func (rt *Router) listExecutions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := domain.ExecutionFilter{
-		AgentID:        q.Get("agent_id"),
-		ConcurrencyKey: q.Get("concurrency_key"),
-		Status:         domain.ExecutionStatus(q.Get("status")),
-		Cursor:         q.Get("cursor"),
+		AgentID: q.Get("agent_id"),
+		Session: q.Get("session"),
+		Status:  domain.ExecutionStatus(q.Get("status")),
+		Cursor:  q.Get("cursor"),
 	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -85,6 +90,23 @@ func (rt *Router) getExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, exec, http.StatusOK)
+}
+
+func (rt *Router) previousState(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
+	state, err := rt.client.PreviousState(r.Context(), id)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	if state == nil {
+		state = json.RawMessage("null")
+	}
+	WriteJSON(w, PreviousStateResponse{State: state}, http.StatusOK)
 }
 
 func (rt *Router) getEvents(w http.ResponseWriter, r *http.Request) {

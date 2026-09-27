@@ -50,7 +50,7 @@ func TestKernelRequiresPrincipalAndExecutionOwner(t *testing.T) {
 					return err
 				},
 				"heartbeat":          func() error { return k.Heartbeat(principal.ctx, exec.ID, lease) },
-				"complete execution": func() error { return k.CompleteExecution(principal.ctx, exec.ID, lease, nil) },
+				"complete execution": func() error { return k.CompleteExecution(principal.ctx, exec.ID, lease, nil, nil) },
 				"fail execution":     func() error { return k.FailExecution(principal.ctx, exec.ID, lease, "failed") },
 			} {
 				t.Run(name, func(t *testing.T) {

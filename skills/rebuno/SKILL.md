@@ -47,6 +47,11 @@ Retain raw functions for non-Rebuno callers. Check whether framework checkpoints
 or caches skip recorded calls on resume; keep recording at individual effect
 boundaries.
 
+For multi-turn agents, create each turn as an execution with a `session`.
+Return `Result(output=..., state=...)` and read the prior turn with
+`previous()` in place of a session store or framework checkpointer. Keep
+conversation state in the framework's own serialized message format.
+
 Default `safe_to_retry` may repeat an effect that started without recording a
 result. For non-idempotent writes, `at_most_once` reports `indeterminate` instead;
 reconcile external state before retrying. Keep external idempotency keys stable.

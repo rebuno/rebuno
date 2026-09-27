@@ -38,6 +38,31 @@ async function process(input: { prompt: string; limit?: number }) {
 The return value becomes the execution's `output` and has to be
 JSON-serializable.
 
+### Sessions
+
+An execution created with a `session` continues the agent's last completed
+execution in that session. Return a `Result` to keep state for the next one,
+and read it back with `previous()`, which returns `null` on the first execution:
+
+```ts
+import { generateText, type ModelMessage } from "ai";
+import { Result, previous } from "rebuno";
+
+async function process(input: { task: string }) {
+  const prior = (await previous<{ messages: ModelMessage[] }>())?.messages ?? [];
+  const messages: ModelMessage[] = [...prior, { role: "user", content: input.task }];
+  const result = await generateText({ model, messages, tools });
+  return new Result({
+    output: { answer: result.text },
+    state: { messages: [...messages, ...result.response.messages] },
+  });
+}
+```
+
+`output` goes to callers and `state` stays with the session. Both have to be
+JSON-serializable. A handler that returns a plain value passes its output as the
+next execution's previous state. See [Sessions](/architecture#sessions).
+
 ### Validating input
 
 Pass an `inputSchema`, any [Standard Schema](https://standardschema.dev)

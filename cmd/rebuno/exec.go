@@ -32,7 +32,7 @@ func execCmd() *cobra.Command {
 }
 
 func execListCmd() *cobra.Command {
-	var agentID, status, concurrencyKey string
+	var agentID, status, session string
 	var limit int
 	cmd := &cobra.Command{
 		Use:          "ls",
@@ -42,8 +42,8 @@ func execListCmd() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			q := url.Values{}
-			if concurrencyKey != "" {
-				q.Set("concurrency_key", concurrencyKey)
+			if session != "" {
+				q.Set("session", session)
 			}
 			if agentID != "" {
 				q.Set("agent_id", agentID)
@@ -78,14 +78,14 @@ func execListCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&agentID, "agent", "", "Only executions for this agent")
-	f.StringVar(&concurrencyKey, "concurrency-key", "", "Only executions sharing this concurrency key")
+	f.StringVar(&session, "session", "", "Only executions in this session")
 	f.StringVar(&status, "status", "", "Only executions in this status (pending, running, blocked, completed, failed, cancelled)")
 	f.IntVar(&limit, "limit", 0, "Maximum executions to list")
 	return cmd
 }
 
 func execCreateCmd() *cobra.Command {
-	var concurrencyKey string
+	var session string
 	cmd := &cobra.Command{
 		Use:   "create <agent-id> [json-input]",
 		Short: "Start an execution",
@@ -102,7 +102,7 @@ func execCreateCmd() *cobra.Command {
 			if !json.Valid([]byte(input)) {
 				return fmt.Errorf("input is not valid JSON: %s", input)
 			}
-			req := api.CreateExecutionRequest{AgentID: args[0], Input: json.RawMessage(input), ConcurrencyKey: concurrencyKey}
+			req := api.CreateExecutionRequest{AgentID: args[0], Input: json.RawMessage(input), Session: session}
 			var exec domain.Execution
 			if err := kernelClient().do(cmd.Context(), http.MethodPost, "/v0/executions", req, &exec); err != nil {
 				return err
@@ -111,7 +111,7 @@ func execCreateCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&concurrencyKey, "concurrency-key", "", "Run one execution at a time for this key")
+	cmd.Flags().StringVar(&session, "session", "", "Continue this session; its executions run one at a time")
 	return cmd
 }
 
@@ -134,12 +134,15 @@ func execGetCmd() *cobra.Command {
 			fmt.Printf("  id       %s\n", e.ID)
 			fmt.Printf("  agent    %s\n", e.AgentID)
 			fmt.Printf("  status   %s\n", e.Status)
-			if e.ConcurrencyKey != "" {
-				key := e.ConcurrencyKey
+			if e.Session != "" {
+				session := e.Session
 				if e.Status == domain.ExecutionPending {
-					key += " (held by another execution)"
+					session += " (waiting for another execution)"
 				}
-				fmt.Printf("  key      %s\n", key)
+				fmt.Printf("  session  %s\n", session)
+			}
+			if e.ParentExecutionID != nil {
+				fmt.Printf("  parent   %s\n", *e.ParentExecutionID)
 			}
 			fmt.Printf("  created  %s (%s ago)\n", e.CreatedAt.Format(time.RFC3339), age(e.CreatedAt))
 			if len(e.Output) > 0 {

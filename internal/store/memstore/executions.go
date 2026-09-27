@@ -29,7 +29,7 @@ func (s *Store) listExecutionsLocked(filter domain.ExecutionFilter) domain.Execu
 		if filter.AgentID != "" && e.AgentID != filter.AgentID {
 			continue
 		}
-		if filter.ConcurrencyKey != "" && e.ConcurrencyKey != filter.ConcurrencyKey {
+		if filter.Session != "" && e.Session != filter.Session {
 			continue
 		}
 		if filter.Status != "" && e.Status != filter.Status {
@@ -98,9 +98,9 @@ func (s *Store) updateExecutionStatusLocked(ctx context.Context, id uuid.UUID, s
 	if exec.Status.IsTerminal() {
 		return domain.ErrExecutionTerminal
 	}
-	if exec.ConcurrencyKey != "" && (status == domain.ExecutionRunning || status == domain.ExecutionBlocked) {
+	if exec.Session != "" && (status == domain.ExecutionRunning || status == domain.ExecutionBlocked) {
 		for _, other := range s.executions {
-			if other.ID != id && other.ConcurrencyKey == exec.ConcurrencyKey &&
+			if other.ID != id && other.Session == exec.Session &&
 				(other.Status == domain.ExecutionRunning || other.Status == domain.ExecutionBlocked) {
 				return domain.ErrConflict
 			}
@@ -148,8 +148,14 @@ func (s *Store) DeleteExecutionsCreatedBefore(ctx context.Context, before time.T
 }
 
 func (s *Store) deleteExecutionsCreatedBeforeLocked(ctx context.Context, before time.Time) {
+	kept := make(map[string]bool)
+	for _, exec := range s.executions {
+		if exec.Session != "" && (!exec.Status.IsTerminal() || !exec.CreatedAt.Before(before)) {
+			kept[exec.Session] = true
+		}
+	}
 	for id, exec := range s.executions {
-		if !exec.Status.IsTerminal() || !exec.CreatedAt.Before(before) {
+		if !exec.Status.IsTerminal() || !exec.CreatedAt.Before(before) || kept[exec.Session] {
 			continue
 		}
 		for stepID, step := range s.steps {
@@ -170,6 +176,12 @@ func (s *Store) deleteExecutionsCreatedBeforeLocked(ctx context.Context, before 
 		}
 		delete(s.events, id)
 		delete(s.executions, id)
+		for childID, child := range s.executions {
+			if child.ParentExecutionID != nil && *child.ParentExecutionID == id {
+				child.ParentExecutionID = nil
+				s.executions[childID] = child
+			}
+		}
 	}
 }
 
@@ -194,56 +206,56 @@ func (tx *txStore) DeleteExecutionsCreatedBefore(ctx context.Context, before tim
 	return nil
 }
 
-func (s *Store) ListIdleConcurrencyKeys(_ context.Context, now time.Time) ([]string, error) {
+func (s *Store) ListIdleSessions(_ context.Context, now time.Time) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.listIdleConcurrencyKeysLocked(now), nil
+	return s.listIdleSessionsLocked(now), nil
 }
 
-func (tx *txStore) ListIdleConcurrencyKeys(_ context.Context, now time.Time) ([]string, error) {
-	return tx.listIdleConcurrencyKeysLocked(now), nil
+func (tx *txStore) ListIdleSessions(_ context.Context, now time.Time) ([]string, error) {
+	return tx.listIdleSessionsLocked(now), nil
 }
 
-func (s *Store) listIdleConcurrencyKeysLocked(now time.Time) []string {
+func (s *Store) listIdleSessionsLocked(now time.Time) []string {
 	queued := make(map[string]bool)
 	active := make(map[string]bool)
 	for _, exec := range s.executions {
-		if exec.ConcurrencyKey == "" {
+		if exec.Session == "" {
 			continue
 		}
 		switch exec.Status {
 		case domain.ExecutionRunning, domain.ExecutionBlocked:
-			active[exec.ConcurrencyKey] = true
+			active[exec.Session] = true
 		case domain.ExecutionPending:
 			if exec.DeadlineAt == nil || exec.DeadlineAt.After(now) {
-				queued[exec.ConcurrencyKey] = true
+				queued[exec.Session] = true
 			}
 		}
 	}
-	var keys []string
-	for key := range queued {
-		if !active[key] {
-			keys = append(keys, key)
+	var sessions []string
+	for session := range queued {
+		if !active[session] {
+			sessions = append(sessions, session)
 		}
 	}
-	sort.Strings(keys)
-	return keys
+	sort.Strings(sessions)
+	return sessions
 }
 
-func (s *Store) NextPendingByKey(_ context.Context, key string, now time.Time) (domain.Execution, error) {
+func (s *Store) NextPendingInSession(_ context.Context, session string, now time.Time) (domain.Execution, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.nextPendingByKeyLocked(key, now)
+	return s.nextPendingInSessionLocked(session, now)
 }
 
-func (tx *txStore) NextPendingByKey(_ context.Context, key string, now time.Time) (domain.Execution, error) {
-	return tx.nextPendingByKeyLocked(key, now)
+func (tx *txStore) NextPendingInSession(_ context.Context, session string, now time.Time) (domain.Execution, error) {
+	return tx.nextPendingInSessionLocked(session, now)
 }
 
-func (s *Store) nextPendingByKeyLocked(key string, now time.Time) (domain.Execution, error) {
+func (s *Store) nextPendingInSessionLocked(session string, now time.Time) (domain.Execution, error) {
 	var next domain.Execution
 	for _, exec := range s.executions {
-		if exec.ConcurrencyKey != key || exec.Status != domain.ExecutionPending {
+		if exec.Session != session || exec.Status != domain.ExecutionPending {
 			continue
 		}
 		if exec.DeadlineAt != nil && !exec.DeadlineAt.After(now) {
@@ -257,4 +269,73 @@ func (s *Store) nextPendingByKeyLocked(key string, now time.Time) (domain.Execut
 		return domain.Execution{}, domain.ErrNotFound
 	}
 	return next, nil
+}
+
+func (s *Store) SessionHead(_ context.Context, session, agentID string) (domain.Execution, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sessionHeadLocked(session, agentID)
+}
+
+func (tx *txStore) SessionHead(_ context.Context, session, agentID string) (domain.Execution, error) {
+	return tx.sessionHeadLocked(session, agentID)
+}
+
+func (s *Store) sessionHeadLocked(session, agentID string) (domain.Execution, error) {
+	var head domain.Execution
+	for _, exec := range s.executions {
+		if exec.Session != session || exec.AgentID != agentID || exec.Status != domain.ExecutionCompleted {
+			continue
+		}
+		if head.ID == uuid.Nil || exec.ID.String() > head.ID.String() {
+			head = exec
+		}
+	}
+	if head.ID == uuid.Nil {
+		return domain.Execution{}, domain.ErrNotFound
+	}
+	return head, nil
+}
+
+func (s *Store) SetExecutionParent(_ context.Context, id, parent uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.setExecutionParentLocked(id, parent)
+}
+
+func (tx *txStore) SetExecutionParent(_ context.Context, id, parent uuid.UUID) error {
+	return tx.setExecutionParentLocked(id, parent)
+}
+
+func (s *Store) setExecutionParentLocked(id, parent uuid.UUID) error {
+	exec, ok := s.executions[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	if _, ok := s.executions[parent]; !ok {
+		return domain.ErrNotFound
+	}
+	exec.ParentExecutionID = &parent
+	s.executions[id] = exec
+	return nil
+}
+
+func (s *Store) SetExecutionState(_ context.Context, id uuid.UUID, state []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.setExecutionStateLocked(id, state)
+}
+
+func (tx *txStore) SetExecutionState(_ context.Context, id uuid.UUID, state []byte) error {
+	return tx.setExecutionStateLocked(id, state)
+}
+
+func (s *Store) setExecutionStateLocked(id uuid.UUID, state []byte) error {
+	exec, ok := s.executions[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	exec.State = state
+	s.executions[id] = exec
+	return nil
 }

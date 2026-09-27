@@ -47,6 +47,29 @@ Binding happens before your handler runs. A missing required field or a pydantic
 error fails the execution. The return value becomes the execution's `output` and
 has to be JSON-serializable.
 
+### Sessions
+
+An execution created with a `session` continues the agent's last completed
+execution in that session. Return a `Result` to keep state for the next one,
+and read it back with `previous()`, which returns `None` on the first execution:
+
+```python
+from langchain_core.messages import HumanMessage, messages_from_dict, messages_to_dict
+from rebuno import Result, previous
+
+async def process(task: str) -> Result:
+    prior = messages_from_dict((await previous() or {}).get("messages", []))
+    result = await graph.ainvoke({"messages": [*prior, HumanMessage(task)]})
+    return Result(
+        output={"answer": result["messages"][-1].text},
+        state={"messages": messages_to_dict(result["messages"])},
+    )
+```
+
+`output` goes to callers and `state` stays with the session. Both have to be
+JSON-serializable. A handler that returns a plain value passes its output as the
+next execution's previous state. See [Sessions](/architecture#sessions).
+
 ## `run()` vs `app`
 
 `run()` binds the handler and serves it with uvicorn. It blocks:

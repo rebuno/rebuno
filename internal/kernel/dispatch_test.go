@@ -181,7 +181,7 @@ func TestCompleteExecutionReleasesLease(t *testing.T) {
 	}
 	did := leaseOf(t, k, exec.ID)
 
-	if err := k.CompleteExecution(ctx, exec.ID, did, json.RawMessage(`{"done":true}`)); err != nil {
+	if err := k.CompleteExecution(ctx, exec.ID, did, json.RawMessage(`{"done":true}`), nil); err != nil {
 		t.Fatal(err)
 	}
 	d, err := ms.GetDispatch(ctx, did.DispatchID)
@@ -572,7 +572,7 @@ func TestSupersededExecutionTerminalsAreRefused(t *testing.T) {
 	stalled := leaseOf(t, k, exec.ID)
 	live := supersede(t, k, exec.ID)
 
-	if err := k.CompleteExecution(ctx, exec.ID, stalled, json.RawMessage(`{"stale":true}`)); !errors.Is(err, domain.ErrLeaseSuperseded) {
+	if err := k.CompleteExecution(ctx, exec.ID, stalled, json.RawMessage(`{"stale":true}`), nil); !errors.Is(err, domain.ErrLeaseSuperseded) {
 		t.Fatalf("stalled completion must be refused, got %v", err)
 	}
 	if err := k.FailExecution(ctx, exec.ID, stalled, "stale"); !errors.Is(err, domain.ErrLeaseSuperseded) {
@@ -586,7 +586,7 @@ func TestSupersededExecutionTerminalsAreRefused(t *testing.T) {
 		t.Fatalf("execution must still be running, got %s", got.Status)
 	}
 
-	if err := k.CompleteExecution(ctx, exec.ID, live, json.RawMessage(`{"ok":true}`)); err != nil {
+	if err := k.CompleteExecution(ctx, exec.ID, live, json.RawMessage(`{"ok":true}`), nil); err != nil {
 		t.Fatalf("live attempt must complete the execution, got %v", err)
 	}
 }
@@ -1300,7 +1300,7 @@ func TestReleasedDispatchRecordsNoEvent(t *testing.T) {
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := k.CompleteExecution(ctx, exec.ID, leaseOf(t, k, exec.ID), json.RawMessage(`{"ok":true}`)); err != nil {
+	if err := k.CompleteExecution(ctx, exec.ID, leaseOf(t, k, exec.ID), json.RawMessage(`{"ok":true}`), nil); err != nil {
 		t.Fatal(err)
 	}
 

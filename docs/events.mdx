@@ -32,8 +32,9 @@ the system of record. Executions, steps, and approvals are projections of it.
 ## Execution events
 
 The `execution.*` types cover the lifecycle of the run itself. Payloads carry
-`execution_id` and `status`, plus `concurrency_key` and `deadline_at` when the
-execution has them.
+`execution_id` and `status`, plus `session` and `deadline_at` when the execution
+has them. `execution.started` also carries `parent_execution_id` when the
+execution continues an earlier one in its session.
 
 | Type | When |
 |------|------|

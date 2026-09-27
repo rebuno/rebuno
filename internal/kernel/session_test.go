@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,7 +26,7 @@ import (
 	"github.com/rebuno/rebuno/internal/store/postgres"
 )
 
-type concurrencyStore interface {
+type sessionStore interface {
 	store.APIKeyStore
 	store.EventStore
 	store.StepStore
@@ -37,11 +38,11 @@ type concurrencyStore interface {
 	store.UnitOfWork
 }
 
-func concurrencyKernels(t *testing.T, backend string) (*kernel.Kernel, func() *kernel.Kernel, context.Context) {
+func sessionKernels(t *testing.T, backend string) (*kernel.Kernel, func() *kernel.Kernel, context.Context) {
 	t.Helper()
 	ctx := auth.WithAdmin(t.Context())
 	memory := memstore.NewStore()
-	newStore := func() concurrencyStore { return memory }
+	newStore := func() sessionStore { return memory }
 	if backend == "postgres" {
 		if testing.Short() || os.Getenv("DATABASE_URL") == "" {
 			t.Skip("requires DATABASE_URL without -short")
@@ -54,7 +55,7 @@ func concurrencyKernels(t *testing.T, backend string) (*kernel.Kernel, func() *k
 		if err != nil {
 			t.Fatal(err)
 		}
-		schema := pgx.Identifier{"concurrency_" + strings.ReplaceAll(uuid.NewString(), "-", "")}.Sanitize()
+		schema := pgx.Identifier{"session_" + strings.ReplaceAll(uuid.NewString(), "-", "")}.Sanitize()
 		if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 			admin.Close()
 			t.Fatal(err)
@@ -75,7 +76,7 @@ func concurrencyKernels(t *testing.T, backend string) (*kernel.Kernel, func() *k
 		if err := postgres.Migrate(ctx, pool); err != nil {
 			t.Fatal(err)
 		}
-		newStore = func() concurrencyStore { return postgres.NewStore(pool) }
+		newStore = func() sessionStore { return postgres.NewStore(pool) }
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	t.Cleanup(server.Close)
@@ -94,9 +95,9 @@ func concurrencyKernels(t *testing.T, backend string) (*kernel.Kernel, func() *k
 	return k, replica, ctx
 }
 
-func createKeyed(t *testing.T, k *kernel.Kernel, ctx context.Context, agent, key string) domain.Execution {
+func createInSession(t *testing.T, k *kernel.Kernel, ctx context.Context, agent, session string) domain.Execution {
 	t.Helper()
-	exec, err := k.CreateExecution(ctx, agent, json.RawMessage(`{}`), kernel.CreateExecutionOptions{ConcurrencyKey: key})
+	exec, err := k.CreateExecution(ctx, agent, json.RawMessage(`{}`), kernel.CreateExecutionOptions{Session: session})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,21 +115,21 @@ func requireExecutionStatus(t *testing.T, k *kernel.Kernel, ctx context.Context,
 	}
 }
 
-func drainKeyed(t *testing.T, k *kernel.Kernel, ctx context.Context) {
+func drainSessions(t *testing.T, k *kernel.Kernel, ctx context.Context) {
 	t.Helper()
 	if err := k.DrainDispatches(ctx); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestConcurrencySerializesAcrossAgents(t *testing.T) {
+func TestSessionSerializesAcrossAgents(t *testing.T) {
 	for _, backend := range []string{"memory", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			k, _, ctx := concurrencyKernels(t, backend)
-			first := createKeyed(t, k, ctx, "agent-1", "session-a")
-			second := createKeyed(t, k, ctx, "agent-2", "session-a")
-			third := createKeyed(t, k, ctx, "agent-1", "session-a")
-			independent := createKeyed(t, k, ctx, "agent-1", "session-b")
+			k, _, ctx := sessionKernels(t, backend)
+			first := createInSession(t, k, ctx, "agent-1", "session-a")
+			second := createInSession(t, k, ctx, "agent-2", "session-a")
+			third := createInSession(t, k, ctx, "agent-1", "session-a")
+			independent := createInSession(t, k, ctx, "agent-1", "session-b")
 			if first.Status != domain.ExecutionRunning || second.Status != domain.ExecutionPending {
 				t.Fatalf("create returned %s and %s", first.Status, second.Status)
 			}
@@ -140,12 +141,12 @@ func TestConcurrencySerializesAcrossAgents(t *testing.T) {
 				t.Fatalf("creation events: %+v", events)
 			}
 			var payload struct {
-				ConcurrencyKey string `json:"concurrency_key"`
+				Session string `json:"session"`
 			}
-			if err := json.Unmarshal(events[0].Payload, &payload); err != nil || payload.ConcurrencyKey != "session-a" {
-				t.Fatalf("creation key: %+v, %v", payload, err)
+			if err := json.Unmarshal(events[0].Payload, &payload); err != nil || payload.Session != "session-a" {
+				t.Fatalf("creation session: %+v, %v", payload, err)
 			}
-			drainKeyed(t, k, ctx)
+			drainSessions(t, k, ctx)
 			requireExecutionStatus(t, k, ctx, first.ID, domain.ExecutionRunning)
 			requireExecutionStatus(t, k, ctx, independent.ID, domain.ExecutionRunning)
 			for _, exec := range []domain.Execution{second, third} {
@@ -155,16 +156,16 @@ func TestConcurrencySerializesAcrossAgents(t *testing.T) {
 					t.Fatalf("waiter dispatches: %v, %v", ds, err)
 				}
 			}
-			page, err := k.ListExecutions(ctx, domain.ExecutionFilter{ConcurrencyKey: "session-a"})
+			page, err := k.ListExecutions(ctx, domain.ExecutionFilter{Session: "session-a"})
 			if err != nil || len(page.Executions) != 3 {
-				t.Fatalf("key filter: %+v, %v", page, err)
+				t.Fatalf("session filter: %+v, %v", page, err)
 			}
-			if err := k.CompleteExecution(ctx, first.ID, leaseOf(t, k, first.ID), json.RawMessage(`{}`)); err != nil {
+			if err := k.CompleteExecution(ctx, first.ID, leaseOf(t, k, first.ID), json.RawMessage(`{}`), nil); err != nil {
 				t.Fatal(err)
 			}
 			requireExecutionStatus(t, k, ctx, second.ID, domain.ExecutionRunning)
 			requireExecutionStatus(t, k, ctx, third.ID, domain.ExecutionPending)
-			drainKeyed(t, k, ctx)
+			drainSessions(t, k, ctx)
 			if err := k.FailExecution(ctx, second.ID, leaseOf(t, k, second.ID), "failed"); err != nil {
 				t.Fatal(err)
 			}
@@ -186,27 +187,27 @@ func TestConcurrencySerializesAcrossAgents(t *testing.T) {
 	}
 }
 
-func TestConcurrencyRetainsOwnershipAcrossApproval(t *testing.T) {
+func TestSessionRetainsOwnershipAcrossApproval(t *testing.T) {
 	for _, backend := range []string{"memory", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			base, _, ctx := concurrencyKernels(t, backend)
+			base, _, ctx := sessionKernels(t, backend)
 			deps := base.Deps()
 			deps.Policy = approvalPolicy()
 			k := kernel.New(kernel.DefaultConfig(), deps)
-			first := createKeyed(t, k, ctx, "agent-1", "session")
-			second := createKeyed(t, k, ctx, "agent-1", "session")
-			drainKeyed(t, k, ctx)
+			first := createInSession(t, k, ctx, "agent-1", "session")
+			second := createInSession(t, k, ctx, "agent-1", "session")
+			drainSessions(t, k, ctx)
 			decision, err := k.SubmitStep(ctx, first.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "fs_write", Args: json.RawMessage(`{}`), Lease: leaseOf(t, k, first.ID)})
 			if err != nil || decision.ApprovalID == nil {
 				t.Fatalf("approval: %+v, %v", decision, err)
 			}
-			drainKeyed(t, k, ctx)
+			drainSessions(t, k, ctx)
 			requireExecutionStatus(t, k, ctx, first.ID, domain.ExecutionBlocked)
 			requireExecutionStatus(t, k, ctx, second.ID, domain.ExecutionPending)
 			if err := k.GrantApproval(ctx, *decision.ApprovalID, kernel.GrantApprovalRequest{DecidedBy: "test"}); err != nil {
 				t.Fatal(err)
 			}
-			drainKeyed(t, k, ctx)
+			drainSessions(t, k, ctx)
 			requireExecutionStatus(t, k, ctx, second.ID, domain.ExecutionPending)
 			if err := k.CancelExecution(ctx, first.ID); err != nil {
 				t.Fatal(err)
@@ -216,19 +217,19 @@ func TestConcurrencyRetainsOwnershipAcrossApproval(t *testing.T) {
 	}
 }
 
-func TestConcurrencyCancellationAndDeadlines(t *testing.T) {
+func TestSessionCancellationAndDeadlines(t *testing.T) {
 	for _, backend := range []string{"memory", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			k, _, ctx := concurrencyKernels(t, backend)
-			first := createKeyed(t, k, ctx, "agent-1", "session")
-			cancelled := createKeyed(t, k, ctx, "agent-1", "session")
+			k, _, ctx := sessionKernels(t, backend)
+			first := createInSession(t, k, ctx, "agent-1", "session")
+			cancelled := createInSession(t, k, ctx, "agent-1", "session")
 			past := time.Now().Add(-time.Hour)
-			expired := domain.Execution{ID: uuid.Must(uuid.NewV7()), AgentID: "agent-1", ConcurrencyKey: "session", Status: domain.ExecutionPending, Input: json.RawMessage(`{}`), DeadlineAt: &past}
+			expired := domain.Execution{ID: uuid.Must(uuid.NewV7()), AgentID: "agent-1", Session: "session", Status: domain.ExecutionPending, Input: json.RawMessage(`{}`), DeadlineAt: &past}
 			if err := k.Deps().Executions.CreateExecution(ctx, expired); err != nil {
 				t.Fatal(err)
 			}
-			next := createKeyed(t, k, ctx, "agent-1", "session")
-			drainKeyed(t, k, ctx)
+			next := createInSession(t, k, ctx, "agent-1", "session")
+			drainSessions(t, k, ctx)
 			if err := k.CancelExecution(ctx, cancelled.ID); err != nil {
 				t.Fatal(err)
 			}
@@ -252,15 +253,15 @@ func TestConcurrencyCancellationAndDeadlines(t *testing.T) {
 	}
 }
 
-func TestConcurrencyAdmissionAcrossReplicas(t *testing.T) {
+func TestSessionAdmissionAcrossReplicas(t *testing.T) {
 	for _, backend := range []string{"memory", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			k, replica, ctx := concurrencyKernels(t, backend)
+			k, replica, ctx := sessionKernels(t, backend)
 			const count = 12
 			var wg sync.WaitGroup
 			for range count {
 				wg.Go(func() {
-					if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{ConcurrencyKey: "session"}); err != nil {
+					if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{Session: "session"}); err != nil {
 						t.Error(err)
 					}
 				})
@@ -275,7 +276,7 @@ func TestConcurrencyAdmissionAcrossReplicas(t *testing.T) {
 				})
 			}
 			wg.Wait()
-			page, err := k.ListExecutions(ctx, domain.ExecutionFilter{ConcurrencyKey: "session"})
+			page, err := k.ListExecutions(ctx, domain.ExecutionFilter{Session: "session"})
 			if err != nil || len(page.Executions) != count {
 				t.Fatalf("executions: %+v, %v", page, err)
 			}
@@ -317,14 +318,14 @@ func (admissionFaultTx) Enqueue(context.Context, domain.Dispatch) error {
 }
 
 // Postgres only: memstore transactions do not roll back.
-func TestConcurrencyAdmissionRollback(t *testing.T) {
-	k, _, ctx := concurrencyKernels(t, "postgres")
+func TestSessionAdmissionRollback(t *testing.T) {
+	k, _, ctx := sessionKernels(t, "postgres")
 	deps := k.Deps()
 	fault := &admissionFault{UnitOfWork: deps.UnitOfWork}
 	fault.fail.Store(true)
 	deps.UnitOfWork = fault
 	failing := kernel.New(kernel.DefaultConfig(), deps)
-	exec := createKeyed(t, failing, ctx, "agent-1", "session")
+	exec := createInSession(t, failing, ctx, "agent-1", "session")
 	requireExecutionStatus(t, k, ctx, exec.ID, domain.ExecutionPending)
 	events, err := k.GetEvents(ctx, exec.ID, 0, 100)
 	if err != nil || len(events) != 1 || events[0].Type != domain.EventExecutionCreated {
@@ -341,13 +342,13 @@ func TestConcurrencyAdmissionRollback(t *testing.T) {
 	requireExecutionStatus(t, k, ctx, exec.ID, domain.ExecutionRunning)
 }
 
-func TestConcurrencyRetentionPreservesNonterminalExecutions(t *testing.T) {
+func TestSessionRetentionPreservesNonterminalExecutions(t *testing.T) {
 	for _, backend := range []string{"memory", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			k, _, ctx := concurrencyKernels(t, backend)
+			k, _, ctx := sessionKernels(t, backend)
 			ids := make(map[domain.ExecutionStatus]uuid.UUID)
 			for _, status := range []domain.ExecutionStatus{domain.ExecutionPending, domain.ExecutionRunning, domain.ExecutionBlocked, domain.ExecutionCompleted, domain.ExecutionFailed, domain.ExecutionCancelled} {
-				exec := domain.Execution{ID: uuid.Must(uuid.NewV7()), AgentID: "agent-1", Input: json.RawMessage(`{}`), ConcurrencyKey: string(status), Status: domain.ExecutionPending, CreatedAt: time.Now().Add(-48 * time.Hour)}
+				exec := domain.Execution{ID: uuid.Must(uuid.NewV7()), AgentID: "agent-1", Input: json.RawMessage(`{}`), Session: string(status), Status: domain.ExecutionPending, CreatedAt: time.Now().Add(-48 * time.Hour)}
 				if err := k.Deps().Executions.CreateExecution(ctx, exec); err != nil {
 					t.Fatal(err)
 				}
@@ -370,6 +371,116 @@ func TestConcurrencyRetentionPreservesNonterminalExecutions(t *testing.T) {
 				} else if err != nil {
 					t.Fatalf("deleted %s: %v", status, err)
 				}
+			}
+		})
+	}
+}
+
+func TestSessionContinuesAgentHead(t *testing.T) {
+	for _, backend := range []string{"memory", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			k, _, ctx := sessionKernels(t, backend)
+			first := createInSession(t, k, ctx, "agent-1", "chat")
+			if prev, err := k.PreviousState(ctx, first.ID); err != nil || prev != nil {
+				t.Fatalf("first previous: %s, %v", prev, err)
+			}
+			if err := k.CompleteExecution(ctx, first.ID, leaseOf(t, k, first.ID), json.RawMessage(`{"answer":1}`), json.RawMessage(`{"turns":1}`)); err != nil {
+				t.Fatal(err)
+			}
+			failed := createInSession(t, k, ctx, "agent-1", "chat")
+			if failed.ParentExecutionID == nil || *failed.ParentExecutionID != first.ID {
+				t.Fatalf("second parent: %v", failed.ParentExecutionID)
+			}
+			if err := k.FailExecution(ctx, failed.ID, leaseOf(t, k, failed.ID), "failed"); err != nil {
+				t.Fatal(err)
+			}
+			third := createInSession(t, k, ctx, "agent-1", "chat")
+			if third.ParentExecutionID == nil || *third.ParentExecutionID != first.ID {
+				t.Fatalf("a failed execution became the head: %v", third.ParentExecutionID)
+			}
+			requirePreviousState(t, k, ctx, third.ID, `{"turns":1}`)
+			events, err := k.GetEvents(ctx, third.ID, 0, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var started struct {
+				ParentExecutionID string `json:"parent_execution_id"`
+			}
+			for _, event := range events {
+				if event.Type == domain.EventExecutionStarted {
+					if err := json.Unmarshal(event.Payload, &started); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if started.ParentExecutionID != first.ID.String() {
+				t.Fatalf("started payload parent: %q", started.ParentExecutionID)
+			}
+			if err := k.CompleteExecution(ctx, third.ID, leaseOf(t, k, third.ID), json.RawMessage(`{"answer":3}`), nil); err != nil {
+				t.Fatal(err)
+			}
+			other := createInSession(t, k, ctx, "agent-2", "chat")
+			if other.ParentExecutionID != nil {
+				t.Fatalf("another agent's execution became the parent: %v", other.ParentExecutionID)
+			}
+			if err := k.CompleteExecution(ctx, other.ID, leaseOf(t, k, other.ID), json.RawMessage(`{}`), nil); err != nil {
+				t.Fatal(err)
+			}
+			fourth := createInSession(t, k, ctx, "agent-1", "chat")
+			requirePreviousState(t, k, ctx, fourth.ID, `{"answer":3}`)
+		})
+	}
+}
+
+func requirePreviousState(t *testing.T, k *kernel.Kernel, ctx context.Context, id uuid.UUID, want string) {
+	t.Helper()
+	raw, err := k.PreviousState(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, expected any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("previous state %s: %v", raw, err)
+	}
+	if err := json.Unmarshal([]byte(want), &expected); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("previous state: want %s, got %s", want, raw)
+	}
+}
+
+func TestSessionRetentionKeepsAncestors(t *testing.T) {
+	for _, backend := range []string{"memory", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			k, _, ctx := sessionKernels(t, backend)
+			old := time.Now().Add(-48 * time.Hour)
+			create := func(session string, createdAt time.Time) uuid.UUID {
+				exec := domain.Execution{ID: uuid.Must(uuid.NewV7()), AgentID: "agent-1", Input: json.RawMessage(`{}`), Session: session, Status: domain.ExecutionPending, CreatedAt: createdAt}
+				if err := k.Deps().Executions.CreateExecution(ctx, exec); err != nil {
+					t.Fatal(err)
+				}
+				if err := k.Deps().Executions.UpdateExecutionStatus(ctx, exec.ID, domain.ExecutionCompleted, nil, ""); err != nil {
+					t.Fatal(err)
+				}
+				return exec.ID
+			}
+			ancestor := create("active", old)
+			recent := create("active", time.Now())
+			if err := k.Deps().Executions.SetExecutionParent(ctx, recent, ancestor); err != nil {
+				t.Fatal(err)
+			}
+			expired := create("expired", old)
+			if err := k.Cleanup(ctx, 24*time.Hour, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []uuid.UUID{ancestor, recent} {
+				if _, err := k.GetExecution(ctx, id); err != nil {
+					t.Fatalf("session with a recent execution lost %s: %v", id, err)
+				}
+			}
+			if _, err := k.GetExecution(ctx, expired); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("expired session kept: %v", err)
 			}
 		})
 	}

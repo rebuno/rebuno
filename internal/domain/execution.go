@@ -27,25 +27,27 @@ func (s ExecutionStatus) IsTerminal() bool {
 }
 
 type Execution struct {
-	ID             uuid.UUID       `json:"id"`
-	AgentID        string          `json:"agent_id"`
-	ConcurrencyKey string          `json:"concurrency_key,omitempty"`
-	Input          json.RawMessage `json:"input"`
-	Status         ExecutionStatus `json:"status"`
-	Output         json.RawMessage `json:"output,omitempty"`
-	FailureReason  string          `json:"failure_reason,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
-	DeadlineAt     *time.Time      `json:"deadline_at,omitempty"`
+	ID                uuid.UUID       `json:"id"`
+	AgentID           string          `json:"agent_id"`
+	Session           string          `json:"session,omitempty"`
+	ParentExecutionID *uuid.UUID      `json:"parent_execution_id,omitempty"`
+	Input             json.RawMessage `json:"input"`
+	Status            ExecutionStatus `json:"status"`
+	Output            json.RawMessage `json:"output,omitempty"`
+	State             json.RawMessage `json:"-"`
+	FailureReason     string          `json:"failure_reason,omitempty"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+	DeadlineAt        *time.Time      `json:"deadline_at,omitempty"`
 }
 
 // Cursor holds an execution ID. IDs are UUIDv7, so ordering by ID orders by creation.
 type ExecutionFilter struct {
-	AgentID        string
-	ConcurrencyKey string
-	Status         ExecutionStatus
-	Limit          int
-	Cursor         string
+	AgentID string
+	Session string
+	Status  ExecutionStatus
+	Limit   int
+	Cursor  string
 }
 
 // Empty NextCursor means the last page; otherwise pass it back as ExecutionFilter.Cursor.

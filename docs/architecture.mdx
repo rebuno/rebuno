@@ -120,16 +120,31 @@ The kernel also guarantees a terminal event is never overridden, and that every
 state transition is atomic with the event that caused it. It does not guarantee
 exactly-once side effects.
 
-## Execution concurrency
+## Sessions
 
-An execution can carry an immutable `concurrency_key`. Executions sharing a key
-run one at a time; the rest wait in `pending`, with no dispatch or delivery
-attempts. Different keys run concurrently.
+An execution can carry an immutable `session`, which names a chain of executions
+that continue one another, such as the turns of a conversation. Executions in a
+session run one at a time; the rest wait in `pending`, with no dispatch or
+delivery attempts. Different sessions run concurrently. Sessions are global to
+the kernel, so executions for different agents in one session also run one at a
+time.
 
-An execution holds its key while `running` or `blocked`, so approval waits,
+An execution holds its session while `running` or `blocked`, so approval waits,
 retry backoff, and rate-limit pauses all keep it, and deadlines include the time
-spent waiting. Reaching a terminal state releases the key and starts the oldest
-execution waiting on it.
+spent waiting. Reaching a terminal state releases the session and starts the
+oldest execution waiting in it.
+
+When an execution in a session starts, its parent becomes the agent's most
+recently created completed execution in that session. A failed or cancelled
+execution never becomes a parent. An agent completes an execution with `state`
+alongside its `output`, and the next execution reads its parent's `state`, or
+the parent's `output` when it recorded none. The kernel stores `state` as opaque
+JSON; agents keep their conversation there in their framework's own format, so
+they need no session storage of their own.
+
+Retention deletes a session's executions only once every execution in the
+session is terminal and older than the retention cutoff, so a retained
+execution's parent stays readable.
 
 ## Dispatch and delivery
 

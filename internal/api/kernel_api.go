@@ -66,8 +66,12 @@ func (k *KernelAPI) Heartbeat(ctx context.Context, execID uuid.UUID, lease domai
 	return k.Inner.Heartbeat(ctx, execID, lease)
 }
 
-func (k *KernelAPI) CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output json.RawMessage) error {
-	return k.Inner.CompleteExecution(ctx, execID, lease, output)
+func (k *KernelAPI) CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output, state json.RawMessage) error {
+	return k.Inner.CompleteExecution(ctx, execID, lease, output, state)
+}
+
+func (k *KernelAPI) PreviousState(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
+	return k.Inner.PreviousState(ctx, id)
 }
 
 func (k *KernelAPI) FailExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error {

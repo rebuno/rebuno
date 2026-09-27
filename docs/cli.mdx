@@ -67,7 +67,8 @@ See [API keys](/api#api-keys) for rotation and revocation.
 | `rebuno exec events <id>` | Print the full event log with expanded payloads. |
 | `rebuno exec cancel <id>` | Cancel a pending, running, or blocked execution. |
 
-`exec ls` narrows with `--agent`, `--concurrency-key`, `--status`, and `--limit`.
+`exec ls` narrows with `--agent`, `--session`, `--status`, and `--limit`.
+`exec create --session <name>` continues that session.
 
 ```bash
 rebuno exec create hello '{"query": "hello world"}'

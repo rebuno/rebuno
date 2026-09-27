@@ -429,9 +429,9 @@ func TestRegisterAgentReturnsStoredAgent(t *testing.T) {
 	}
 }
 
-func TestConcurrencyKeyViaHTTP(t *testing.T) {
+func TestSessionViaHTTP(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
-	body := `{"agent_id":"agent-1","input":{},"concurrency_key":"tenant:a/session:1"}`
+	body := `{"agent_id":"agent-1","input":{},"session":"tenant:a/session:1"}`
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v0/executions", strings.NewReader(body)))
 	if rr.Code != http.StatusCreated {
@@ -441,7 +441,7 @@ func TestConcurrencyKeyViaHTTP(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &exec); err != nil {
 		t.Fatal(err)
 	}
-	if exec.Status != domain.ExecutionRunning || exec.ConcurrencyKey != "tenant:a/session:1" {
+	if exec.Status != domain.ExecutionRunning || exec.Session != "tenant:a/session:1" {
 		t.Fatalf("execution: %+v", exec)
 	}
 	ds, err := k.Deps().Queue.ListDispatchesByExecution(ctx, exec.ID)
@@ -454,24 +454,29 @@ func TestConcurrencyKeyViaHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if exec.Status != domain.ExecutionPending {
-		t.Fatalf("second execution on the key: %+v", exec)
+		t.Fatalf("second execution in the session: %+v", exec)
 	}
-	for _, path := range []string{"/v0/executions/" + exec.ID.String(), "/v0/executions?concurrency_key=" + url.QueryEscape(exec.ConcurrencyKey)} {
+	for _, path := range []string{"/v0/executions/" + exec.ID.String(), "/v0/executions?session=" + url.QueryEscape(exec.Session)} {
 		rr = httptest.NewRecorder()
 		mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
-		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"concurrency_key":"tenant:a/session:1"`) {
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"session":"tenant:a/session:1"`) {
 			t.Fatalf("get: %d %s", rr.Code, rr.Body.String())
 		}
 	}
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v0/executions/"+exec.ID.String()+"/previous", nil))
+	if rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != `{"state":null}` {
+		t.Fatalf("previous: %d %s", rr.Code, rr.Body.String())
+	}
 	for _, key := range []string{"   ", strings.Repeat("a", 257), "session\x00invalid"} {
-		body, err := json.Marshal(api.CreateExecutionRequest{AgentID: "agent-1", Input: json.RawMessage(`{}`), ConcurrencyKey: key})
+		body, err := json.Marshal(api.CreateExecutionRequest{AgentID: "agent-1", Input: json.RawMessage(`{}`), Session: key})
 		if err != nil {
 			t.Fatal(err)
 		}
 		rr = httptest.NewRecorder()
 		mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v0/executions", bytes.NewReader(body)))
 		if rr.Code != http.StatusBadRequest {
-			t.Fatalf("invalid key: %d %s", rr.Code, rr.Body.String())
+			t.Fatalf("invalid session: %d %s", rr.Code, rr.Body.String())
 		}
 	}
 }
