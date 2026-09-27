@@ -20,11 +20,6 @@ import (
 
 func budgetKernel(t *testing.T, maxTokens int, onExceed string) (*kernel.Kernel, context.Context) {
 	t.Helper()
-	return scopedBudgetKernel(t, domain.BudgetConfig{MaxTokens: maxTokens, OnExceed: onExceed})
-}
-
-func scopedBudgetKernel(t *testing.T, budget domain.BudgetConfig) (*kernel.Kernel, context.Context) {
-	t.Helper()
 	ms := memstore.NewStore()
 	pe, err := policy.NewRuleEngine(policy.Config{
 		Rules: []policy.Rule{{
@@ -32,7 +27,7 @@ func scopedBudgetKernel(t *testing.T, budget domain.BudgetConfig) (*kernel.Kerne
 			When: policy.Condition{StepKind: string(domain.StepKindLLM)},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionAllow,
-				Budget:         budget,
+				Budget:         domain.BudgetConfig{MaxTokens: maxTokens, OnExceed: onExceed},
 				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: time.Hour},
 			},
 		}},
@@ -129,20 +124,33 @@ func TestBudgetIsBlindToUnmeasuredResponses(t *testing.T) {
 }
 
 func TestSessionBudgetCountsEarlierExecutionsInTheSession(t *testing.T) {
-	for _, scope := range []string{domain.BudgetScopeExecution, domain.BudgetScopeSession} {
-		t.Run(scope, func(t *testing.T) {
-			k, ctx := scopedBudgetKernel(t, domain.BudgetConfig{MaxTokens: 1000, Scope: scope})
-			first, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{Session: "chat"})
-			llmCall(t, k, ctx, first.ID, usageBody(600, 400))
-			if err := k.CompleteExecution(ctx, first.ID, leaseOf(t, k, first.ID), json.RawMessage(`{}`), nil); err != nil {
-				t.Fatal(err)
-			}
-			second, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{Session: "chat"})
-			want := map[string]string{domain.BudgetScopeExecution: "proceed", domain.BudgetScopeSession: "denied"}[scope]
-			if dec := llmCall(t, k, ctx, second.ID, usageBody(1, 1)); dec.Decision != want {
-				t.Fatalf("second execution's call = %s, want %s", dec.Decision, want)
-			}
-		})
+	for _, backend := range []string{"memory", "postgres"} {
+		for _, scope := range []string{domain.BudgetScopeExecution, domain.BudgetScopeSession} {
+			t.Run(backend+"/"+scope, func(t *testing.T) {
+				base, _, ctx := sessionKernels(t, backend)
+				pe, err := policy.NewRuleEngine(policy.Config{Rules: []policy.Rule{{
+					ID:   "llm-budget",
+					When: policy.Condition{StepKind: string(domain.StepKindLLM)},
+					Then: domain.PolicyResult{Decision: domain.DecisionAllow, Budget: domain.BudgetConfig{MaxTokens: 1000, Scope: scope}},
+				}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				deps := base.Deps()
+				deps.Policy = pe
+				k := kernel.New(kernel.DefaultConfig(), deps)
+				first := createInSession(t, k, ctx, "agent-1", "chat")
+				llmCall(t, k, ctx, first.ID, usageBody(600, 400))
+				if err := k.CompleteExecution(ctx, first.ID, leaseOf(t, k, first.ID), json.RawMessage(`{}`), nil); err != nil {
+					t.Fatal(err)
+				}
+				second := createInSession(t, k, ctx, "agent-1", "chat")
+				want := map[string]string{domain.BudgetScopeExecution: "proceed", domain.BudgetScopeSession: "denied"}[scope]
+				if dec := llmCall(t, k, ctx, second.ID, usageBody(1, 1)); dec.Decision != want {
+					t.Fatalf("second execution's call = %s, want %s", dec.Decision, want)
+				}
+			})
+		}
 	}
 }
 
