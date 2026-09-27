@@ -179,8 +179,11 @@ func (s *Store) deleteExecutionsCreatedBeforeLocked(ctx context.Context, before 
 		for childID, child := range s.executions {
 			if child.ParentExecutionID != nil && *child.ParentExecutionID == id {
 				child.ParentExecutionID = nil
-				s.executions[childID] = child
 			}
+			if child.ForkedFrom != nil && *child.ForkedFrom == id {
+				child.ForkedFrom = nil
+			}
+			s.executions[childID] = child
 		}
 	}
 }

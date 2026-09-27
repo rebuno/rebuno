@@ -129,29 +129,44 @@ func New(cfg Config, d Deps) *Kernel {
 }
 
 type CreateExecutionOptions struct {
-	Session string
+	Session           string
+	ParentExecutionID *uuid.UUID
 }
 
 func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json.RawMessage, options ...CreateExecutionOptions) (domain.Execution, error) {
-	var session string
+	var opts CreateExecutionOptions
 	if len(options) > 0 {
-		session = options[0].Session
+		opts = options[0]
 	}
-	if len(session) > 256 || !utf8.ValidString(session) || strings.ContainsRune(session, 0) || (session != "" && strings.TrimSpace(session) == "") {
-		return domain.Execution{}, fmt.Errorf("%w: session must be a nonblank UTF-8 string of at most 256 bytes without NUL", domain.ErrValidation)
+	session := opts.Session
+	if err := validateSession(session); err != nil {
+		return domain.Execution{}, err
 	}
 	if _, err := k.d.Agents.GetAgent(ctx, agentID); err != nil {
 		return domain.Execution{}, err
 	}
+	if opts.ParentExecutionID != nil {
+		parent, err := authorizedExecution(ctx, k.d.Executions, *opts.ParentExecutionID)
+		if err != nil {
+			return domain.Execution{}, err
+		}
+		if parent.AgentID != agentID || parent.Status != domain.ExecutionCompleted {
+			return domain.Execution{}, fmt.Errorf("%w: the parent must be a completed execution of the same agent", domain.ErrConflict)
+		}
+		if err := k.requireNewSession(ctx, session); err != nil {
+			return domain.Execution{}, err
+		}
+	}
 	now := time.Now().UTC()
 	exec := domain.Execution{
-		ID:        uuid.Must(uuid.NewV7()),
-		AgentID:   agentID,
-		Session:   session,
-		Input:     input,
-		Status:    domain.ExecutionPending,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                uuid.Must(uuid.NewV7()),
+		AgentID:           agentID,
+		Session:           session,
+		ParentExecutionID: opts.ParentExecutionID,
+		Input:             input,
+		Status:            domain.ExecutionPending,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if k.cfg.ExecutionDeadlineTimeout > 0 {
 		deadline := now.Add(k.cfg.ExecutionDeadlineTimeout)
@@ -193,6 +208,30 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 	return exec, nil
 }
 
+func (k *Kernel) requireNewSession(ctx context.Context, session string) error {
+	if session == "" {
+		return nil
+	}
+	if err := validateSession(session); err != nil {
+		return err
+	}
+	page, err := k.d.Executions.ListExecutions(ctx, domain.ExecutionFilter{Session: session, Limit: 1})
+	if err != nil {
+		return err
+	}
+	if len(page.Executions) > 0 {
+		return fmt.Errorf("%w: session %q already has executions", domain.ErrConflict, session)
+	}
+	return nil
+}
+
+func validateSession(session string) error {
+	if len(session) > 256 || !utf8.ValidString(session) || strings.ContainsRune(session, 0) || (session != "" && strings.TrimSpace(session) == "") {
+		return fmt.Errorf("%w: session must be a nonblank UTF-8 string of at most 256 bytes without NUL", domain.ErrValidation)
+	}
+	return nil
+}
+
 func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec *domain.Execution) error {
 	started := payload.Execution(exec.ID, domain.ExecutionRunning, nil, "")
 	if exec.DeadlineAt != nil {
@@ -200,6 +239,8 @@ func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec *d
 	}
 	if exec.Session != "" {
 		started["session"] = exec.Session
+	}
+	if exec.Session != "" && exec.ParentExecutionID == nil && exec.ForkedFrom == nil {
 		head, err := tx.SessionHead(ctx, exec.Session, exec.AgentID)
 		switch {
 		case err == nil:
@@ -207,10 +248,12 @@ func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec *d
 				return err
 			}
 			exec.ParentExecutionID = &head.ID
-			started["parent_execution_id"] = head.ID.String()
 		case !errors.Is(err, domain.ErrNotFound):
 			return err
 		}
+	}
+	if exec.ParentExecutionID != nil {
+		started["parent_execution_id"] = exec.ParentExecutionID.String()
 	}
 	if err := tx.UpdateExecutionStatus(ctx, exec.ID, domain.ExecutionRunning, nil, ""); err != nil {
 		return err

@@ -11,7 +11,8 @@ import (
 )
 
 const executionColumns = `id, agent_id, input, status, output, failure_reason,
-	created_at, updated_at, deadline_at, COALESCE(session, ''), parent_execution_id, state`
+	created_at, updated_at, deadline_at, COALESCE(session, ''), parent_execution_id, state,
+	forked_from, COALESCE(fork_seq, 0), COALESCE(policy_bundle, '')`
 
 func (s *Store) CreateExecution(ctx context.Context, exec domain.Execution) error {
 	return createExecution(ctx, s.q(ctx), exec)
@@ -32,10 +33,13 @@ func createExecution(ctx context.Context, q Querier, exec domain.Execution) erro
 	}
 
 	_, err := q.Exec(ctx, `
-		INSERT INTO executions (id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at, session)
-		VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8, $9, NULLIF($10, ''))
+		INSERT INTO executions (id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at, session,
+			parent_execution_id, forked_from, fork_seq, policy_bundle)
+		VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8, $9, NULLIF($10, ''),
+			$11::uuid, $12::uuid, NULLIF($13, 0), NULLIF($14, ''))
 	`, exec.ID.String(), exec.AgentID, rawArg(exec.Input), string(exec.Status),
 		rawArg(exec.Output), exec.FailureReason, createdAt, updatedAt, timeArg(exec.DeadlineAt), exec.Session,
+		uuidArg(exec.ParentExecutionID), uuidArg(exec.ForkedFrom), exec.ForkSeq, exec.PolicyBundle,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -220,21 +224,21 @@ func deleteExecutionsCreatedBefore(ctx context.Context, q Querier, before time.T
 func scanExecution(row pgx.Row) (domain.Execution, error) {
 	var exec domain.Execution
 	var idStr, status string
-	var parentID, input, output, state *string
+	var parentID, forkedFrom, input, output, state *string
 
 	if err := row.Scan(
 		&idStr, &exec.AgentID, &input, &status,
 		&output, &exec.FailureReason, &exec.CreatedAt, &exec.UpdatedAt, &exec.DeadlineAt,
-		&exec.Session, &parentID, &state,
+		&exec.Session, &parentID, &state, &forkedFrom, &exec.ForkSeq, &exec.PolicyBundle,
 	); err != nil {
 		return domain.Execution{}, err
 	}
-	if parentID != nil {
-		parent, err := parseUUID(*parentID)
-		if err != nil {
-			return domain.Execution{}, fmt.Errorf("parse parent execution id: %w", err)
-		}
-		exec.ParentExecutionID = &parent
+	var err error
+	if exec.ParentExecutionID, err = optionalUUID(parentID); err != nil {
+		return domain.Execution{}, fmt.Errorf("parse parent execution id: %w", err)
+	}
+	if exec.ForkedFrom, err = optionalUUID(forkedFrom); err != nil {
+		return domain.Execution{}, fmt.Errorf("parse forked_from: %w", err)
 	}
 
 	id, err := parseUUID(idStr)
@@ -247,6 +251,24 @@ func scanExecution(row pgx.Row) (domain.Execution, error) {
 	exec.Output = rawFromPtr(output)
 	exec.State = rawFromPtr(state)
 	return exec, nil
+}
+
+func uuidArg(id *uuid.UUID) any {
+	if id == nil {
+		return nil
+	}
+	return id.String()
+}
+
+func optionalUUID(s *string) (*uuid.UUID, error) {
+	if s == nil {
+		return nil, nil
+	}
+	id, err := parseUUID(*s)
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
 }
 
 func (s *Store) ListIdleSessions(ctx context.Context, now time.Time) ([]string, error) {

@@ -66,9 +66,11 @@ See [API keys](/api#api-keys) for rotation and revocation.
 | `rebuno exec watch <id>` | Tail an execution's events until it finishes. |
 | `rebuno exec events <id>` | Print the full event log with expanded payloads. |
 | `rebuno exec cancel <id>` | Cancel a pending, running, or blocked execution. |
+| `rebuno exec fork <id> --at <seq>` | Rerun an execution, replaying its steps up to an event sequence. `--session <name>` starts a new session with it, and `--policy <file>` sets its policy bundle. |
 
 `exec ls` narrows with `--agent`, `--session`, `--status`, and `--limit`.
-`exec create --session <name>` continues that session.
+`exec create --session <name>` continues that session, and `--parent <id>`
+continues a completed execution; with `--parent`, `--session` must be new.
 
 ```bash
 rebuno exec create hello '{"query": "hello world"}'

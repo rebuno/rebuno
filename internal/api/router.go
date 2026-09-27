@@ -60,6 +60,7 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(bearer(domain.ScopeExecutionsRead)).Get("/v0/executions/{id}/events", r.getEvents)
 	mux.With(bearer(domain.ScopeExecutionsRead)).Get("/v0/executions/{id}/stream", r.streamExecution)
 	mux.With(bearer(domain.ScopeExecutionsWrite)).Post("/v0/executions/{id}/cancel", r.cancelExecution)
+	mux.With(bearer(domain.ScopeExecutionsWrite)).Post("/v0/executions/{id}/fork", r.forkExecution)
 
 	mux.With(dual).Get("/v0/executions/{id}/steps", r.listSteps)
 	mux.With(dual).Get("/v0/executions/{id}/steps/{step_id}", r.getStep)

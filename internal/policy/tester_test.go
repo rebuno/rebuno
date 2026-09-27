@@ -103,13 +103,16 @@ func TestReplayCasesKeepsFirstDecision(t *testing.T) {
 	}
 }
 
-func TestReplayCasesSkipsNonPolicyDenial(t *testing.T) {
+func TestReplayCasesSkipsKernelDecisions(t *testing.T) {
 	steps := []domain.Step{{StepID: "s1", Kind: domain.StepKindTool, Target: "shell_exec"}}
-	events := []domain.Event{decisionEvent(domain.EventStepDenied, "s1", domain.RuleIndeterminateRetry)}
-
-	cases := ReplayCases(steps, events)
-	if cases[0].Expect != "" {
-		t.Fatalf("expect = %q, want empty", cases[0].Expect)
+	for _, e := range []domain.Event{
+		decisionEvent(domain.EventStepDenied, "s1", domain.RuleIndeterminateRetry),
+		decisionEvent(domain.EventStepAwaitingApproval, "s1", domain.RuleForkRepeatedEffect),
+	} {
+		cases := ReplayCases(steps, []domain.Event{e})
+		if cases[0].Expect != "" {
+			t.Fatalf("%s: expect = %q, want empty", e.Type, cases[0].Expect)
+		}
 	}
 }
 

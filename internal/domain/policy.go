@@ -12,9 +12,12 @@ const (
 	DecisionJudge           = "judge"
 )
 
-// RuleIndeterminateRetry marks a denial no rule made: an at_most_once retry
-// refused after an indeterminate outcome.
-const RuleIndeterminateRetry = "__indeterminate_retry"
+// Rule IDs for decisions the kernel makes without a policy rule. Policy tests
+// skip them.
+const (
+	RuleIndeterminateRetry = "__indeterminate_retry"
+	RuleForkRepeatedEffect = "__fork_repeated_effect"
+)
 
 type PolicyResult struct {
 	Decision       string               `json:"decision" yaml:"decision"`

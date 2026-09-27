@@ -15,6 +15,7 @@ const (
 	EventExecutionCancelled = "execution.cancelled"
 	EventExecutionBlocked   = "execution.blocked"
 	EventExecutionResumed   = "execution.resumed"
+	EventExecutionForked    = "execution.forked"
 
 	EventStepProposed         = "step.proposed"
 	EventStepAllowed          = "step.allowed"

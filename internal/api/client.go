@@ -21,12 +21,14 @@ type ClientKernel interface {
 	ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error)
 	GetEvents(ctx context.Context, id uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error)
 	CancelExecution(ctx context.Context, id uuid.UUID) error
+	ForkExecution(ctx context.Context, id uuid.UUID, req kernel.ForkRequest) (domain.Execution, error)
 }
 
 type CreateExecutionRequest struct {
-	AgentID string          `json:"agent_id"`
-	Input   json.RawMessage `json:"input"`
-	Session string          `json:"session,omitempty"`
+	AgentID           string          `json:"agent_id"`
+	Input             json.RawMessage `json:"input"`
+	Session           string          `json:"session,omitempty"`
+	ParentExecutionID *uuid.UUID      `json:"parent_execution_id,omitempty"`
 }
 
 type PreviousStateResponse struct {
@@ -39,7 +41,7 @@ func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{Session: req.Session})
+	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{Session: req.Session, ParentExecutionID: req.ParentExecutionID})
 	if err != nil {
 		WriteError(w, err)
 		return
@@ -90,6 +92,25 @@ func (rt *Router) getExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, exec, http.StatusOK)
+}
+
+func (rt *Router) forkExecution(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
+	var req kernel.ForkRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteError(w, err)
+		return
+	}
+	exec, err := rt.client.ForkExecution(r.Context(), id, req)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteJSON(w, exec, http.StatusCreated)
 }
 
 func (rt *Router) previousState(w http.ResponseWriter, r *http.Request) {

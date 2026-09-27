@@ -70,6 +70,10 @@ func (k *KernelAPI) CompleteExecution(ctx context.Context, execID uuid.UUID, lea
 	return k.Inner.CompleteExecution(ctx, execID, lease, output, state)
 }
 
+func (k *KernelAPI) ForkExecution(ctx context.Context, id uuid.UUID, req kernel.ForkRequest) (domain.Execution, error) {
+	return k.Inner.ForkExecution(ctx, id, req)
+}
+
 func (k *KernelAPI) PreviousState(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
 	return k.Inner.PreviousState(ctx, id)
 }

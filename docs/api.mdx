@@ -111,7 +111,9 @@ of a conversation:
 ```
 
 The execution returns `running` when the session is free and `pending` when
-another execution in it is running or blocked. Sessions are global to the
+another execution in it is running or blocked. Add `parent_execution_id` to
+continue a completed execution of the same agent. With it, `session` is
+optional and, when given, must have no executions yet. Sessions are global to the
 kernel, so executions for two different agents in one session also run one at a
 time. See [Sessions](/architecture#sessions).
 
@@ -128,8 +130,9 @@ time. See [Sessions](/architecture#sessions).
 }
 ```
 
-`session` and `parent_execution_id` are present when set. The parent is set when
-an execution in a session starts.
+`session` and `parent_execution_id` are present when set. Unless named at
+creation, the parent is set when an execution in a session starts. A fork also
+carries `forked_from` and `fork_seq`.
 
 ### Get the previous state
 
@@ -167,6 +170,20 @@ Returns an ordered array of [events](/events). `limit` defaults to 100, max
 Server-Sent Events carrying the deltas an agent publishes while a step is still
 running. Best-effort, never persisted, and separate from the event log. See
 [Live streaming](/streaming).
+
+### Fork an execution
+
+`POST /v0/executions/{id}/fork` · bearer
+
+```json
+{ "session": "login-fix-retry", "at_seq": 214 }
+```
+
+Returns `201` with the new execution. The fork reruns the source's input and
+replays the steps it recorded up to event `at_seq`. `session` is optional and,
+when given, must have no executions yet. An optional `policy_bundle`
+governs the fork in place of the agent's bundle and requires `policies:write`.
+See [Forks](/architecture#forks).
 
 ### Cancel an execution
 

@@ -464,6 +464,11 @@ func TestSessionViaHTTP(t *testing.T) {
 		}
 	}
 	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v0/executions/"+exec.ID.String()+"/fork", strings.NewReader(`{"session":"alt","at_seq":1}`)))
+	if rr.Code != http.StatusCreated || !strings.Contains(rr.Body.String(), `"forked_from":"`+exec.ID.String()+`"`) {
+		t.Fatalf("fork: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v0/executions/"+exec.ID.String()+"/previous", nil))
 	if rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != `{"state":null}` {
 		t.Fatalf("previous: %d %s", rr.Code, rr.Body.String())

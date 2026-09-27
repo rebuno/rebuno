@@ -31,6 +31,9 @@ type Execution struct {
 	AgentID           string          `json:"agent_id"`
 	Session           string          `json:"session,omitempty"`
 	ParentExecutionID *uuid.UUID      `json:"parent_execution_id,omitempty"`
+	ForkedFrom        *uuid.UUID      `json:"forked_from,omitempty"`
+	ForkSeq           int64           `json:"fork_seq,omitempty"`
+	PolicyBundle      string          `json:"-"`
 	Input             json.RawMessage `json:"input"`
 	Status            ExecutionStatus `json:"status"`
 	Output            json.RawMessage `json:"output,omitempty"`

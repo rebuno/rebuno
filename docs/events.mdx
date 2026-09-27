@@ -39,6 +39,7 @@ execution continues an earlier one in its session.
 | Type | When |
 |------|------|
 | `execution.created` | Client created the execution. |
+| `execution.forked` | The execution was forked from another. Payload carries `source_execution_id`, `fork_seq`, and `policy_override`. |
 | `execution.started` | The execution began running and its first dispatch is queued. |
 | `execution.blocked` | Paused on a human approval. |
 | `execution.resumed` | An approval was granted, denied, or expired, and work continues. |

@@ -142,9 +142,38 @@ the parent's `output` when it recorded none. The kernel stores `state` as opaque
 JSON; agents keep their conversation there in their framework's own format, so
 they need no session storage of their own.
 
+An execution created with `parent_execution_id` continues that completed
+execution of the same agent. It branches a conversation from an earlier turn and
+leaves the original session untouched. Its session is optional, and when given
+must be new, so later turns continue the branch.
+
 Retention deletes a session's executions only once every execution in the
 session is terminal and older than the retention cutoff, so a retained
 execution's parent stays readable.
+
+## Forks
+
+A fork reruns an existing execution, up to an event sequence from its record and
+live after it. It can start a new session, so later turns continue it. The fork keeps the source's input and parent,
+so it reads the same previous state the source read.
+
+The fork copies the source's steps that reached a terminal outcome at or before
+the fork point, with their decisions, results, errors, and usage, and appends
+their events to the fork's log ahead of `execution.started`. The agent reruns
+from the top: copied steps replay through the normal replay path, and everything
+after the fork point runs live under policy. A fork's log is complete on its
+own, so auditing and policy tests read it like any other execution.
+
+A fork can reach an effect its source already started after the fork point.
+An `at_most_once` step whose kind, target, arguments, and occurrence match a
+step that started on the source requires approval before it runs, with the rule
+ID `__fork_repeated_effect`. `safe_to_retry` steps run without this check.
+
+A fork can carry its own policy bundle, which governs that execution in place of
+the agent's bundle. Forking with a bundle requires the `policies:write` scope.
+
+A fork restores what the kernel recorded. State outside the kernel, such as the
+files in a sandbox, stays as it is.
 
 ## Dispatch and delivery
 

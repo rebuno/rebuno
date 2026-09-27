@@ -11,6 +11,7 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/identity"
 	"github.com/rebuno/rebuno/internal/payload"
+	"github.com/rebuno/rebuno/internal/policy"
 	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store"
 	"github.com/rebuno/rebuno/internal/usage"
@@ -130,11 +131,36 @@ func (k *Kernel) decideStep(
 		Args:     req.Args,
 		StepKind: req.Kind,
 	}
+	engine := k.d.Policy
+	if exec.PolicyBundle != "" {
+		rules, err := policy.NewRuleEngineFromBundle(exec.PolicyBundle)
+		if err != nil {
+			return domain.StepDecision{}, false, err
+		}
+		rules.Judge = k.d.Judge
+		engine = rules
+	}
 	start := time.Now()
-	polResult, err := k.d.Policy.Evaluate(ctx, input)
+	polResult, err := engine.Evaluate(ctx, input)
 	k.d.Observer.RecordPolicyLatency(time.Since(start))
 	if err != nil {
 		return domain.StepDecision{}, false, err
+	}
+	if polResult.Decision == domain.DecisionAllow {
+		repeated, err := k.repeatsSourceEffect(ctx, exec, req, argsHash, occurrence)
+		if err != nil {
+			return domain.StepDecision{}, false, err
+		}
+		if repeated {
+			polResult = domain.PolicyResult{
+				Decision: domain.DecisionRequireApproval,
+				Reason:   "effect_started_on_source",
+				RuleID:   domain.RuleForkRepeatedEffect,
+				ApprovalConfig: domain.PolicyApprovalConfig{
+					Message: "This effect already started on execution " + exec.ForkedFrom.String() + ", which this execution was forked from.",
+				},
+			}
+		}
 	}
 	k.d.Observer.RecordPolicyDecision(polResult.Decision)
 	return k.recordStepDecision(ctx, execID, exec.AgentID, stepID, req, argsHash, occurrence, polResult)

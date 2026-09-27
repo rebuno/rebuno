@@ -204,7 +204,8 @@ func recordedDecision(e domain.Event) (string, recorded, bool) {
 	if err := json.Unmarshal(e.Payload, &payload); err != nil || payload.StepID == "" {
 		return "", recorded{}, false
 	}
-	if payload.RuleID == domain.RuleIndeterminateRetry {
+	switch payload.RuleID {
+	case domain.RuleIndeterminateRetry, domain.RuleForkRepeatedEffect:
 		return "", recorded{}, false
 	}
 	return payload.StepID, recorded{decision: decisionForEvent(e.Type), ruleID: payload.RuleID}, true

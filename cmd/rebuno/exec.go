@@ -27,7 +27,7 @@ func execCmd() *cobra.Command {
 		Use:   "exec",
 		Short: "Create and inspect executions",
 	}
-	cmd.AddCommand(execListCmd(), execCreateCmd(), execGetCmd(), execWatchCmd(), execEventsCmd(), execCancelCmd())
+	cmd.AddCommand(execListCmd(), execCreateCmd(), execGetCmd(), execWatchCmd(), execEventsCmd(), execCancelCmd(), execForkCmd())
 	return cmd
 }
 
@@ -85,7 +85,7 @@ func execListCmd() *cobra.Command {
 }
 
 func execCreateCmd() *cobra.Command {
-	var session string
+	var session, parent string
 	cmd := &cobra.Command{
 		Use:   "create <agent-id> [json-input]",
 		Short: "Start an execution",
@@ -103,6 +103,13 @@ func execCreateCmd() *cobra.Command {
 				return fmt.Errorf("input is not valid JSON: %s", input)
 			}
 			req := api.CreateExecutionRequest{AgentID: args[0], Input: json.RawMessage(input), Session: session}
+			if parent != "" {
+				id, err := resolveExecID(cmd.Context(), kernelClient(), parent)
+				if err != nil {
+					return err
+				}
+				req.ParentExecutionID = &id
+			}
 			var exec domain.Execution
 			if err := kernelClient().do(cmd.Context(), http.MethodPost, "/v0/executions", req, &exec); err != nil {
 				return err
@@ -112,6 +119,7 @@ func execCreateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&session, "session", "", "Continue this session; its executions run one at a time")
+	cmd.Flags().StringVar(&parent, "parent", "", "Continue from this completed execution; --session must then be new")
 	return cmd
 }
 
@@ -143,6 +151,9 @@ func execGetCmd() *cobra.Command {
 			}
 			if e.ParentExecutionID != nil {
 				fmt.Printf("  parent   %s\n", *e.ParentExecutionID)
+			}
+			if e.ForkedFrom != nil {
+				fmt.Printf("  forked   from %s at seq %d\n", *e.ForkedFrom, e.ForkSeq)
 			}
 			fmt.Printf("  created  %s (%s ago)\n", e.CreatedAt.Format(time.RFC3339), age(e.CreatedAt))
 			if len(e.Output) > 0 {
@@ -212,6 +223,46 @@ func execCancelCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func execForkCmd() *cobra.Command {
+	var session, policyPath string
+	var at int64
+	cmd := &cobra.Command{
+		Use:   "fork <id>",
+		Short: "Rerun an execution, reusing its steps up to an event",
+		Long: "Rerun the execution from the top, reusing the steps it recorded up to the\n" +
+			"event sequence given by --at. --session starts a new session with the fork.",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := kernelClient()
+			id, err := resolveExecID(cmd.Context(), c, args[0])
+			if err != nil {
+				return err
+			}
+			req := kernel.ForkRequest{Session: session, AtSeq: at}
+			if policyPath != "" {
+				bundle, err := os.ReadFile(policyPath)
+				if err != nil {
+					return err
+				}
+				req.PolicyBundle = string(bundle)
+			}
+			var exec domain.Execution
+			if err := c.do(cmd.Context(), http.MethodPost, "/v0/executions/"+id.String()+"/fork", req, &exec); err != nil {
+				return err
+			}
+			fmt.Printf("  forked %s (%s); follow with 'rebuno exec watch %s'\n", shortID(exec.ID), exec.Status, shortID(exec.ID))
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&session, "session", "", "New session the fork starts")
+	f.Int64Var(&at, "at", 0, "Event sequence whose recorded steps the fork reuses (required)")
+	f.StringVar(&policyPath, "policy", "", "Policy bundle file that governs the fork")
+	_ = cmd.MarkFlagRequired("at")
+	return cmd
 }
 
 func getEvents(ctx context.Context, c *client, id uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error) {
