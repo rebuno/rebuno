@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
@@ -58,5 +61,51 @@ func TestTestPolicyRejectsBadRequests(t *testing.T) {
 	_, err := k.TestPolicy(ctx, "nope", kernel.PolicyTestRequest{Bundle: "default_action: allow\n"})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown agent = %v, want not found", err)
+	}
+}
+
+func TestTestPolicyReplaysSelectedExecutions(t *testing.T) {
+	k, ctx := setup(t)
+	var ids []uuid.UUID
+	for _, session := range []string{"chat", "chat", "other"} {
+		exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{Session: session})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{
+			Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`), Lease: leaseOf(t, k, exec.ID),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := k.CompleteExecution(ctx, exec.ID, leaseOf(t, k, exec.ID), json.RawMessage(`{}`), nil); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, exec.ID)
+	}
+
+	replayed := func(sel kernel.ExecutionSelector) []string {
+		t.Helper()
+		report, err := k.TestPolicy(ctx, "agent-1", kernel.PolicyTestRequest{Bundle: "default_action: deny\n", Executions: &sel})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, res := range report.Results {
+			if res.Pass {
+				t.Fatalf("recorded allow matched a deny-all bundle: %+v", res)
+			}
+			got = append(got, res.ExecutionID)
+		}
+		return got
+	}
+	if got := replayed(kernel.ExecutionSelector{Session: "chat"}); len(got) != 2 || got[0] != ids[1].String() || got[1] != ids[0].String() {
+		t.Fatalf("session selection: %v", got)
+	}
+	if got := replayed(kernel.ExecutionSelector{Limit: 1}); len(got) != 1 || got[0] != ids[2].String() {
+		t.Fatalf("limit selection: %v", got)
+	}
+	future := time.Now().Add(time.Hour)
+	if got := replayed(kernel.ExecutionSelector{Since: &future}); len(got) != 0 {
+		t.Fatalf("since selection: %v", got)
 	}
 }

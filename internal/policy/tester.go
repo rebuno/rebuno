@@ -22,8 +22,9 @@ type Case struct {
 	Expect     string          `yaml:"expect,omitempty" json:"expect,omitempty"`
 	ExpectRule string          `yaml:"expect_rule,omitempty" json:"expect_rule,omitempty"`
 
-	StepID  string `yaml:"-" json:"step_id,omitempty"`
-	WasRule string `yaml:"-" json:"was_rule,omitempty"`
+	ExecutionID string `yaml:"-" json:"execution_id,omitempty"`
+	StepID      string `yaml:"-" json:"step_id,omitempty"`
+	WasRule     string `yaml:"-" json:"was_rule,omitempty"`
 }
 
 type CaseFile struct {
@@ -179,11 +180,12 @@ func ReplayCases(steps []domain.Step, events []domain.Event) []Case {
 	cases := make([]Case, 0, len(steps))
 	for _, s := range steps {
 		c := Case{
-			StepID:  s.StepID,
-			Kind:    s.Kind,
-			Target:  s.Target,
-			Expect:  seen[s.StepID].decision,
-			WasRule: seen[s.StepID].ruleID,
+			ExecutionID: s.ExecutionID.String(),
+			StepID:      s.StepID,
+			Kind:        s.Kind,
+			Target:      s.Target,
+			Expect:      seen[s.StepID].decision,
+			WasRule:     seen[s.StepID].ruleID,
 		}
 		if len(s.Args) > 0 {
 			_ = json.Unmarshal(s.Args, &c.Args)

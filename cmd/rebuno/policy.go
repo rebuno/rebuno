@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -29,6 +31,13 @@ type policyTestOpts struct {
 	args      string
 	kind      string
 	execution string
+	session   string
+	since     string
+	limit     int
+}
+
+func (o policyTestOpts) backtest() bool {
+	return o.execution != "" || o.session != "" || o.since != "" || o.limit > 0
 }
 
 func policyCmd() *cobra.Command {
@@ -78,7 +87,8 @@ func policyTestCmd() *cobra.Command {
 			"<bundle>.policytest.yaml beside the bundle.\n\n" +
 			"With --target the bundle is probed with a single input instead, printing\n" +
 			"the decision and the rule behind it. With --execution the cases come from\n" +
-			"a past execution's recorded steps, which a running kernel serves.",
+			"a past execution's recorded steps, which a running kernel serves. With\n" +
+			"--session, --since, or --limit they come from the agent's recent executions.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,6 +102,9 @@ func policyTestCmd() *cobra.Command {
 	f.StringVar(&opts.args, "args", "", "JSON arguments for --target")
 	f.StringVar(&opts.kind, "kind", "", "Step kind for --target (tool_call, llm_call, local; default tool_call)")
 	f.StringVar(&opts.execution, "execution", "", "Replay this execution's recorded steps, with --agent-id")
+	f.StringVar(&opts.session, "session", "", "Replay the agent's executions in this session, with --agent-id")
+	f.StringVar(&opts.since, "since", "", "Replay the agent's executions created within this long, such as 24h or 7d")
+	f.IntVar(&opts.limit, "limit", 0, "Replay at most this many of the agent's recent executions (default 100)")
 	return cmd
 }
 
@@ -116,7 +129,7 @@ func runPolicyTest(ctx context.Context, bundlePath string, opts policyTestOpts) 
 }
 
 func policyReport(ctx context.Context, bundle, bundlePath string, opts policyTestOpts) (policy.Report, error) {
-	if opts.execution != "" {
+	if opts.backtest() {
 		return replayPolicy(ctx, bundle, opts)
 	}
 	engine, err := policy.NewRuleEngineFromBundle(bundle)
@@ -136,22 +149,47 @@ func policyReport(ctx context.Context, bundle, bundlePath string, opts policyTes
 
 func replayPolicy(ctx context.Context, bundle string, opts policyTestOpts) (policy.Report, error) {
 	if opts.agentID == "" {
-		return policy.Report{}, fmt.Errorf("--execution needs --agent-id")
+		return policy.Report{}, fmt.Errorf("replaying executions needs --agent-id")
 	}
 	if opts.target != "" || opts.casesPath != "" {
-		return policy.Report{}, fmt.Errorf("--execution cannot be combined with --target or --cases")
+		return policy.Report{}, fmt.Errorf("replaying executions cannot be combined with --target or --cases")
 	}
-	execID, err := uuid.Parse(opts.execution)
-	if err != nil {
-		return policy.Report{}, fmt.Errorf("--execution: %q is not a full execution id", opts.execution)
+	req := kernel.PolicyTestRequest{Bundle: bundle}
+	if opts.execution != "" {
+		execID, err := uuid.Parse(opts.execution)
+		if err != nil {
+			return policy.Report{}, fmt.Errorf("--execution: %q is not a full execution id", opts.execution)
+		}
+		req.ExecutionID = &execID
+	} else {
+		sel := kernel.ExecutionSelector{Session: opts.session, Limit: opts.limit}
+		if opts.since != "" {
+			age, err := parseAge(opts.since)
+			if err != nil {
+				return policy.Report{}, fmt.Errorf("--since: %w", err)
+			}
+			since := time.Now().Add(-age)
+			sel.Since = &since
+		}
+		req.Executions = &sel
 	}
-	req := kernel.PolicyTestRequest{Bundle: bundle, ExecutionID: &execID}
 	path := "/v0/policies/" + url.PathEscape(opts.agentID) + "/test"
 	var report policy.Report
 	if err := kernelClient().do(ctx, http.MethodPost, path, req, &report); err != nil {
 		return policy.Report{}, err
 	}
 	return report, nil
+}
+
+func parseAge(s string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("%q is not a duration", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
 }
 
 func policyTestCases(bundlePath string, opts policyTestOpts) ([]policy.Case, error) {
@@ -219,7 +257,13 @@ func printPolicyReport(report policy.Report) {
 		details = max(details, len(policyDetail(res)))
 	}
 
+	grouped := len(report.Results) > 0 && report.Results[0].ExecutionID != report.Results[len(report.Results)-1].ExecutionID
+	var execution string
 	for _, res := range report.Results {
+		if grouped && res.ExecutionID != execution {
+			execution = res.ExecutionID
+			fmt.Printf("\n  execution %s\n", execution)
+		}
 		status := "PASS"
 		if !res.Pass {
 			status = "FAIL"

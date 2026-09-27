@@ -20,11 +20,13 @@ type Reaper interface {
 	ReapBefore(ctx context.Context, cutoff time.Time) error
 }
 
-func ScopeKey(ruleID, perWhat, execID, agentID string) Key {
-	switch perWhat {
-	case domain.PerWhatAgent:
+func ScopeKey(ruleID, perWhat, execID, session, agentID string) Key {
+	switch {
+	case perWhat == domain.PerWhatSession && session != "":
+		return Key(ruleID + ":session:" + session)
+	case perWhat == domain.PerWhatAgent:
 		return Key(ruleID + ":agent:" + agentID)
-	case domain.PerWhatGlobal:
+	case perWhat == domain.PerWhatGlobal:
 		return Key(ruleID + ":global")
 	default:
 		return Key(ruleID + ":exec:" + execID)

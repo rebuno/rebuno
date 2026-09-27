@@ -3,6 +3,8 @@ package policy
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -54,6 +56,7 @@ type Config struct {
 type RuleEngine struct {
 	rules         []Rule
 	defaultResult domain.PolicyResult
+	hash          string
 	Judge         *Judge
 }
 
@@ -75,8 +78,9 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 		}
 		for _, err := range []error{
 			oneOf("decision", r.Then.Decision, domain.DecisionAllow, domain.DecisionDeny, domain.DecisionRequireApproval, domain.DecisionJudge),
-			oneOf("per_what", r.Then.RateLimit.PerWhat, domain.PerWhatExecution, domain.PerWhatAgent, domain.PerWhatGlobal),
+			oneOf("per_what", r.Then.RateLimit.PerWhat, domain.PerWhatExecution, domain.PerWhatSession, domain.PerWhatAgent, domain.PerWhatGlobal),
 			oneOf("on_limiter_error", r.Then.RateLimit.OnLimiterError, domain.LimiterErrorAllow, domain.LimiterErrorDeny),
+			oneOf("scope", r.Then.Budget.Scope, domain.BudgetScopeExecution, domain.BudgetScopeSession),
 			oneOf("on_exceed", r.Then.Budget.OnExceed, domain.DecisionDeny, domain.DecisionRequireApproval),
 			oneOf("fallback", r.Then.Judge.Fallback, domain.DecisionAllow, domain.DecisionDeny, domain.DecisionRequireApproval),
 		} {
@@ -147,7 +151,13 @@ func NewRuleEngineFromBundle(bundleYAML string) (*RuleEngine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewRuleEngine(cfg)
+	engine, err := NewRuleEngine(cfg)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256([]byte(bundleYAML))
+	engine.hash = hex.EncodeToString(sum[:])
+	return engine, nil
 }
 
 func (e *RuleEngine) RuleIDs() []string {
@@ -159,6 +169,12 @@ func (e *RuleEngine) RuleIDs() []string {
 }
 
 func (e *RuleEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (domain.PolicyResult, error) {
+	res := e.evaluate(ctx, input)
+	res.PolicyHash = e.hash
+	return res, nil
+}
+
+func (e *RuleEngine) evaluate(ctx context.Context, input domain.PolicyInput) domain.PolicyResult {
 	for _, rule := range e.rules {
 		if matches(rule.When, input) {
 			res := rule.Then
@@ -168,13 +184,13 @@ func (e *RuleEngine) Evaluate(ctx context.Context, input domain.PolicyInput) (do
 			if res.Decision == domain.DecisionJudge {
 				res.Decision, res.Reason = e.Judge.decide(ctx, input, res.Judge)
 			}
-			return res, nil
+			return res
 		}
 	}
 	if input.StepKind == domain.StepKindLocal {
-		return domain.PolicyResult{Decision: domain.DecisionAllow, Reason: "local step", RuleID: "local"}, nil
+		return domain.PolicyResult{Decision: domain.DecisionAllow, Reason: "local step", RuleID: "local"}
 	}
-	return e.defaultResult, nil
+	return e.defaultResult
 }
 
 func matches(cond Condition, input domain.PolicyInput) bool {

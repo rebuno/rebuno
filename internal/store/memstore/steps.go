@@ -131,6 +131,26 @@ func (tx *txStore) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, e
 	return sumUsage(tx.steps, execID), nil
 }
 
+func (s *Store) SessionUsage(ctx context.Context, session string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sessionUsageLocked(session), nil
+}
+
+func (tx *txStore) SessionUsage(ctx context.Context, session string) (int, error) {
+	return tx.sessionUsageLocked(session), nil
+}
+
+func (s *Store) sessionUsageLocked(session string) int {
+	var total int
+	for _, step := range s.steps {
+		if s.executions[step.ExecutionID].Session == session {
+			total += step.UsageInput + step.UsageOutput
+		}
+	}
+	return total
+}
+
 func sumUsage(steps map[string]domain.Step, execID uuid.UUID) int {
 	var total int
 	for _, step := range steps {

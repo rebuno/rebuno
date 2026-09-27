@@ -2,6 +2,8 @@ package kernel_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -12,10 +14,16 @@ import (
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/policy"
+	"github.com/rebuno/rebuno/internal/ratelimit"
 	"github.com/rebuno/rebuno/internal/store/memstore"
 )
 
 func budgetKernel(t *testing.T, maxTokens int, onExceed string) (*kernel.Kernel, context.Context) {
+	t.Helper()
+	return scopedBudgetKernel(t, domain.BudgetConfig{MaxTokens: maxTokens, OnExceed: onExceed})
+}
+
+func scopedBudgetKernel(t *testing.T, budget domain.BudgetConfig) (*kernel.Kernel, context.Context) {
 	t.Helper()
 	ms := memstore.NewStore()
 	pe, err := policy.NewRuleEngine(policy.Config{
@@ -24,7 +32,7 @@ func budgetKernel(t *testing.T, maxTokens int, onExceed string) (*kernel.Kernel,
 			When: policy.Condition{StepKind: string(domain.StepKindLLM)},
 			Then: domain.PolicyResult{
 				Decision:       domain.DecisionAllow,
-				Budget:         domain.BudgetConfig{MaxTokens: maxTokens, OnExceed: onExceed},
+				Budget:         budget,
 				ApprovalConfig: domain.PolicyApprovalConfig{Timeout: time.Hour},
 			},
 		}},
@@ -118,4 +126,98 @@ func TestBudgetIsBlindToUnmeasuredResponses(t *testing.T) {
 			t.Fatalf("call %d = %s: a response with no parseable usage never trips the budget", i, dec.Decision)
 		}
 	}
+}
+
+func TestSessionBudgetCountsEarlierExecutionsInTheSession(t *testing.T) {
+	for _, scope := range []string{domain.BudgetScopeExecution, domain.BudgetScopeSession} {
+		t.Run(scope, func(t *testing.T) {
+			k, ctx := scopedBudgetKernel(t, domain.BudgetConfig{MaxTokens: 1000, Scope: scope})
+			first, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{Session: "chat"})
+			llmCall(t, k, ctx, first.ID, usageBody(600, 400))
+			if err := k.CompleteExecution(ctx, first.ID, leaseOf(t, k, first.ID), json.RawMessage(`{}`), nil); err != nil {
+				t.Fatal(err)
+			}
+			second, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{Session: "chat"})
+			want := map[string]string{domain.BudgetScopeExecution: "proceed", domain.BudgetScopeSession: "denied"}[scope]
+			if dec := llmCall(t, k, ctx, second.ID, usageBody(1, 1)); dec.Decision != want {
+				t.Fatalf("second execution's call = %s, want %s", dec.Decision, want)
+			}
+		})
+	}
+}
+
+func TestSessionRateLimitSharesCallsAcrossTheSession(t *testing.T) {
+	pe, err := policy.NewRuleEngine(policy.Config{
+		Rules: []policy.Rule{{
+			ID:   "one-read-per-session",
+			When: policy.Condition{Target: "read"},
+			Then: domain.PolicyResult{
+				Decision:  domain.DecisionAllow,
+				RateLimit: domain.RateLimitConfig{MaxCalls: 1, Window: time.Hour, PerWhat: domain.PerWhatSession},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := kernel.New(kernel.DefaultConfig(), memDeps(memstore.NewStore(), kernel.Deps{Policy: pe, RateLimiter: ratelimit.NewMemoryLimiter()}))
+	ctx := auth.WithAdmin(context.Background())
+	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	read := func(session string) string {
+		t.Helper()
+		exec, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{Session: session})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dec, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`), Lease: leaseOf(t, k, exec.ID)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := k.CompleteExecution(ctx, exec.ID, leaseOf(t, k, exec.ID), json.RawMessage(`{}`), nil); err != nil {
+			t.Fatal(err)
+		}
+		return dec.Decision
+	}
+	for _, c := range []struct{ session, want string }{{"chat", "proceed"}, {"chat", "rate_limited"}, {"other", "proceed"}} {
+		if got := read(c.session); got != c.want {
+			t.Fatalf("read in %s = %s, want %s", c.session, got, c.want)
+		}
+	}
+}
+
+func TestDecisionEventsRecordThePolicyHash(t *testing.T) {
+	const bundle = "default_action: allow\n"
+	pe, err := policy.NewRuleEngineFromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := kernel.New(kernel.DefaultConfig(), memDeps(memstore.NewStore(), kernel.Deps{Policy: pe}))
+	ctx := auth.WithAdmin(context.Background())
+	if err := k.RegisterAgent(ctx, domain.Agent{ID: "agent-1", WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	exec, _ := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`))
+	if _, err := k.SubmitStep(ctx, exec.ID, kernel.SubmitStepRequest{Kind: domain.StepKindTool, Target: "read", Args: json.RawMessage(`{}`), Lease: leaseOf(t, k, exec.ID)}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := k.GetEvents(ctx, exec.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(bundle))
+	for _, e := range events {
+		if e.Type != domain.EventStepAllowed {
+			continue
+		}
+		var payload struct {
+			PolicyHash string `json:"policy_hash"`
+		}
+		if err := json.Unmarshal(e.Payload, &payload); err != nil || payload.PolicyHash != hex.EncodeToString(sum[:]) {
+			t.Fatalf("step.allowed policy_hash = %q, %v", payload.PolicyHash, err)
+		}
+		return
+	}
+	t.Fatal("no step.allowed event")
 }

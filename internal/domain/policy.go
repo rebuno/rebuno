@@ -23,6 +23,7 @@ type PolicyResult struct {
 	Decision       string               `json:"decision" yaml:"decision"`
 	Reason         string               `json:"reason,omitempty" yaml:"reason,omitempty"`
 	RuleID         string               `json:"rule_id,omitempty" yaml:"-"`
+	PolicyHash     string               `json:"policy_hash,omitempty" yaml:"-"`
 	ApprovalConfig PolicyApprovalConfig `json:"approval_config,omitempty" yaml:"approval_config,omitempty"`
 	RateLimit      RateLimitConfig      `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
 	Budget         BudgetConfig         `json:"budget,omitempty" yaml:"budget,omitempty"`
@@ -37,8 +38,14 @@ type JudgeConfig struct {
 
 type BudgetConfig struct {
 	MaxTokens int    `json:"max_tokens,omitempty" yaml:"max_tokens,omitempty"`
+	Scope     string `json:"scope,omitempty" yaml:"scope,omitempty"`
 	OnExceed  string `json:"on_exceed,omitempty" yaml:"on_exceed,omitempty"`
 }
+
+const (
+	BudgetScopeExecution = "execution"
+	BudgetScopeSession   = "session"
+)
 
 type RateLimitConfig struct {
 	MaxCalls       int           `json:"max_calls,omitempty" yaml:"max_calls,omitempty"`
@@ -55,6 +62,7 @@ const (
 
 const (
 	PerWhatExecution = "execution"
+	PerWhatSession   = "session"
 	PerWhatAgent     = "agent"
 	PerWhatGlobal    = "global"
 )

@@ -116,7 +116,7 @@ func (k *Kernel) decideStep(
 			return domain.StepDecision{}, false, err
 		}
 		if retry {
-			return k.recordStepDecision(ctx, execID, exec.AgentID, stepID, req, argsHash, occurrence,
+			return k.recordStepDecision(ctx, exec, stepID, req, argsHash, occurrence,
 				domain.PolicyResult{
 					Decision: domain.DecisionDeny,
 					Reason:   "prior attempt outcome unknown; retry refused",
@@ -163,7 +163,7 @@ func (k *Kernel) decideStep(
 		}
 	}
 	k.d.Observer.RecordPolicyDecision(polResult.Decision)
-	return k.recordStepDecision(ctx, execID, exec.AgentID, stepID, req, argsHash, occurrence, polResult)
+	return k.recordStepDecision(ctx, exec, stepID, req, argsHash, occurrence, polResult)
 }
 
 // indeterminateRetry reports whether this effect already resolved indeterminate
@@ -336,9 +336,24 @@ func (k *Kernel) parkRateLimited(
 	return domain.StepDecision{Decision: "blocked", Reason: domain.ReasonRateLimited}, false, nil
 }
 
-func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agentID, stepID string, req SubmitStepRequest, argsHash string, occurrence int, pol domain.PolicyResult) (domain.StepDecision, bool, error) {
+func decided(p map[string]any, pol domain.PolicyResult) map[string]any {
+	if pol.PolicyHash != "" {
+		p["policy_hash"] = pol.PolicyHash
+	}
+	return p
+}
+
+func (k *Kernel) budgetUsage(ctx context.Context, exec domain.Execution, budget domain.BudgetConfig) (int, error) {
+	if budget.Scope == domain.BudgetScopeSession && exec.Session != "" {
+		return k.d.Steps.SessionUsage(ctx, exec.Session)
+	}
+	return k.d.Steps.ExecutionUsage(ctx, exec.ID)
+}
+
+func (k *Kernel) recordStepDecision(ctx context.Context, exec domain.Execution, stepID string, req SubmitStepRequest, argsHash string, occurrence int, pol domain.PolicyResult) (domain.StepDecision, bool, error) {
+	execID := exec.ID
 	if pol.RateLimit.MaxCalls > 0 {
-		key := ratelimit.ScopeKey(pol.RuleID, pol.RateLimit.PerWhat, execID.String(), agentID)
+		key := ratelimit.ScopeKey(pol.RuleID, pol.RateLimit.PerWhat, execID.String(), exec.Session, exec.AgentID)
 		allowed, wait, err := k.d.RateLimiter.Allow(ctx, key, pol.RateLimit)
 		if err != nil {
 			if pol.RateLimit.OnLimiterError == domain.LimiterErrorDeny {
@@ -357,7 +372,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 	}
 
 	if pol.Budget.MaxTokens > 0 && pol.Decision == domain.DecisionAllow {
-		spent, err := k.d.Steps.ExecutionUsage(ctx, execID)
+		spent, err := k.budgetUsage(ctx, exec, pol.Budget)
 		switch {
 		case err != nil:
 			k.log.Warn("execution usage unavailable, allowing step",
@@ -396,7 +411,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		step.Status = domain.StepExecuting
 		step.StartedAt = &now
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepAllowed, Payload: payload.StepDecided(stepID, req.Kind, req.Target, pol.RuleID, pol.Reason)},
+			store.EventRecord{Type: domain.EventStepAllowed, Payload: decided(payload.StepDecided(stepID, req.Kind, req.Target, pol.RuleID, pol.Reason), pol)},
 			store.EventRecord{Type: domain.EventStepExecuting, Payload: payload.Step(stepID, req.Kind, req.Target, "")},
 		)
 		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
@@ -414,7 +429,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		errPayload, _ := json.Marshal(map[string]string{"reason": reason, "rule_id": pol.RuleID})
 		step.Error = errPayload
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepDenied, Payload: payload.StepDenied(stepID, req.Kind, req.Target, pol.RuleID, errPayload)},
+			store.EventRecord{Type: domain.EventStepDenied, Payload: decided(payload.StepDenied(stepID, req.Kind, req.Target, pol.RuleID, errPayload), pol)},
 		)
 		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
 			return domain.StepDecision{}, false, err
@@ -441,7 +456,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, execID uuid.UUID, agent
 		}
 		step.Status = domain.StepAwaitingApproval
 		evts = append(evts,
-			store.EventRecord{Type: domain.EventStepAwaitingApproval, Payload: payload.StepDecided(stepID, req.Kind, req.Target, pol.RuleID, pol.Reason)},
+			store.EventRecord{Type: domain.EventStepAwaitingApproval, Payload: decided(payload.StepDecided(stepID, req.Kind, req.Target, pol.RuleID, pol.Reason), pol)},
 			store.EventRecord{Type: domain.EventApprovalRequested, Payload: payload.Approval(approvalID, stepID, execID, domain.ApprovalPending, "", "")},
 		)
 		blockPayload := payload.Execution(execID, domain.ExecutionBlocked, nil, "")

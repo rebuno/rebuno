@@ -316,9 +316,12 @@ An agent reads `{ "id", "webhook_url", "policy_bundle?", "registered_at",
 Body `{ "bundle": "<raw YAML>" }` → `204`. See [Policy](/policy).
 
 `POST /v0/policies/{agent_id}/test` · bearer evaluates a bundle without storing
-it. Body `{ "bundle?", "cases?", "execution_id?" }`. Omit `bundle` to test the
-agent's stored one; give `cases` to evaluate inputs, or `execution_id` to replay
-a past execution's steps. Returns each case's decision and a count of those that
+it. Body `{ "bundle?", "cases?", "execution_id?", "executions?" }`. Omit `bundle`
+to test the agent's stored one; give `cases` to evaluate inputs, `execution_id`
+to replay a past execution's steps, or `executions`
+(`{ "session?", "since?", "limit?" }`) to replay the agent's executions newest
+first, 100 by default and at most 1000. Each replayed case names its
+`execution_id`. Returns each case's decision and a count of those that
 did not match. See [Testing a bundle](/policy#testing-a-bundle).
 
 ### Approvals

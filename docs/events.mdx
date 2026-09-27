@@ -65,7 +65,8 @@ LLM call, or a local step.
 | `step.cancelled` | Terminal. The execution was cancelled while the step was in flight, so whether the effect ran is unknown. |
 
 Payloads stay lean. They identify the step (`step_id`, `step_type`, and `target`
-where it is known) and carry decision context (`rule_id`, `error`). Results are
+where it is known) and carry decision context (`rule_id`, `error`, and the
+`policy_hash` of the bundle that decided, a SHA-256 of its YAML). Results are
 not in the payload. The result of a tool call, and the request and response bodies
 of an `llm_call`, live on the step itself, so fetch them with
 `GET /v0/executions/{id}/steps/{step_id}`.

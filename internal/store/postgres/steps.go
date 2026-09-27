@@ -176,6 +176,28 @@ func executionUsage(ctx context.Context, q Querier, execID uuid.UUID) (int, erro
 	return total, nil
 }
 
+func sessionUsage(ctx context.Context, q Querier, session string) (int, error) {
+	var total int
+	err := q.QueryRow(ctx, `
+		SELECT COALESCE(SUM(s.usage_input + s.usage_output), 0)
+		FROM steps s
+		JOIN executions e ON e.id = s.execution_id
+		WHERE e.session = $1
+	`, session).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum session usage: %w", err)
+	}
+	return total, nil
+}
+
+func (s *Store) SessionUsage(ctx context.Context, session string) (int, error) {
+	return sessionUsage(ctx, s.q(ctx), session)
+}
+
+func (q querier) SessionUsage(ctx context.Context, session string) (int, error) {
+	return sessionUsage(ctx, q.q, session)
+}
+
 func (s *Store) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error) {
 	return executionUsage(ctx, s.q(ctx), execID)
 }

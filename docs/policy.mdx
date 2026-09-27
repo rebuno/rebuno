@@ -175,10 +175,13 @@ and the scope in `per_what`, so two rules never share one.
       rate_limit:
         max_calls: 5
         window: 1m
-        per_what: execution      # execution (default) | agent | global
+        per_what: execution      # execution (default) | session | agent | global
         max_wait: 5m             # unset (default) refuses instead of waiting
         on_limiter_error: allow  # allow (default, fail-open) | deny (fail-closed)
 ```
+
+`per_what: session` shares the bucket across a session's executions, and falls
+back to the execution for one without a session.
 
 A step over the limit comes back as `rate_limited` rather than a policy denial.
 Put a hard ceiling in a `deny` or `require_approval` rule instead.
@@ -190,8 +193,8 @@ or the wait would run longer than `max_wait`, it is refused.
 
 ### Token budgets
 
-A rule can cap the LLM tokens an execution spends. The cap applies only to a
-rule that decides `allow`.
+A rule can cap the LLM tokens an execution or a session spends. The cap applies
+only to a rule that decides `allow`.
 
 ```yaml
   - id: cap-llm-spend
@@ -200,11 +203,14 @@ rule that decides `allow`.
       decision: allow
       budget:
         max_tokens: 200000
+        scope: execution       # execution (default) | session
         on_exceed: deny        # deny (default) | require_approval
 ```
 
 The meter sums the input and output tokens recorded on the execution's steps, so
-an effect counts once however many times it was attempted. Only `llm_call` steps
+an effect counts once however many times it was attempted. With `scope: session`
+it sums every execution in the session, including failed ones, and falls back to
+the execution for one without a session. Only `llm_call` steps
 record usage, so nothing else moves the meter.
 
 The check runs before the call, so the step that crosses the limit still runs. A
@@ -297,6 +303,13 @@ agent with `--agent-id` and reaches a kernel the way every command does
 
 ```bash
 rebuno policy test shell.yaml --execution <id> --agent-id shell
+```
+
+`--session`, `--since`, and `--limit` replay many of the agent's executions at
+once, newest first, 100 by default and at most 1000:
+
+```bash
+rebuno policy test shell.yaml --agent-id shell --since 7d
 ```
 
 ## Examples
