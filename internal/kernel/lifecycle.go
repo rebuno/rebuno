@@ -52,7 +52,10 @@ func (k *Kernel) Cleanup(ctx context.Context, retain time.Duration, now time.Tim
 			k.log.Warn("rate limit reap failed", "error", err) // best-effort
 		}
 	}
-	return k.d.Executions.DeleteExecutionsCreatedBefore(ctx, cutoff)
+	if err := k.d.Executions.DeleteExecutionsCreatedBefore(ctx, cutoff); err != nil {
+		return err
+	}
+	return k.d.Executions.DeleteUnreferencedChunks(ctx)
 }
 
 func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, now time.Time) error {

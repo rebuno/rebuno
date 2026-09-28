@@ -327,12 +327,13 @@ func (k *Kernel) PreviousState(ctx context.Context, id uuid.UUID) (json.RawMessa
 	if exec.ParentExecutionID == nil {
 		return nil, nil
 	}
+	state, err := k.d.Executions.ExecutionState(ctx, *exec.ParentExecutionID)
+	if err != nil || state != nil {
+		return state, err
+	}
 	parent, err := k.d.Executions.GetExecution(ctx, *exec.ParentExecutionID)
 	if err != nil {
 		return nil, err
-	}
-	if parent.State != nil {
-		return parent.State, nil
 	}
 	return parent.Output, nil
 }

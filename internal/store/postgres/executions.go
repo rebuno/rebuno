@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 )
 
 const executionColumns = `id, agent_id, input, status, output, failure_reason,
-	created_at, updated_at, deadline_at, COALESCE(session, ''), parent_execution_id, state,
+	created_at, updated_at, deadline_at, COALESCE(session, ''), parent_execution_id,
 	forked_from, COALESCE(fork_seq, 0), COALESCE(policy_bundle, '')`
 
 func (s *Store) CreateExecution(ctx context.Context, exec domain.Execution) error {
@@ -224,12 +225,12 @@ func deleteExecutionsCreatedBefore(ctx context.Context, q Querier, before time.T
 func scanExecution(row pgx.Row) (domain.Execution, error) {
 	var exec domain.Execution
 	var idStr, status string
-	var parentID, forkedFrom, input, output, state *string
+	var parentID, forkedFrom, input, output *string
 
 	if err := row.Scan(
 		&idStr, &exec.AgentID, &input, &status,
 		&output, &exec.FailureReason, &exec.CreatedAt, &exec.UpdatedAt, &exec.DeadlineAt,
-		&exec.Session, &parentID, &state, &forkedFrom, &exec.ForkSeq, &exec.PolicyBundle,
+		&exec.Session, &parentID, &forkedFrom, &exec.ForkSeq, &exec.PolicyBundle,
 	); err != nil {
 		return domain.Execution{}, err
 	}
@@ -249,7 +250,6 @@ func scanExecution(row pgx.Row) (domain.Execution, error) {
 	exec.Status = domain.ExecutionStatus(status)
 	exec.Input = rawFromPtr(input)
 	exec.Output = rawFromPtr(output)
-	exec.State = rawFromPtr(state)
 	return exec, nil
 }
 
@@ -370,11 +370,43 @@ func (q querier) SetExecutionParent(ctx context.Context, id, parent uuid.UUID) e
 }
 
 func (s *Store) SetExecutionState(ctx context.Context, id uuid.UUID, state []byte) error {
-	return setExecutionColumn(ctx, s.q(ctx), id, "state = $2::jsonb", rawArg(state))
+	return setExecutionState(ctx, s.q(ctx), id, state)
 }
 
 func (q querier) SetExecutionState(ctx context.Context, id uuid.UUID, state []byte) error {
-	return setExecutionColumn(ctx, q.q, id, "state = $2::jsonb", rawArg(state))
+	return setExecutionState(ctx, q.q, id, state)
+}
+
+func setExecutionState(ctx context.Context, q Querier, id uuid.UUID, state []byte) error {
+	chunks, err := writeChunks(ctx, q, state)
+	if err != nil {
+		return err
+	}
+	return setExecutionColumn(ctx, q, id, "state = NULL, state_chunks = $2", chunks)
+}
+
+func (s *Store) ExecutionState(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
+	return executionState(ctx, s.q(ctx), id)
+}
+
+func (q querier) ExecutionState(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
+	return executionState(ctx, q.q, id)
+}
+
+func executionState(ctx context.Context, q Querier, id uuid.UUID) (json.RawMessage, error) {
+	var inline *string
+	var chunks [][]byte
+	if err := q.QueryRow(ctx, `SELECT state, state_chunks FROM executions WHERE id = $1`, id.String()).Scan(&inline, &chunks); err != nil {
+		return nil, mapNotFound(err)
+	}
+	if chunks == nil {
+		return rawFromPtr(inline), nil
+	}
+	state, err := readChunks(ctx, q, chunks)
+	if err != nil {
+		return nil, err
+	}
+	return state[0], nil
 }
 
 func setExecutionColumn(ctx context.Context, q Querier, id uuid.UUID, assignment string, value any) error {

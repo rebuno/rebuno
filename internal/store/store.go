@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,9 +36,11 @@ type ExecutionStore interface {
 	SessionHead(ctx context.Context, session, agentID string) (domain.Execution, error)
 	SetExecutionParent(ctx context.Context, id, parent uuid.UUID) error
 	SetExecutionState(ctx context.Context, id uuid.UUID, state []byte) error
+	ExecutionState(ctx context.Context, id uuid.UUID) (json.RawMessage, error)
 	UpdateExecutionStatus(ctx context.Context, id uuid.UUID, status domain.ExecutionStatus, output []byte, reason string) error
 	ListExpiredExecutions(ctx context.Context, now time.Time) ([]domain.Execution, error)
 	DeleteExecutionsCreatedBefore(ctx context.Context, before time.Time) error
+	DeleteUnreferencedChunks(ctx context.Context) error
 }
 
 type AgentStore interface {

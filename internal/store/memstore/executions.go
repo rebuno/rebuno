@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"time"
 
@@ -176,6 +177,7 @@ func (s *Store) deleteExecutionsCreatedBeforeLocked(ctx context.Context, before 
 		}
 		delete(s.events, id)
 		delete(s.executions, id)
+		delete(s.states, id)
 		for childID, child := range s.executions {
 			if child.ParentExecutionID != nil && *child.ParentExecutionID == id {
 				child.ParentExecutionID = nil
@@ -334,11 +336,34 @@ func (tx *txStore) SetExecutionState(_ context.Context, id uuid.UUID, state []by
 }
 
 func (s *Store) setExecutionStateLocked(id uuid.UUID, state []byte) error {
-	exec, ok := s.executions[id]
-	if !ok {
+	if _, ok := s.executions[id]; !ok {
 		return domain.ErrNotFound
 	}
-	exec.State = state
-	s.executions[id] = exec
+	s.states[id] = state
+	return nil
+}
+
+func (s *Store) ExecutionState(_ context.Context, id uuid.UUID) (json.RawMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.executionStateLocked(id)
+}
+
+func (tx *txStore) ExecutionState(_ context.Context, id uuid.UUID) (json.RawMessage, error) {
+	return tx.executionStateLocked(id)
+}
+
+func (s *Store) executionStateLocked(id uuid.UUID) (json.RawMessage, error) {
+	if _, ok := s.executions[id]; !ok {
+		return nil, domain.ErrNotFound
+	}
+	return s.states[id], nil
+}
+
+func (s *Store) DeleteUnreferencedChunks(context.Context) error {
+	return nil
+}
+
+func (tx *txStore) DeleteUnreferencedChunks(context.Context) error {
 	return nil
 }

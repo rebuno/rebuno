@@ -228,6 +228,13 @@ The `steps` table is a projection of the event log, written in the same
 transaction as its events. Replay lookups are therefore read-after-write
 consistent, and the projection never lags.
 
+An `llm_call` request carries the conversation so far, and an execution's
+`state` usually carries it again, so consecutive payloads mostly repeat each
+other. Postgres stores both split into content-defined chunks, keyed by hash in
+`payload_chunks`, so a repeated chunk is stored once across every step and
+execution. The retention sweep deletes chunks that nothing references and that
+went unused for a day.
+
 The HTTP API is stateless. Any replica serves any request and dispatches any
 execution, with no connection registry or sticky routing. Two replicas can
 therefore touch one execution at once. Every path that mutates an execution runs

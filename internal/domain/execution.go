@@ -37,7 +37,6 @@ type Execution struct {
 	Input             json.RawMessage `json:"input"`
 	Status            ExecutionStatus `json:"status"`
 	Output            json.RawMessage `json:"output,omitempty"`
-	State             json.RawMessage `json:"-"`
 	FailureReason     string          `json:"failure_reason,omitempty"`
 	CreatedAt         time.Time       `json:"created_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`

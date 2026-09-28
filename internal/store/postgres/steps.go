@@ -22,13 +22,21 @@ func upsertStep(ctx context.Context, q Querier, step domain.Step) error {
 	result := rawArg(step.Result)
 	errPayload := rawArg(step.Error)
 	argsPayload := rawArg(step.Args)
+	var argsChunks [][]byte
+	if step.Kind == domain.StepKindLLM && len(step.Args) > 0 {
+		var err error
+		if argsChunks, err = writeChunks(ctx, q, step.Args); err != nil {
+			return err
+		}
+		argsPayload = nil
+	}
 
 	_, err := q.Exec(ctx, `
 		INSERT INTO steps (
 			step_id, execution_id, kind, target, args_hash, occurrence, status,
 			idempotency, args, result, error, started_at, completed_at,
-			usage_input, usage_output
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, $15, $16)
+			usage_input, usage_output, args_chunks
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, $15, $16, $17)
 		ON CONFLICT (step_id) DO UPDATE SET
 			execution_id = EXCLUDED.execution_id,
 			kind         = EXCLUDED.kind,
@@ -39,6 +47,7 @@ func upsertStep(ctx context.Context, q Querier, step domain.Step) error {
 							THEN steps.status ELSE EXCLUDED.status END,
 			idempotency  = EXCLUDED.idempotency,
 			args         = EXCLUDED.args,
+			args_chunks  = EXCLUDED.args_chunks,
 			result       = CASE WHEN steps.status = ANY($14::text[])
 							THEN steps.result ELSE EXCLUDED.result END,
 			error        = CASE WHEN steps.status = ANY($14::text[])
@@ -54,7 +63,7 @@ func upsertStep(ctx context.Context, q Querier, step domain.Step) error {
 		step.StepID, step.ExecutionID.String(), string(step.Kind), step.Target, step.ArgsHash, step.Occurrence,
 		string(step.Status), step.Idempotency, argsPayload, result, errPayload,
 		timeArg(step.StartedAt), timeArg(step.CompletedAt), terminalStatuses,
-		step.UsageInput, step.UsageOutput,
+		step.UsageInput, step.UsageOutput, argsChunks,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert step: %w", err)
@@ -74,15 +83,19 @@ func getStep(ctx context.Context, q Querier, stepID string) (domain.Step, error)
 	row := q.QueryRow(ctx, `
 		SELECT step_id, execution_id, kind, target, args_hash, occurrence, status,
 		       idempotency, args, result, error, started_at, completed_at,
-		       usage_input, usage_output
+		       usage_input, usage_output, args_chunks
 		FROM steps
 		WHERE step_id = $1
 	`, stepID)
-	step, err := scanStep(row)
+	step, chunks, err := scanStep(row)
 	if err != nil {
 		return domain.Step{}, mapNotFound(err)
 	}
-	return step, nil
+	steps := []domain.Step{step}
+	if err := assembleArgs(ctx, q, steps, [][][]byte{chunks}); err != nil {
+		return domain.Step{}, err
+	}
+	return steps[0], nil
 }
 
 func (s *Store) DispatchOccurrence(ctx context.Context, dispatchID uuid.UUID, kind domain.StepKind, target, argsHash string) (int, error) {
@@ -150,7 +163,7 @@ func listStepsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]d
 	rows, err := q.Query(ctx, `
 		SELECT step_id, execution_id, kind, target, args_hash, occurrence, status,
 		       idempotency, args, result, error, started_at, completed_at,
-		       usage_input, usage_output
+		       usage_input, usage_output, args_chunks
 		FROM steps
 		WHERE execution_id = $1
 		ORDER BY step_id
@@ -158,9 +171,14 @@ func listStepsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]d
 	if err != nil {
 		return nil, fmt.Errorf("list steps: %w", err)
 	}
-	defer rows.Close()
-
-	return scanSteps(rows)
+	steps, chunks, err := scanSteps(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := assembleArgs(ctx, q, steps, chunks); err != nil {
+		return nil, err
+	}
+	return steps, nil
 }
 
 func executionUsage(ctx context.Context, q Querier, execID uuid.UUID) (int, error) {
@@ -206,24 +224,38 @@ func (q querier) ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, err
 	return executionUsage(ctx, q.q, execID)
 }
 
-func scanStep(row pgx.Row) (domain.Step, error) {
+func assembleArgs(ctx context.Context, q Querier, steps []domain.Step, chunks [][][]byte) error {
+	args, err := readChunks(ctx, q, chunks...)
+	if err != nil {
+		return err
+	}
+	for i := range steps {
+		if args[i] != nil {
+			steps[i].Args = args[i]
+		}
+	}
+	return nil
+}
+
+func scanStep(row pgx.Row) (domain.Step, [][]byte, error) {
 	var step domain.Step
 	var execID string
 	var status string
 	var kind string
 	var args, result, errPayload *string
+	var argsChunks [][]byte
 
 	if err := row.Scan(
 		&step.StepID, &execID, &kind, &step.Target, &step.ArgsHash, &step.Occurrence, &status,
 		&step.Idempotency, &args, &result, &errPayload, &step.StartedAt, &step.CompletedAt,
-		&step.UsageInput, &step.UsageOutput,
+		&step.UsageInput, &step.UsageOutput, &argsChunks,
 	); err != nil {
-		return domain.Step{}, err
+		return domain.Step{}, nil, err
 	}
 
 	id, err := parseUUID(execID)
 	if err != nil {
-		return domain.Step{}, fmt.Errorf("parse execution_id: %w", err)
+		return domain.Step{}, nil, fmt.Errorf("parse execution_id: %w", err)
 	}
 	step.ExecutionID = id
 	step.Kind = domain.StepKind(kind)
@@ -231,20 +263,23 @@ func scanStep(row pgx.Row) (domain.Step, error) {
 	step.Args = rawFromPtr(args)
 	step.Result = rawFromPtr(result)
 	step.Error = rawFromPtr(errPayload)
-	return step, nil
+	return step, argsChunks, nil
 }
 
-func scanSteps(rows pgx.Rows) ([]domain.Step, error) {
+func scanSteps(rows pgx.Rows) ([]domain.Step, [][][]byte, error) {
+	defer rows.Close()
 	var out []domain.Step
+	var chunks [][][]byte
 	for rows.Next() {
-		step, err := scanStep(rows)
+		step, c, err := scanStep(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan step: %w", err)
+			return nil, nil, fmt.Errorf("scan step: %w", err)
 		}
 		out = append(out, step)
+		chunks = append(chunks, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate steps: %w", err)
+		return nil, nil, fmt.Errorf("iterate steps: %w", err)
 	}
-	return out, nil
+	return out, chunks, nil
 }

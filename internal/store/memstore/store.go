@@ -13,6 +13,7 @@ func NewStore() *Store {
 		apiKeys:    make(map[string]domain.APIKey),
 		agents:     make(map[string]domain.Agent),
 		executions: make(map[uuid.UUID]domain.Execution),
+		states:     make(map[uuid.UUID][]byte),
 		events:     make(map[uuid.UUID][]domain.Event),
 		steps:      make(map[string]domain.Step),
 		approvals:  make(map[uuid.UUID]domain.Approval),
@@ -27,6 +28,7 @@ type Store struct {
 	apiKeys    map[string]domain.APIKey
 	agents     map[string]domain.Agent
 	executions map[uuid.UUID]domain.Execution
+	states     map[uuid.UUID][]byte
 	events     map[uuid.UUID][]domain.Event
 	steps      map[string]domain.Step
 	approvals  map[uuid.UUID]domain.Approval
