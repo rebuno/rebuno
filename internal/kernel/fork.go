@@ -3,7 +3,6 @@ package kernel
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -196,18 +195,4 @@ func eventStepID(e domain.Event) string {
 		return ""
 	}
 	return body.StepID
-}
-
-func (k *Kernel) repeatsSourceEffect(ctx context.Context, exec domain.Execution, req SubmitStepRequest, argsHash string, occurrence int) (bool, error) {
-	if exec.ForkedFrom == nil || req.Idempotency != "at_most_once" {
-		return false, nil
-	}
-	sourceStep, err := k.d.Steps.GetStep(ctx, identity.ComputeStepID(*exec.ForkedFrom, req.Kind, req.Target, argsHash, occurrence))
-	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return sourceStep.StartedAt != nil, nil
 }

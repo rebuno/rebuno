@@ -107,7 +107,7 @@ func TestReplayCasesSkipsKernelDecisions(t *testing.T) {
 	steps := []domain.Step{{StepID: "s1", Kind: domain.StepKindTool, Target: "shell_exec"}}
 	for _, e := range []domain.Event{
 		decisionEvent(domain.EventStepDenied, "s1", domain.RuleIndeterminateRetry),
-		decisionEvent(domain.EventStepAwaitingApproval, "s1", domain.RuleForkRepeatedEffect),
+		decisionEvent(domain.EventStepAwaitingApproval, "s1", domain.RuleForkEffect),
 	} {
 		cases := ReplayCases(steps, []domain.Event{e})
 		if cases[0].Expect != "" {

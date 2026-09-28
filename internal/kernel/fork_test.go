@@ -86,12 +86,10 @@ func TestForkReplaysStepsRecordedBeforeTheForkPoint(t *testing.T) {
 	}
 }
 
-func TestForkRequiresApprovalToRepeatAnAtMostOnceEffect(t *testing.T) {
+func TestForkRequiresApprovalForAtMostOnceEffects(t *testing.T) {
 	k, _, ctx := sessionKernels(t, "memory")
 	source := createInSession(t, k, ctx, "agent-1", "main")
 	at := latestSeq(t, k, ctx, source.ID)
-	runStep(t, k, ctx, source.ID, "open_pr", "at_most_once", `"#42"`)
-	runStep(t, k, ctx, source.ID, "search", "safe_to_retry", `{}`)
 
 	fork, err := k.ForkExecution(ctx, source.ID, kernel.ForkRequest{AtSeq: at})
 	if err != nil {
@@ -102,7 +100,7 @@ func TestForkRequiresApprovalToRepeatAnAtMostOnceEffect(t *testing.T) {
 	}
 	dec := runStep(t, k, ctx, fork.ID, "open_pr", "at_most_once", `"#43"`)
 	if dec.Decision != "blocked" || dec.ApprovalID == nil {
-		t.Fatalf("repeated effect: %+v", dec)
+		t.Fatalf("at_most_once effect: %+v", dec)
 	}
 	approval, err := k.GetApproval(ctx, *dec.ApprovalID)
 	if err != nil || approval.StepID != dec.StepID {

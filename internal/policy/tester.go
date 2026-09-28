@@ -207,7 +207,7 @@ func recordedDecision(e domain.Event) (string, recorded, bool) {
 		return "", recorded{}, false
 	}
 	switch payload.RuleID {
-	case domain.RuleIndeterminateRetry, domain.RuleForkRepeatedEffect:
+	case domain.RuleIndeterminateRetry, domain.RuleForkEffect:
 		return "", recorded{}, false
 	}
 	return payload.StepID, recorded{decision: decisionForEvent(e.Type), ruleID: payload.RuleID}, true

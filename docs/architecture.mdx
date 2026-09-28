@@ -164,10 +164,10 @@ from the top: copied steps replay through the normal replay path, and everything
 after the fork point runs live under policy. A fork's log is complete on its
 own, so auditing and policy tests read it like any other execution.
 
-A fork can reach an effect its source already started after the fork point.
-An `at_most_once` step whose kind, target, arguments, and occurrence match a
-step that started on the source requires approval before it runs, with the rule
-ID `__fork_repeated_effect`. `safe_to_retry` steps run without this check.
+A fork can reach an effect its source already performed after the fork point,
+possibly with different arguments. Every `at_most_once` step a fork runs live
+requires approval before it runs, with the rule ID `__fork_effect`.
+`safe_to_retry` steps run without this check.
 
 A fork can carry its own policy bundle, which governs that execution in place of
 the agent's bundle. Forking with a bundle requires the `policies:write` scope.

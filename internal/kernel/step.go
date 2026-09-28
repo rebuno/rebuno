@@ -146,20 +146,14 @@ func (k *Kernel) decideStep(
 	if err != nil {
 		return domain.StepDecision{}, false, err
 	}
-	if polResult.Decision == domain.DecisionAllow {
-		repeated, err := k.repeatsSourceEffect(ctx, exec, req, argsHash, occurrence)
-		if err != nil {
-			return domain.StepDecision{}, false, err
-		}
-		if repeated {
-			polResult = domain.PolicyResult{
-				Decision: domain.DecisionRequireApproval,
-				Reason:   "effect_started_on_source",
-				RuleID:   domain.RuleForkRepeatedEffect,
-				ApprovalConfig: domain.PolicyApprovalConfig{
-					Message: "This effect already started on execution " + exec.ForkedFrom.String() + ", which this execution was forked from.",
-				},
-			}
+	if polResult.Decision == domain.DecisionAllow && exec.ForkSeq > 0 && req.Idempotency == "at_most_once" {
+		polResult = domain.PolicyResult{
+			Decision: domain.DecisionRequireApproval,
+			Reason:   "forked_effect",
+			RuleID:   domain.RuleForkEffect,
+			ApprovalConfig: domain.PolicyApprovalConfig{
+				Message: "This execution is a fork, so its at_most_once effects require approval.",
+			},
 		}
 	}
 	k.d.Observer.RecordPolicyDecision(polResult.Decision)

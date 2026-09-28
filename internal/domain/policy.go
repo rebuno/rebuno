@@ -16,7 +16,7 @@ const (
 // skip them.
 const (
 	RuleIndeterminateRetry = "__indeterminate_retry"
-	RuleForkRepeatedEffect = "__fork_repeated_effect"
+	RuleForkEffect         = "__fork_effect"
 )
 
 type PolicyResult struct {
