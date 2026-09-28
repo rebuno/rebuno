@@ -110,7 +110,7 @@ func (m *Manager) runDispatch(ctx context.Context) {
 // Its own cadence, so a passed deadline is not left waiting on the much longer
 // singleton interval.
 func (m *Manager) deadlineTick(ctx context.Context) error {
-	return m.withLeaderLock(ctx, func(ctx context.Context) error {
+	return m.withLeaderLock(ctx, m.LeaderLockKey+":deadlines", func(ctx context.Context) error {
 		return errors.Join(
 			m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC()),
 			m.kernel.AdmitQueued(ctx),
@@ -119,15 +119,15 @@ func (m *Manager) deadlineTick(ctx context.Context) error {
 }
 
 func (m *Manager) singletonsTick(ctx context.Context) error {
-	return m.withLeaderLock(ctx, m.runSingletons)
+	return m.withLeaderLock(ctx, m.LeaderLockKey, m.runSingletons)
 }
 
 // With no locker configured, fn runs unconditionally on every replica.
-func (m *Manager) withLeaderLock(ctx context.Context, fn func(context.Context) error) error {
+func (m *Manager) withLeaderLock(ctx context.Context, key string, fn func(context.Context) error) error {
 	if m.leaderLocker == nil || m.LeaderLockKey == "" {
 		return fn(ctx)
 	}
-	release, err := m.leaderLocker.TryAcquire(ctx, m.LeaderLockKey)
+	release, err := m.leaderLocker.TryAcquire(ctx, key)
 	if err != nil {
 		return err
 	}
