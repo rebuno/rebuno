@@ -74,6 +74,22 @@ func (k *KernelAPI) ForkExecution(ctx context.Context, id uuid.UUID, req kernel.
 	return k.Inner.ForkExecution(ctx, id, req)
 }
 
+func (k *KernelAPI) ForkPoints(ctx context.Context, id uuid.UUID) (kernel.ForkPoints, error) {
+	return k.Inner.ForkPoints(ctx, id)
+}
+
+func (k *KernelAPI) RegisterResource(ctx context.Context, execID uuid.UUID, req kernel.RegisterResourceRequest) (kernel.ResourceView, error) {
+	return k.Inner.RegisterResource(ctx, execID, req)
+}
+
+func (k *KernelAPI) BindResource(ctx context.Context, execID uuid.UUID, key string, req kernel.BindResourceRequest) error {
+	return k.Inner.BindResource(ctx, execID, key, req)
+}
+
+func (k *KernelAPI) PublishCheckpoints(ctx context.Context, execID uuid.UUID, req kernel.PublishCheckpointsRequest) error {
+	return k.Inner.PublishCheckpoints(ctx, execID, req)
+}
+
 func (k *KernelAPI) PreviousState(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
 	return k.Inner.PreviousState(ctx, id)
 }

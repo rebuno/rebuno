@@ -41,6 +41,8 @@ type Execution struct {
 	CreatedAt         time.Time       `json:"created_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
 	DeadlineAt        *time.Time      `json:"deadline_at,omitempty"`
+	// Restoration is set on the execution a fork request returns.
+	Restoration map[string]ResourceSelection `json:"restoration,omitempty"`
 }
 
 // Cursor holds an execution ID. IDs are UUIDv7, so ordering by ID orders by creation.

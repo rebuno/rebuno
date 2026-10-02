@@ -32,6 +32,12 @@ const (
 	EventApprovalDenied    = "approval.denied"
 	EventApprovalExpired   = "approval.expired"
 
+	EventResourceRegistered       = "resource.registered"
+	EventResourceInitialized      = "resource.initialized"
+	EventResourceBound            = "resource.bound"
+	EventResourceCheckpointed     = "resource.checkpointed"
+	EventResourceCheckpointFailed = "resource.checkpoint_failed"
+
 	EventDispatchQueued    = "dispatch.queued"
 	EventDispatchAcked     = "dispatch.acked"
 	EventDispatchFailed    = "dispatch.failed"

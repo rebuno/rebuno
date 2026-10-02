@@ -172,8 +172,31 @@ requires approval before it runs, with the rule ID `__fork_effect`.
 A fork can carry its own policy bundle, which governs that execution in place of
 the agent's bundle. Forking with a bundle requires the `policies:write` scope.
 
-A fork restores what the kernel recorded. State outside the kernel, such as the
-files in a sandbox, stays as it is.
+### External resources
+
+An agent can register external state, such as a sandbox, as a resource. Its SDK
+captures checkpoints on a per-resource schedule. The kernel stores bindings,
+checkpoint references, and coverage boundaries; captured contents stay with the
+provider. See [Python resources](/sdk/python/resources) or
+[TypeScript resources](/sdk/typescript/resources) for SDK usage.
+
+A live step advances the affected resource's generation before running and ends
+its checkpoint coverage. Captures require the current generation and no active
+writer. The kernel commits captures with step outcomes; a failed capture
+preserves the outcome and leaves the resource uncovered.
+
+A fork point is covered when every resource registered there has matching
+captured state. Executions without resources are covered at every event.
+Coverage is advisory: forks keep the requested event regardless of coverage.
+
+For each resource, a fork selects the newest covering checkpoint, otherwise the
+newest earlier checkpoint, otherwise the initial environment. The agent creates
+a separate resource from that state; later dispatches open its existing binding.
+The fork's `restoration` field records each selection and its coverage.
+
+Copied outcomes replay through the fork point. At an uncovered point, they can
+describe changes absent from the restored resource. An expired or missing
+selected checkpoint fails resource initialization and the forked execution.
 
 ## Dispatch and delivery
 

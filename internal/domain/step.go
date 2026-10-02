@@ -52,4 +52,5 @@ type Step struct {
 	CompletedAt *time.Time      `json:"completed_at,omitempty"`
 	UsageInput  int             `json:"usage_input,omitempty"`
 	UsageOutput int             `json:"usage_output,omitempty"`
+	Resources   []string        `json:"resources,omitempty"`
 }

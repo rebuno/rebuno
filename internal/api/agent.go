@@ -24,6 +24,9 @@ type AgentKernel interface {
 	Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.Lease) error
 	CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output, state json.RawMessage) error
 	FailExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error
+	RegisterResource(ctx context.Context, execID uuid.UUID, req kernel.RegisterResourceRequest) (kernel.ResourceView, error)
+	BindResource(ctx context.Context, execID uuid.UUID, key string, req kernel.BindResourceRequest) error
+	PublishCheckpoints(ctx context.Context, execID uuid.UUID, req kernel.PublishCheckpointsRequest) error
 }
 
 // The lease the kernel issued in the webhook, which every mutation sends back.
@@ -225,6 +228,73 @@ func (rt *Router) agentFailExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := rt.agent.FailExecution(r.Context(), id, lease, req.Error); err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteNoContent(w)
+}
+
+func (rt *Router) registerResource(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
+	var req kernel.RegisterResourceRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteError(w, err)
+		return
+	}
+	if req.Lease, err = leaseFrom(r); err != nil {
+		WriteError(w, err)
+		return
+	}
+	view, err := rt.agent.RegisterResource(r.Context(), id, req)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteJSON(w, view, http.StatusOK)
+}
+
+func (rt *Router) bindResource(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
+	var req kernel.BindResourceRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteError(w, err)
+		return
+	}
+	if req.Lease, err = leaseFrom(r); err != nil {
+		WriteError(w, err)
+		return
+	}
+	if err := rt.agent.BindResource(r.Context(), id, chi.URLParam(r, "key"), req); err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteNoContent(w)
+}
+
+func (rt *Router) publishCheckpoints(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
+	var req kernel.PublishCheckpointsRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteError(w, err)
+		return
+	}
+	if req.Lease, err = leaseFrom(r); err != nil {
+		WriteError(w, err)
+		return
+	}
+	if err := rt.agent.PublishCheckpoints(r.Context(), id, req); err != nil {
 		WriteError(w, err)
 		return
 	}

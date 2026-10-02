@@ -185,6 +185,45 @@ when given, must have no executions yet. An optional `policy_bundle`
 governs the fork in place of the agent's bundle and requires `policies:write`.
 See [Forks](/architecture#forks).
 
+For registered [resources](/architecture#external-resources), `restoration`
+records each resource's starting state:
+
+```json
+{
+  "workspace": {
+    "checkpoint_ref": "snapshot-abc",
+    "checkpoint_seq": 65,
+    "covered": false
+  },
+  "database": { "covered": false }
+}
+```
+
+`checkpoint_seq` is the checkpoint's source coverage boundary. No reference
+means initial state. `covered` reports whether it matches the history at
+`at_seq`; uncovered points remain forkable. The map is also recorded in
+`execution.forked`.
+
+### List fork points
+
+`GET /v0/executions/{id}/fork-points` · bearer
+
+```json
+{
+  "latest_seq": 14,
+  "resources": { "workspace": 5 },
+  "checkpoints": [
+    { "key": "workspace", "generation": 0, "checkpoint_ref": "snap-0", "covered_seq": 6, "invalidated_seq": 10 }
+  ]
+}
+```
+
+`resources` maps keys to registration events. Checkpoints cover
+`covered_seq <= seq < invalidated_seq`, with an open end when `invalidated_seq`
+is absent. A boundary is covered when all resources registered there have
+coverage; with none, it is covered. Use these intervals to mark coverage on a
+timeline. All boundaries remain selectable.
+
 ### Cancel an execution
 
 `POST /v0/executions/{id}/cancel` · bearer → `204`
@@ -220,6 +259,10 @@ it is not there.
 { "kind": "tool_call", "target": "web_search", "args": {...}, "idempotency": "safe_to_retry" }
 ```
 
+Optional `resources` names registered [resources](#resources) the step may
+change. Defaults to none. LLM calls affect none. Unknown keys
+return `400`; the declaration does not affect step identity.
+
 `kind` is `tool_call`, `llm_call`, or `local`. The dispatch headers are
 required, and the kernel rejects the request if either is missing, or if they
 name a dispatch that is not this execution's or an attempt that no longer owns
@@ -242,6 +285,14 @@ returns a decision. The `step_id` that comes back is what addresses the step's
 | `rate_limited` | A rule's rate limit refused the call. `reason` says why. |
 | `execution_terminal` | The execution is already cancelled or finished. Exit cleanly. |
 
+A `proceed` decision includes affected resource generations and capture cadence:
+
+```json
+{ "decision": "proceed", "step_id": "9a3f…", "resources": [{ "key": "workspace", "generation": 5, "due": true }] }
+```
+
+When `due` is true, capture after the effect and report it with the outcome.
+
 ### Report a step outcome
 
 `POST /v0/executions/{id}/steps/{step_id}/complete` takes `{ "result": {...} }`
@@ -249,6 +300,59 @@ and records `step.succeeded`.
 
 `POST /v0/executions/{id}/steps/{step_id}/fail` takes `{ "error": {...} }` and
 records `step.failed`.
+
+Both accept captures and capture failures, committed with the outcome:
+
+```json
+{
+  "result": {...},
+  "captures": [{ "key": "workspace", "generation": 5, "checkpoint_ref": "snapshot-abc" }],
+  "capture_failures": [{ "key": "database", "generation": 3, "error": "snapshot timed out" }]
+}
+```
+
+Captures require the current generation and no other active writer. Refused
+captures record `resource.checkpoint_failed`; the step outcome is preserved.
+
+### Resources
+
+`POST /v0/executions/{id}/resources` · HMAC · dispatch headers
+
+Registers a resource and returns its current state:
+
+```json
+{
+  "key": "workspace",
+  "driver_id": "example.e2b.v1",
+  "configuration": { "timeout": 600 },
+  "coverage_reuse": false,
+  "every_steps": 5,
+  "on_completion": true
+}
+```
+
+`key` matches `[A-Za-z0-9_.-]{1,128}`. Defaults: `every_steps=1`,
+`on_completion=true`, `coverage_reuse=false`. Re-registering preserves the
+policy. Differences in `driver_id`, `configuration`, or `coverage_reuse` return
+`409 conflict`. The response adds:
+
+| Field | Meaning |
+|-------|---------|
+| `generation` | Current version to report with captures. |
+| `count` | Settled affecting steps. |
+| `registered_seq` | Registration event sequence. |
+| `binding` | JSON locator for opening the resource, absent until bound. |
+| `checkpoint_ref` | Fork starting checkpoint, absent for initial state. |
+| `covered` | Whether the current state has checkpoint coverage. |
+
+`POST /v0/executions/{id}/resources/{key}/binding` · HMAC · dispatch headers → `204`
+
+Takes `{ "binding": {...} }`. A different binding for an already bound resource
+returns `409 conflict`.
+
+`POST /v0/executions/{id}/resources/checkpoints` · HMAC · dispatch headers → `204`
+
+Takes `captures` and `capture_failures` as above, covering the latest event.
 
 ### Publish a stream delta
 

@@ -426,6 +426,9 @@ func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason strin
 				if err := tx.Upsert(ctx, s); err != nil {
 					return err
 				}
+				if err := settleEffect(ctx, tx, s); err != nil {
+					return err
+				}
 			}
 			return nil
 		})

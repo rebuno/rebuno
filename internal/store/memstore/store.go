@@ -24,23 +24,26 @@ func NewStore() *Store {
 }
 
 type Store struct {
-	mu         sync.RWMutex
-	apiKeys    map[string]domain.APIKey
-	agents     map[string]domain.Agent
-	executions map[uuid.UUID]domain.Execution
-	states     map[uuid.UUID][]byte
-	events     map[uuid.UUID][]domain.Event
-	steps      map[string]domain.Step
-	approvals  map[uuid.UUID]domain.Approval
-	dispatches map[uuid.UUID]domain.Dispatch
-	counters   map[counterKey]int
-	lockers    map[string]chan struct{}
-	lockMtx    sync.Mutex
+	mu          sync.RWMutex
+	apiKeys     map[string]domain.APIKey
+	agents      map[string]domain.Agent
+	executions  map[uuid.UUID]domain.Execution
+	states      map[uuid.UUID][]byte
+	events      map[uuid.UUID][]domain.Event
+	steps       map[string]domain.Step
+	approvals   map[uuid.UUID]domain.Approval
+	dispatches  map[uuid.UUID]domain.Dispatch
+	counters    map[counterKey]int
+	resources   []domain.Resource
+	checkpoints []domain.ResourceCheckpoint
+	lockers     map[string]chan struct{}
+	lockMtx     sync.Mutex
 }
 
 var _ store.EventStore = (*Store)(nil)
 var _ store.StepStore = (*Store)(nil)
 var _ store.ExecutionStore = (*Store)(nil)
+var _ store.ResourceStore = (*Store)(nil)
 var _ store.AgentStore = (*Store)(nil)
 var _ store.ApprovalStore = (*Store)(nil)
 var _ store.JobQueue = (*Store)(nil)

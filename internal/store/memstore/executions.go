@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"time"
 
@@ -67,6 +68,7 @@ func (s *Store) createExecutionLocked(ctx context.Context, exec domain.Execution
 		exec.CreatedAt = time.Now().UTC()
 	}
 	exec.UpdatedAt = exec.CreatedAt
+	exec.Restoration = nil
 	s.executions[exec.ID] = exec
 	return nil
 }
@@ -175,6 +177,8 @@ func (s *Store) deleteExecutionsCreatedBeforeLocked(ctx context.Context, before 
 				delete(s.dispatches, dispID)
 			}
 		}
+		s.resources = slices.DeleteFunc(s.resources, func(r domain.Resource) bool { return r.ExecutionID == id })
+		s.checkpoints = slices.DeleteFunc(s.checkpoints, func(c domain.ResourceCheckpoint) bool { return c.ExecutionID == id })
 		delete(s.events, id)
 		delete(s.executions, id)
 		delete(s.states, id)

@@ -11,6 +11,7 @@ import (
 var _ store.EventStore = (*Store)(nil)
 var _ store.StepStore = (*Store)(nil)
 var _ store.ExecutionStore = (*Store)(nil)
+var _ store.ResourceStore = (*Store)(nil)
 var _ store.AgentStore = (*Store)(nil)
 var _ store.ApprovalStore = (*Store)(nil)
 var _ store.JobQueue = (*Store)(nil)

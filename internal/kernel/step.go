@@ -22,17 +22,22 @@ type SubmitStepRequest struct {
 	Target      string          `json:"target"`
 	Args        json.RawMessage `json:"args"`
 	Idempotency string          `json:"idempotency,omitempty"`
+	Resources   []string        `json:"resources,omitempty"`
 	Lease       domain.Lease    `json:"-"`
 }
 
 type CompleteStepRequest struct {
-	Result json.RawMessage `json:"result"`
-	Lease  domain.Lease    `json:"-"`
+	Result          json.RawMessage          `json:"result"`
+	Captures        []ResourceCapture        `json:"captures,omitempty"`
+	CaptureFailures []ResourceCaptureFailure `json:"capture_failures,omitempty"`
+	Lease           domain.Lease             `json:"-"`
 }
 
 type FailStepRequest struct {
-	Error json.RawMessage `json:"error"`
-	Lease domain.Lease    `json:"-"`
+	Error           json.RawMessage          `json:"error"`
+	Captures        []ResourceCapture        `json:"captures,omitempty"`
+	CaptureFailures []ResourceCaptureFailure `json:"capture_failures,omitempty"`
+	Lease           domain.Lease             `json:"-"`
 }
 
 func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitStepRequest) (domain.StepDecision, error) {
@@ -110,6 +115,9 @@ func (k *Kernel) decideStep(
 	}
 
 	execID := exec.ID
+	if err := k.checkDeclaredResources(ctx, execID, req.Resources); err != nil {
+		return domain.StepDecision{}, false, err
+	}
 	if req.Idempotency == "at_most_once" {
 		retry, err := k.indeterminateRetry(ctx, execID, req, argsHash)
 		if err != nil {
@@ -218,10 +226,11 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, lease
 		evts := []store.EventRecord{
 			{Type: domain.EventStepExecuting, Payload: payload.Step(step.StepID, step.Kind, step.Target, "")},
 		}
-		if err := k.writeStepLive(ctx, lease, step, evts); err != nil {
+		touched, err := k.startStep(ctx, lease, step, evts, false)
+		if err != nil {
 			return domain.StepDecision{}, err
 		}
-		return domain.StepDecision{Decision: "proceed"}, nil
+		return domain.StepDecision{Decision: "proceed", Resources: touched}, nil
 	case domain.StepExecuting:
 		if idempotency == "at_most_once" {
 			errPayload, _ := json.Marshal(map[string]string{
@@ -233,7 +242,14 @@ func (k *Kernel) handleExistingStep(ctx context.Context, step domain.Step, lease
 			}
 			return domain.StepDecision{Decision: "replay", Error: errPayload}, nil
 		}
-		return k.proceedUnderLiveLease(ctx, step.ExecutionID, lease)
+		evts := []store.EventRecord{
+			{Type: domain.EventStepExecuting, Payload: payload.Step(step.StepID, step.Kind, step.Target, "")},
+		}
+		touched, err := k.startStep(ctx, lease, step, evts, true)
+		if err != nil {
+			return domain.StepDecision{}, err
+		}
+		return domain.StepDecision{Decision: "proceed", Resources: touched}, nil
 	case domain.StepDenied:
 		// A resumed handler re-proposing a refused effect is told why it was
 		// refused, so it can distinguish a policy rule from a human decision.
@@ -394,6 +410,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, exec domain.Execution, 
 		Status:      domain.StepProposed,
 		Idempotency: req.Idempotency,
 		Args:        req.Args,
+		Resources:   req.Resources,
 	}
 
 	evts := []store.EventRecord{
@@ -408,10 +425,11 @@ func (k *Kernel) recordStepDecision(ctx context.Context, exec domain.Execution, 
 			store.EventRecord{Type: domain.EventStepAllowed, Payload: decided(payload.StepDecided(stepID, req.Kind, req.Target, pol.RuleID, pol.Reason), pol)},
 			store.EventRecord{Type: domain.EventStepExecuting, Payload: payload.Step(stepID, req.Kind, req.Target, "")},
 		)
-		if err := k.writeStepLive(ctx, req.Lease, step, evts); err != nil {
+		touched, err := k.startStep(ctx, req.Lease, step, evts, false)
+		if err != nil {
 			return domain.StepDecision{}, false, err
 		}
-		return domain.StepDecision{Decision: "proceed"}, true, nil
+		return domain.StepDecision{Decision: "proceed", Resources: touched}, true, nil
 
 	case domain.DecisionDeny:
 		step.Status = domain.StepDenied
@@ -484,23 +502,8 @@ func (k *Kernel) recordStepDecision(ctx context.Context, exec domain.Execution, 
 }
 
 func (k *Kernel) writeStepLive(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord) error {
-	return k.writeStep(ctx, step, evts, func(tx store.TxStore) error {
-		return renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC())
-	})
-}
-
-func (k *Kernel) writeStepRecorded(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord) error {
-	return k.writeStep(ctx, step, evts, func(tx store.TxStore) error {
-		if _, err := authorizedExecution(ctx, tx, step.ExecutionID); err != nil {
-			return err
-		}
-		return tx.CheckLease(ctx, step.ExecutionID, lease)
-	})
-}
-
-func (k *Kernel) writeStep(ctx context.Context, step domain.Step, evts []store.EventRecord, fence func(store.TxStore) error) error {
 	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := fence(tx); err != nil {
+		if err := renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		if _, err := tx.AppendBatch(ctx, step.ExecutionID, evts); err != nil {
@@ -508,6 +511,84 @@ func (k *Kernel) writeStep(ctx context.Context, step domain.Step, evts []store.E
 		}
 		return tx.Upsert(ctx, step)
 	})
+}
+
+// Each attempt advances generations so earlier captures cannot cover a retry.
+func (k *Kernel) startStep(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord, restart bool) ([]domain.StepResource, error) {
+	var touched []domain.StepResource
+	err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		if err := renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC()); err != nil {
+			return err
+		}
+		resources, err := tx.ListResources(ctx, step.ExecutionID)
+		if err != nil {
+			return err
+		}
+		touched = touchResources(resources, &step)
+		if restart && len(touched) == 0 {
+			return nil
+		}
+		if len(touched) > 0 {
+			executing := evts[len(evts)-1].Payload.(map[string]any)
+			executing["resources"] = step.Resources
+			generations := make(map[string]int64, len(touched))
+			for _, t := range touched {
+				generations[t.Key] = t.Generation
+			}
+			executing["generations"] = generations
+		}
+		appended, err := tx.AppendBatch(ctx, step.ExecutionID, evts)
+		if err != nil {
+			return err
+		}
+		seq := appended[len(appended)-1].EventSeq
+		for _, t := range touched {
+			r, _ := findResource(resources, t.Key)
+			r.Generation = t.Generation
+			if err := tx.InvalidateCheckpoints(ctx, r.ExecutionID, r.Key, seq); err != nil {
+				return err
+			}
+			if err := tx.PutResource(ctx, r); err != nil {
+				return err
+			}
+		}
+		return tx.Upsert(ctx, step)
+	})
+	return touched, err
+}
+
+func (k *Kernel) settleStep(
+	ctx context.Context, step domain.Step, outcome store.EventRecord, fence func(store.TxStore) error,
+	captures []ResourceCapture, failures []ResourceCaptureFailure,
+) error {
+	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+		if err := fence(tx); err != nil {
+			return err
+		}
+		ev, err := tx.Append(ctx, step.ExecutionID, outcome.Type, outcome.Payload)
+		if err != nil {
+			return err
+		}
+		if err := tx.Upsert(ctx, step); err != nil {
+			return err
+		}
+		if err := settleEffect(ctx, tx, step); err != nil {
+			return err
+		}
+		return recordCaptures(ctx, tx, step.ExecutionID, ev.EventSeq, captures, failures)
+	})
+}
+
+func (k *Kernel) settleStepRecorded(
+	ctx context.Context, lease domain.Lease, step domain.Step, outcome store.EventRecord,
+	captures []ResourceCapture, failures []ResourceCaptureFailure,
+) error {
+	return k.settleStep(ctx, step, outcome, func(tx store.TxStore) error {
+		if _, err := authorizedExecution(ctx, tx, step.ExecutionID); err != nil {
+			return err
+		}
+		return tx.CheckLease(ctx, step.ExecutionID, lease)
+	}, captures, failures)
 }
 
 func requireExecuting(step domain.Step) error {
@@ -563,10 +644,8 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 			step.UsageOutput = tokens.Output
 		}
 
-		evts := []store.EventRecord{
-			{Type: domain.EventStepSucceeded, Payload: payload.StepResult(stepID, step.Kind, step.Target, tokens)},
-		}
-		if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
+		outcome := store.EventRecord{Type: domain.EventStepSucceeded, Payload: payload.StepResult(stepID, step.Kind, step.Target, tokens)}
+		if err := k.settleStepRecorded(ctx, req.Lease, step, outcome, req.Captures, req.CaptureFailures); err != nil {
 			return err
 		}
 		dec = domain.StepDecision{Decision: "recorded"}
@@ -610,10 +689,8 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 		step.Status = domain.StepFailed
 		step.Error = req.Error
 		step.CompletedAt = &now
-		evts := []store.EventRecord{
-			{Type: domain.EventStepFailed, Payload: payload.StepError(stepID, step.Kind, step.Target, req.Error)},
-		}
-		if err := k.writeStepRecorded(ctx, req.Lease, step, evts); err != nil {
+		outcome := store.EventRecord{Type: domain.EventStepFailed, Payload: payload.StepError(stepID, step.Kind, step.Target, req.Error)}
+		if err := k.settleStepRecorded(ctx, req.Lease, step, outcome, req.Captures, req.CaptureFailures); err != nil {
 			return err
 		}
 		dec = domain.StepDecision{Decision: "recorded"}
@@ -627,10 +704,10 @@ func (k *Kernel) failStepInternal(ctx context.Context, lease domain.Lease, step 
 	step.Status = domain.StepFailed
 	step.Error = errPayload
 	step.CompletedAt = &now
-	evts := []store.EventRecord{
-		{Type: domain.EventStepFailed, Payload: payload.StepError(step.StepID, step.Kind, step.Target, errPayload)},
-	}
-	return k.writeStepLive(ctx, lease, step, evts)
+	outcome := store.EventRecord{Type: domain.EventStepFailed, Payload: payload.StepError(step.StepID, step.Kind, step.Target, errPayload)}
+	return k.settleStep(ctx, step, outcome, func(tx store.TxStore) error {
+		return renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC())
+	}, nil, nil)
 }
 
 func (k *Kernel) GetStep(ctx context.Context, stepID string) (domain.Step, error) {

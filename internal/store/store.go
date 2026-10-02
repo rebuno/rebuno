@@ -43,6 +43,14 @@ type ExecutionStore interface {
 	DeleteUnreferencedChunks(ctx context.Context) error
 }
 
+type ResourceStore interface {
+	PutResource(ctx context.Context, r domain.Resource) error
+	ListResources(ctx context.Context, execID uuid.UUID) ([]domain.Resource, error)
+	AddCheckpoint(ctx context.Context, c domain.ResourceCheckpoint) error
+	ListCheckpoints(ctx context.Context, execID uuid.UUID) ([]domain.ResourceCheckpoint, error)
+	InvalidateCheckpoints(ctx context.Context, execID uuid.UUID, key string, seq int64) error
+}
+
 type AgentStore interface {
 	RegisterAgent(ctx context.Context, agent domain.Agent) error
 	GetAgent(ctx context.Context, id string) (domain.Agent, error)
@@ -91,6 +99,7 @@ type TxStore interface {
 	EventStore
 	StepStore
 	ExecutionStore
+	ResourceStore
 	ApprovalStore
 	JobQueue
 }

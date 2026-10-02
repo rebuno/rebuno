@@ -22,6 +22,7 @@ type ClientKernel interface {
 	GetEvents(ctx context.Context, id uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error)
 	CancelExecution(ctx context.Context, id uuid.UUID) error
 	ForkExecution(ctx context.Context, id uuid.UUID, req kernel.ForkRequest) (domain.Execution, error)
+	ForkPoints(ctx context.Context, id uuid.UUID) (kernel.ForkPoints, error)
 }
 
 type CreateExecutionRequest struct {
@@ -111,6 +112,20 @@ func (rt *Router) forkExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, exec, http.StatusCreated)
+}
+
+func (rt *Router) forkPoints(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
+	points, err := rt.client.ForkPoints(r.Context(), id)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteJSON(w, points, http.StatusOK)
 }
 
 func (rt *Router) previousState(w http.ResponseWriter, r *http.Request) {

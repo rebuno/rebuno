@@ -61,6 +61,7 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(bearer(domain.ScopeExecutionsRead)).Get("/v0/executions/{id}/stream", r.streamExecution)
 	mux.With(bearer(domain.ScopeExecutionsWrite)).Post("/v0/executions/{id}/cancel", r.cancelExecution)
 	mux.With(bearer(domain.ScopeExecutionsWrite)).Post("/v0/executions/{id}/fork", r.forkExecution)
+	mux.With(bearer(domain.ScopeExecutionsRead)).Get("/v0/executions/{id}/fork-points", r.forkPoints)
 
 	mux.With(dual).Get("/v0/executions/{id}/steps", r.listSteps)
 	mux.With(dual).Get("/v0/executions/{id}/steps/{step_id}", r.getStep)
@@ -71,6 +72,9 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(hmac).Post("/v0/executions/{id}/heartbeat", r.heartbeat)
 	mux.With(hmac).Post("/v0/executions/{id}/complete", r.agentCompleteExecution)
 	mux.With(hmac).Post("/v0/executions/{id}/fail", r.agentFailExecution)
+	mux.With(hmac).Post("/v0/executions/{id}/resources", r.registerResource)
+	mux.With(hmac).Post("/v0/executions/{id}/resources/checkpoints", r.publishCheckpoints)
+	mux.With(hmac).Post("/v0/executions/{id}/resources/{key}/binding", r.bindResource)
 
 	mux.With(bearer(domain.ScopeAgentsWrite)).Post("/v0/agents", r.registerAgent)
 	mux.With(bearer(domain.ScopeAgentsRead)).Get("/v0/agents", r.listAgents)

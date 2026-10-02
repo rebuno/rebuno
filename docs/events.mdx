@@ -39,7 +39,7 @@ execution continues an earlier one in its session.
 | Type | When |
 |------|------|
 | `execution.created` | Client created the execution. |
-| `execution.forked` | The execution was forked from another. Payload carries `source_execution_id`, `fork_seq`, and `policy_override`. |
+| `execution.forked` | Fork created. Payload carries `source_execution_id`, `fork_seq`, `policy_override`, and resource `restoration` when present. |
 | `execution.started` | The execution began running and its first dispatch is queued. |
 | `execution.blocked` | Paused on a human approval. |
 | `execution.resumed` | An approval was granted, denied, or expired, and work continues. |
@@ -59,7 +59,7 @@ LLM call, or a local step.
 | `step.denied` | Policy denied it, or an approval was denied or expired. |
 | `step.awaiting_approval` | Policy requires a human decision, and an approval was created. |
 | `step.rate_limited` | A rule's rate limit refused or parked it. No step row is written. |
-| `step.executing` | Written before the external call runs, as the durable intent to act. |
+| `step.executing` | Written before the external call runs. Resource changes carry `resources` keys and their `generations`, including on retries. |
 | `step.succeeded` | Terminal. An `llm_call` also carries `usage` when token counts were found in the response. |
 | `step.failed` | Terminal, with the recorded `error`. |
 | `step.cancelled` | Terminal. The execution was cancelled while the step was in flight, so whether the effect ran is unknown. |
@@ -70,6 +70,18 @@ where it is known) and carry decision context (`rule_id`, `error`, and the
 not in the payload. The result of a tool call, and the request and response bodies
 of an `llm_call`, live on the step itself, so fetch them with
 `GET /v0/executions/{id}/steps/{step_id}`.
+
+## Resource events
+
+Resource payloads carry `key`.
+
+| Type | When |
+|------|------|
+| `resource.registered` | Registration with `driver_id`, `configuration`, `coverage_reuse`, `every_steps`, and `on_completion`. |
+| `resource.initialized` | Fork initialization with `generation` and optional `checkpoint_ref`; no reference means initial state. |
+| `resource.bound` | Physical resource assigned, with its `binding`. |
+| `resource.checkpointed` | Capture accepted, with `generation`, `checkpoint_ref`, and coverage start `covered_seq`. |
+| `resource.checkpoint_failed` | Capture failed or refused, with `generation` and `error`. |
 
 ## Approval events
 
