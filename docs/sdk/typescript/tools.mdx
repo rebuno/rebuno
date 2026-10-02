@@ -31,6 +31,10 @@ unchanged. Hand tools to a framework as a plain array:
 const agent = createAgent(llm, [search, ...]);
 ```
 
+`resources` names the external resources the tool may change.
+Defaults to none.
+`wrapTool` accepts the same option. See [Resources](/sdk/typescript/resources).
+
 ### Idempotency
 
 `idempotency` controls whether a tool may run again when a dispatch replays.

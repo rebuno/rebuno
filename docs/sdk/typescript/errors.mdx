@@ -36,6 +36,7 @@ RebunoError
 │  ├─ PolicyError          403  denied by policy (carries .ruleId)
 │  └─ LeaseSuperseded      409  internal: a newer attempt owns this dispatch
 ├─ ToolError               a tool's effect body failed (carries .toolId, .stepId)
+├─ CheckpointUnavailable   a selected resource checkpoint is expired or gone
 ├─ RateLimited             a step was rejected by a policy rate limit
 ├─ Blocked                 internal: a step is awaiting approval
 └─ Terminated              internal: the execution is terminal (e.g. cancelled)
@@ -61,6 +62,11 @@ when it reaches the handler boundary.
 ### `RateLimited`
 
 A step was rejected because a policy rate limit was exceeded. Carries `.reason`.
+
+### `CheckpointUnavailable`
+
+Thrown by a resource driver when a selected checkpoint is expired or missing.
+It fails the forked execution at the handler boundary.
 
 ### `Blocked`, `Terminated`, and `LeaseSuperseded`
 
@@ -96,4 +102,5 @@ for the backstops that cover a handler which swallows one.
 `RebunoError`, `APIError`, `ValidationError`, `UnauthorizedError`,
 `ForbiddenError`, `NotFoundError`, `ConflictError`, `PolicyError`, `ToolError`,
 `RateLimited`, `Blocked`, `Terminated`, `LeaseSuperseded`, `NetworkError`,
-`raiseForRefusal`, and `failureReason` are all importable from `rebuno`.
+`CheckpointUnavailable`, `raiseForRefusal`, and `failureReason` are all importable
+from `rebuno`.

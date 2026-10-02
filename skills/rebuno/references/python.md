@@ -77,6 +77,11 @@ For custom transports and streaming, consult
 - `step(name, fn, args=None, idempotency="safe_to_retry")` calls `fn(**args)`.
   For example, after importing `time` and `step`,
   `await step("timestamp", time.time)` records a stable value. Use JSON data.
+- For external state a fork must restore, such as a sandbox, call
+  `await resource("workspace", driver=..., checkpoints=CheckpointPolicy(every_steps=5))`
+  in the handler and declare writers with `@tool(..., resources=["workspace"])`.
+  `resources` defaults to none. See
+  [Resources](https://github.com/rebuno/rebuno/blob/main/docs/sdk/python/resources.mdx).
 - Offload blocking work with `asyncio.to_thread` so lease heartbeats run.
   Await effects within the handler's lifetime.
 

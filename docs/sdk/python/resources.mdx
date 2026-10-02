@@ -1,0 +1,153 @@
+---
+title: "Resources"
+description: "Checkpoint external state so a fork can restore it"
+---
+
+A resource is external state, such as a sandbox. `resource()` returns a handle
+that the SDK checkpoints during execution and restores in a fork.
+
+This example uses [LangChain](/sdk/python/frameworks/langchain) and the E2B
+driver below:
+
+```python agent.py
+import os
+
+from langchain.agents import create_agent
+from langchain_openai import ChatOpenAI
+from rebuno import Agent, CheckpointPolicy, http_client, resource, tool
+from workspace_resource import E2BResource
+
+
+async def process(task: str) -> dict:
+    workspace = await resource(
+        "workspace",
+        driver=E2BResource(timeout=600),
+        checkpoints=CheckpointPolicy(every_steps=5),
+    )
+
+    @tool("write_file", resources=["workspace"])
+    async def write_file(path: str, content: str) -> str:
+        """Write a file in the workspace."""
+        await workspace.files.write(path, content)
+        return f"wrote {path}"
+
+    @tool("read_file")
+    async def read_file(path: str) -> str:
+        """Read a file from the workspace."""
+        return await workspace.files.read(path)
+
+    model = ChatOpenAI(
+        model=os.environ["LLM_MODEL"], http_async_client=http_client(),
+    )
+    graph = create_agent(model=model, tools=[read_file, write_file])
+    result = await graph.ainvoke({"messages": [{"role": "user", "content": task}]})
+    return {"answer": result["messages"][-1].content}
+
+
+if __name__ == "__main__":
+    Agent("coder").run(process, port=5000)
+```
+
+On first use, the SDK creates the resource from its initial environment or the
+fork's selected checkpoint. Later dispatches open the recorded binding. Calls
+with the same key within a dispatch return the same handle. The SDK captures a
+baseline if no checkpoint covers the starting state.
+
+Keep sandbox IDs in bindings; tool arguments and results replay across forks,
+which use different sandboxes.
+
+## Declaring what a step changes
+
+`resources` on `@tool`, `wrap_tool`, and `step()` identifies what the call may change:
+
+- Default: none.
+- `["workspace"]`: the named resource.
+
+Tools and local steps run one at a time while an execution has resources.
+
+## Checkpoint policy
+
+Each resource has its own policy, preserved across dispatches and forks:
+
+| Option | Default | When to capture |
+|--------|---------|-----------------|
+| `every_steps=N` | `1` | After every Nth live tool call or local step affecting the resource. N must be positive. |
+| `on_completion` | `True` | When the handler returns normally, if the resource is uncovered. |
+
+Failed calls and calls cancelled after starting count. Replay, denied calls,
+and LLM calls do not. A due capture runs after the body and before its outcome
+returns. Capture failure leaves that outcome intact and the resource uncovered.
+
+## Writing a driver
+
+Pass an object with these members:
+
+| Member | Purpose |
+|--------|---------|
+| `driver_id` | Stable identifier for the implementation. |
+| `configuration` | Optional JSON settings, excluding credentials. |
+| `create(checkpoint_ref=None)` | Create an isolated resource from the checkpoint or initial environment; return `(handle, binding)`. |
+| `open(binding)` | Return a handle for the existing resource. |
+| `checkpoint(handle)` | Return an immutable checkpoint reference and leave the handle usable. |
+
+The kernel stores the JSON binding and checkpoint references; the provider
+stores the captured contents. Keep `driver_id` and `configuration` stable for
+each resource key.
+
+<Expandable title="E2B driver">
+
+```python workspace_resource.py
+from e2b import AsyncSandbox
+
+
+class E2BHandle:
+    def __init__(self, sandbox):
+        self.sandbox = sandbox
+
+    @property
+    def files(self):
+        return self.sandbox.files
+
+
+class E2BResource:
+    driver_id = "example.e2b.v1"
+
+    def __init__(self, timeout=600):
+        self.timeout = timeout
+
+    @property
+    def configuration(self):
+        return {"timeout": self.timeout}
+
+    async def create(self, checkpoint_ref=None):
+        sandbox = await AsyncSandbox.create(checkpoint_ref, timeout=self.timeout)
+        return E2BHandle(sandbox), {"sandbox_id": sandbox.sandbox_id}
+
+    async def open(self, binding):
+        sandbox = await AsyncSandbox.connect(binding["sandbox_id"], timeout=self.timeout)
+        return E2BHandle(sandbox)
+
+    async def checkpoint(self, handle):
+        snapshot = await handle.sandbox.create_snapshot()
+        handle.sandbox = await AsyncSandbox.connect(handle.sandbox.sandbox_id, timeout=self.timeout)
+        return snapshot.snapshot_id
+```
+
+The handle keeps its identity while `checkpoint` replaces the client connection.
+
+</Expandable>
+
+## Fork coverage
+
+A fork point is covered when every registered resource has matching captured
+state. Every event can be forked. An uncovered fork uses the newest earlier
+checkpoint, or the initial environment if none exists; copied results still
+replay and may describe changes absent from the restored state.
+
+By default, coverage ends at the next live step. A driver can set
+`coverage_reuse = True` to keep it until an affecting tool or local step starts.
+Use this when all changes happen through declared tools and steps.
+
+A driver raises [`CheckpointUnavailable`](/sdk/python/errors#checkpointunavailable)
+if the selected checkpoint is expired or missing, failing the forked execution.
+See [Forks](/architecture#external-resources) for the kernel flow.

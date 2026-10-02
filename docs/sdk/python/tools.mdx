@@ -56,6 +56,17 @@ async def send_email(to: str, body: str) -> None:
     ...
 ```
 
+### Resources
+
+`resources` names the [external resources](/sdk/python/resources#declaring-what-a-step-changes)
+a tool may change. Defaults to none.
+
+```python
+@tool("write_file", resources=["workspace"])
+async def write_file(path: str, content: str) -> str:
+    ...
+```
+
 ### Denied calls
 
 A tool denied by policy does not raise. `@tool` and `wrap_tool` catch the

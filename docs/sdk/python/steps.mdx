@@ -30,6 +30,7 @@ async def step(
     fn: Callable[..., Any],
     args: dict[str, Any] | None = None,
     idempotency: str = "safe_to_retry",
+    resources: list[str] | None = None,
 ) -> Any
 ```
 
@@ -41,6 +42,8 @@ async def step(
 - `idempotency` mirrors [`@tool`](/sdk/python/tools#idempotency): `safe_to_retry`
   (default) for reads and non-determinism, `at_most_once` for local side effects
   that must not re-run on resume.
+- `resources` names the [registered resources](/sdk/python/resources#declaring-what-a-step-changes)
+  `fn` may change. Defaults to none.
 
 The result has to be JSON-serializable, since it's recorded.
 

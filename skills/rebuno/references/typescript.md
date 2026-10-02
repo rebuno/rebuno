@@ -80,6 +80,11 @@ For streaming and transport details, consult
   stable value. Use JSON arguments/results.
 - Offload blocking work to a worker so lease heartbeats run; await effects
   within the handler's lifetime.
+- For external state a fork must restore, call
+  `await resource("workspace", { driver, checkpoints: { everySteps: 5 } })`
+  in the handler and declare writers with `resources: ["workspace"]` on tools.
+  `resources` defaults to none. See
+  [Resources](https://github.com/rebuno/rebuno/blob/main/docs/sdk/typescript/resources.mdx).
 
 Backend code uses `new Client()`, then
 `await client.create("my-agent", { query: "hello" })`. Creation returns before

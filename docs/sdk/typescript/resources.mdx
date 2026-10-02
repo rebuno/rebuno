@@ -1,0 +1,175 @@
+---
+title: "Resources"
+description: "Checkpoint external state so a fork can restore it"
+---
+
+A resource is external state, such as a sandbox. `resource()` returns a handle
+that the SDK checkpoints during execution and restores in a fork.
+
+This example uses the [Vercel AI SDK](/sdk/typescript/frameworks/vercel-ai-sdk)
+and the E2B driver below. Install `e2b` and set `E2B_API_KEY` for sandbox access.
+
+```ts agent.ts
+import { env } from "node:process";
+import { createOpenAI } from "@ai-sdk/openai";
+import { generateText, stepCountIs, tool } from "ai";
+import { Agent, defineTool, rebunoFetch, resource } from "rebuno";
+import { z } from "zod";
+import { E2BResource } from "./workspace-resource.js";
+
+async function process(input: { task: string }) {
+  const workspace = await resource("workspace", {
+    driver: new E2BResource(600_000),
+    checkpoints: { everySteps: 5 },
+  });
+  const writeFile = defineTool({
+    name: "write_file",
+    resources: ["workspace"],
+    execute: async ({ path, content }: { path: string; content: string }) => {
+      await workspace.files.write(path, content);
+      return `wrote ${path}`;
+    },
+  });
+  const readFile = defineTool({
+    name: "read_file",
+    execute: ({ path }: { path: string }) => workspace.files.read(path),
+  });
+  const modelName = env.LLM_MODEL;
+  if (!modelName) throw new Error("LLM_MODEL is required");
+  const openai = createOpenAI({ fetch: rebunoFetch });
+  const result = await generateText({
+    model: openai(modelName),
+    prompt: input.task,
+    tools: {
+      write_file: tool({
+        description: "Write a file in the workspace.",
+        inputSchema: z.object({ path: z.string(), content: z.string() }),
+        execute: (args) => writeFile(args),
+      }),
+      read_file: tool({
+        description: "Read a file from the workspace.",
+        inputSchema: z.object({ path: z.string() }),
+        execute: (args) => readFile(args),
+      }),
+    },
+    stopWhen: stepCountIs(12),
+  });
+  return { answer: result.text };
+}
+
+await new Agent("coder").serve({ port: 5000 }, process);
+```
+
+On first use, the SDK creates the resource from its initial environment or the
+fork's selected checkpoint. Later dispatches open the recorded binding. Calls
+with the same key within a dispatch return the same handle. The SDK captures a
+baseline if no checkpoint covers the starting state.
+
+Keep sandbox IDs in bindings; tool arguments and results replay across forks,
+which use different sandboxes.
+
+## Declaring what a step changes
+
+`resources` on `defineTool`, `wrapTool`, and `step()` identifies what the call
+may change:
+
+- Default: none.
+- `["workspace"]`: the named resource.
+
+Tools and local steps run one at a time while an execution has resources.
+
+## Checkpoint policy
+
+Pass a `checkpoints` options object for each resource. The kernel preserves its
+policy across dispatches and forks:
+
+| Option | Default | When to capture |
+|--------|---------|-----------------|
+| `everySteps` | `1` | After every Nth live tool call or local step affecting the resource. N must be a positive integer. |
+| `onCompletion` | `true` | When the handler returns normally, if the resource is uncovered. |
+
+Failed calls and calls cancelled after starting count. Replay, denied calls,
+and LLM calls do not. A due capture runs after the body and before its outcome
+returns. Capture failure leaves that outcome intact and the resource uncovered.
+
+## Writing a driver
+
+Pass an object implementing `ResourceDriver<Handle, Binding>`:
+
+| Member | Purpose |
+|--------|---------|
+| `driverId` | Stable identifier for the implementation. |
+| `configuration` | Optional JSON settings, excluding credentials. |
+| `create(checkpointRef?)` | Create an isolated resource from the checkpoint or initial environment; return `{ handle, binding }`. |
+| `open(binding)` | Return a handle for the existing resource. |
+| `checkpoint(handle)` | Return an immutable checkpoint reference and leave the handle usable. |
+
+Methods can return values or promises. `resource()` infers the handle type from
+the driver. The kernel stores the JSON binding and checkpoint references; the
+driver stores the captured contents. Keep `driverId` and `configuration` stable
+for each resource key.
+
+<Expandable title="E2B driver">
+
+```ts workspace-resource.ts
+import { Sandbox, SandboxError } from "e2b";
+import { CheckpointUnavailable, type ResourceDriver } from "rebuno";
+
+class E2BHandle {
+  constructor(public sandbox: Sandbox) {}
+
+  get files() { return this.sandbox.files; }
+}
+
+export class E2BResource implements ResourceDriver<E2BHandle, { sandboxId: string }> {
+  driverId = "example.e2b.v1";
+
+  constructor(private timeoutMs = 600_000) {}
+
+  get configuration() { return { timeoutMs: this.timeoutMs }; }
+
+  async create(checkpointRef?: string) {
+    try {
+      const sandbox = await Sandbox.create(checkpointRef ?? "base", {
+        timeoutMs: this.timeoutMs,
+      });
+      return { handle: new E2BHandle(sandbox), binding: { sandboxId: sandbox.sandboxId } };
+    } catch (error) {
+      if (checkpointRef && error instanceof SandboxError && error.statusCode === 404)
+        throw new CheckpointUnavailable(`checkpoint missing: ${checkpointRef}`);
+      throw error;
+    }
+  }
+
+  async open(binding: { sandboxId: string }) {
+    const sandbox = await Sandbox.connect(binding.sandboxId, { timeoutMs: this.timeoutMs });
+    return new E2BHandle(sandbox);
+  }
+
+  async checkpoint(handle: E2BHandle) {
+    const snapshot = await handle.sandbox.createSnapshot();
+    handle.sandbox = await Sandbox.connect(handle.sandbox.sandboxId, { timeoutMs: this.timeoutMs });
+    return snapshot.snapshotId;
+  }
+}
+```
+
+[E2B snapshots](https://docs.e2b.dev/sandbox/snapshots) drop active connections.
+The handle keeps its identity while `checkpoint` refreshes the client.
+
+</Expandable>
+
+## Fork coverage
+
+A fork point is covered when every registered resource has matching captured
+state. Every event can be forked. An uncovered fork uses the newest earlier
+checkpoint, or the initial environment if none exists; copied results still
+replay and may describe changes absent from the restored state.
+
+By default, coverage ends at the next live step. A driver can set
+`coverageReuse = true` to keep it until an affecting tool or local step starts.
+Use this when all changes happen through declared tools and steps.
+
+A driver throws [`CheckpointUnavailable`](/sdk/typescript/errors#checkpointunavailable)
+if the selected checkpoint is expired or missing, failing the forked execution.
+See [Forks](/architecture#external-resources) for the kernel flow.

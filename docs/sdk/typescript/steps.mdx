@@ -28,6 +28,7 @@ function step<T>(
   fn: (args: Record<string, unknown>) => T | Promise<T>,
   args?: Record<string, unknown>,                   // default {}
   idempotency?: "safe_to_retry" | "at_most_once",   // default "safe_to_retry"
+  resources?: string[],                          // default none
 ): Promise<T>
 ```
 
@@ -40,6 +41,8 @@ function step<T>(
 - `idempotency` mirrors [`defineTool`](/sdk/typescript/tools#idempotency): `safe_to_retry`
   (default) for reads and non-determinism, `at_most_once` for local side effects
   that must not re-run on resume.
+- `resources` names the [resources](/sdk/typescript/resources) the work may
+  change. Defaults to none.
 
 The result has to be JSON-serializable, since it's recorded.
 
