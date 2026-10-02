@@ -345,6 +345,10 @@ policy. Differences in `driver_id`, `configuration`, or `coverage_reuse` return
 | `checkpoint_ref` | Fork starting checkpoint, absent for initial state. |
 | `covered` | Whether the current state has checkpoint coverage. |
 
+Session turns inherit their completed parent's registrations, policies, and
+bindings. `generation` and `count` start at zero; `covered` is false until a
+baseline is captured.
+
 `POST /v0/executions/{id}/resources/{key}/binding` · HMAC · dispatch headers → `204`
 
 Takes `{ "binding": {...} }`. A different binding for an already bound resource

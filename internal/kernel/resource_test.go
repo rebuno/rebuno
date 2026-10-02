@@ -87,6 +87,114 @@ func forkPointCovered(t *testing.T, k *kernel.Kernel, ctx context.Context, id uu
 	return true
 }
 
+func TestSessionContinuesResourceBindingsAndForksRestoreSeparately(t *testing.T) {
+	onEachBackend(t, func(t *testing.T, k *kernel.Kernel, ctx context.Context) {
+		first := createInSession(t, k, ctx, "agent-1", "main")
+		onCompletion := false
+		policy := kernel.RegisterResourceRequest{EverySteps: 3, OnCompletion: &onCompletion}
+		registerWorkspace(t, k, ctx, first.ID, policy)
+		binding := json.RawMessage(`{"sandbox_id":"original"}`)
+		if err := k.BindResource(ctx, first.ID, "workspace", kernel.BindResourceRequest{
+			Binding: binding, Lease: leaseOf(t, k, first.ID),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := k.RegisterResource(ctx, first.ID, kernel.RegisterResourceRequest{
+			Key: "database", DriverID: "database.v1", Lease: leaseOf(t, k, first.ID),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := k.BindResource(ctx, first.ID, "database", kernel.BindResourceRequest{
+			Binding: json.RawMessage(`{"database":"original"}`), Lease: leaseOf(t, k, first.ID),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		publish(t, k, ctx, first.ID, 0, "first-baseline")
+		completeTool(t, k, ctx, first.ID, submitTool(t, k, ctx, first.ID, "write", []string{"workspace"}), "")
+		second := createInSession(t, k, ctx, "agent-1", "main")
+		if err := k.CompleteExecution(ctx, first.ID, leaseOf(t, k, first.ID), json.RawMessage(`{}`), nil); err != nil {
+			t.Fatal(err)
+		}
+
+		view := registerWorkspace(t, k, ctx, second.ID, kernel.RegisterResourceRequest{})
+		if string(view.Binding) != string(binding) || view.CheckpointRef != "" || view.Covered {
+			t.Fatalf("continued workspace: %+v", view)
+		}
+		if view.Count != 0 || view.Generation != 0 || view.EverySteps != 3 || view.OnCompletion {
+			t.Fatalf("continued policy and progress: %+v", view)
+		}
+		database, err := k.RegisterResource(ctx, second.ID, kernel.RegisterResourceRequest{
+			Key: "database", DriverID: "database.v1", Lease: leaseOf(t, k, second.ID),
+		})
+		if err != nil || string(database.Binding) != `{"database":"original"}` {
+			t.Fatalf("continued database: %+v, %v", database, err)
+		}
+		if err := k.PublishCheckpoints(ctx, second.ID, kernel.PublishCheckpointsRequest{
+			Captures: []kernel.ResourceCapture{
+				{Key: "workspace", CheckpointRef: "second-workspace"},
+				{Key: "database", CheckpointRef: "second-database"},
+			},
+			Lease: leaseOf(t, k, second.ID),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		fork, err := k.ForkExecution(ctx, second.ID, kernel.ForkRequest{AtSeq: latestSeq(t, k, ctx, second.ID), Session: "branch"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		view = registerWorkspace(t, k, ctx, fork.ID, policy)
+		if view.Binding != nil || view.CheckpointRef != "second-workspace" || !view.Covered {
+			t.Fatalf("forked workspace: %+v", view)
+		}
+		forkBinding := json.RawMessage(`{"sandbox_id":"fork"}`)
+		if err := k.BindResource(ctx, fork.ID, "workspace", kernel.BindResourceRequest{
+			Binding: forkBinding, Lease: leaseOf(t, k, fork.ID),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := k.CompleteExecution(ctx, fork.ID, leaseOf(t, k, fork.ID), json.RawMessage(`{}`), nil); err != nil {
+			t.Fatal(err)
+		}
+		followup := createInSession(t, k, ctx, "agent-1", "branch")
+		view = registerWorkspace(t, k, ctx, followup.ID, policy)
+		if string(view.Binding) != string(forkBinding) || view.CheckpointRef != "" || view.Covered {
+			t.Fatalf("fork session continuation: %+v", view)
+		}
+		view = registerWorkspace(t, k, ctx, second.ID, policy)
+		if string(view.Binding) != string(binding) {
+			t.Fatalf("source binding after the fork: %+v", view)
+		}
+	})
+}
+
+func TestSessionResourceBindingsStayWithinTheirAgentAndSession(t *testing.T) {
+	onEachBackend(t, func(t *testing.T, k *kernel.Kernel, ctx context.Context) {
+		source := createInSession(t, k, ctx, "agent-1", "main")
+		registerWorkspace(t, k, ctx, source.ID, kernel.RegisterResourceRequest{})
+		if err := k.BindResource(ctx, source.ID, "workspace", kernel.BindResourceRequest{
+			Binding: json.RawMessage(`{"sandbox_id":"source"}`), Lease: leaseOf(t, k, source.ID),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := k.CompleteExecution(ctx, source.ID, leaseOf(t, k, source.ID), json.RawMessage(`{}`), nil); err != nil {
+			t.Fatal(err)
+		}
+		otherAgent := createInSession(t, k, ctx, "agent-2", "main")
+		otherSession := createInSession(t, k, ctx, "agent-1", "other")
+		branched, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{
+			ParentExecutionID: &source.ID, Session: "branched",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, exec := range []domain.Execution{otherAgent, otherSession, branched} {
+			if view := registerWorkspace(t, k, ctx, exec.ID, kernel.RegisterResourceRequest{}); view.Binding != nil {
+				t.Fatalf("independent execution inherited a binding: %+v", view)
+			}
+		}
+	})
+}
+
 func TestForkRestoresEachResourceFromItsNewestCheckpointByTheForkPoint(t *testing.T) {
 	for _, backend := range []string{"memory", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

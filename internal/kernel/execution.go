@@ -261,6 +261,9 @@ func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec *d
 	if _, err := tx.Append(ctx, exec.ID, domain.EventExecutionStarted, started); err != nil {
 		return err
 	}
+	if err := inheritSessionResources(ctx, tx, *exec); err != nil {
+		return err
+	}
 	exec.Status = domain.ExecutionRunning
 	return k.enqueueDispatchTx(ctx, tx, exec.ID, time.Now().UTC())
 }

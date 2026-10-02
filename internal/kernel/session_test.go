@@ -320,6 +320,16 @@ func (admissionFaultTx) Enqueue(context.Context, domain.Dispatch) error {
 // Postgres only: memstore transactions do not roll back.
 func TestSessionAdmissionRollback(t *testing.T) {
 	k, _, ctx := sessionKernels(t, "postgres")
+	parent := createInSession(t, k, ctx, "agent-1", "session")
+	registerWorkspace(t, k, ctx, parent.ID, kernel.RegisterResourceRequest{})
+	if err := k.BindResource(ctx, parent.ID, "workspace", kernel.BindResourceRequest{
+		Binding: json.RawMessage(`{"sandbox_id":"parent"}`), Lease: leaseOf(t, k, parent.ID),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.CompleteExecution(ctx, parent.ID, leaseOf(t, k, parent.ID), json.RawMessage(`{}`), nil); err != nil {
+		t.Fatal(err)
+	}
 	deps := k.Deps()
 	fault := &admissionFault{UnitOfWork: deps.UnitOfWork}
 	fault.fail.Store(true)
@@ -335,11 +345,18 @@ func TestSessionAdmissionRollback(t *testing.T) {
 	if err != nil || len(ds) != 0 {
 		t.Fatalf("rollback dispatches: %+v, %v", ds, err)
 	}
+	points, err := k.ForkPoints(ctx, exec.ID)
+	if err != nil || len(points.Resources) != 0 {
+		t.Fatalf("rollback resources: %+v, %v", points, err)
+	}
 	fault.fail.Store(false)
 	if err := k.AdmitQueued(ctx); err != nil {
 		t.Fatal(err)
 	}
 	requireExecutionStatus(t, k, ctx, exec.ID, domain.ExecutionRunning)
+	if view := registerWorkspace(t, k, ctx, exec.ID, kernel.RegisterResourceRequest{}); string(view.Binding) != `{"sandbox_id":"parent"}` {
+		t.Fatalf("resource after admission: %+v", view)
+	}
 }
 
 func TestSessionRetentionPreservesNonterminalExecutions(t *testing.T) {

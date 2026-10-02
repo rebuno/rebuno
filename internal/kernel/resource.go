@@ -96,6 +96,54 @@ func resourceView(ctx context.Context, tx store.TxStore, r domain.Resource) (Res
 	return ResourceView{Resource: r, Covered: covered}, nil
 }
 
+func registerResourceTx(ctx context.Context, tx store.TxStore, r *domain.Resource) error {
+	events := []store.EventRecord{{Type: domain.EventResourceRegistered, Payload: map[string]any{
+		"key":            r.Key,
+		"driver_id":      r.DriverID,
+		"configuration":  r.Config,
+		"coverage_reuse": r.CoverageReuse,
+		"every_steps":    r.EverySteps,
+		"on_completion":  r.OnCompletion,
+	}}}
+	if len(r.Binding) > 0 {
+		events = append(events, store.EventRecord{Type: domain.EventResourceBound, Payload: map[string]any{
+			"key": r.Key, "binding": r.Binding,
+		}})
+	}
+	recorded, err := tx.AppendBatch(ctx, r.ExecutionID, events)
+	if err != nil {
+		return err
+	}
+	r.RegisteredSeq = recorded[0].EventSeq
+	return tx.PutResource(ctx, *r)
+}
+
+func inheritSessionResources(ctx context.Context, tx store.TxStore, exec domain.Execution) error {
+	if exec.Session == "" || exec.ParentExecutionID == nil || exec.ForkedFrom != nil {
+		return nil
+	}
+	parent, err := tx.GetExecution(ctx, *exec.ParentExecutionID)
+	if err != nil {
+		return err
+	}
+	if parent.Session != exec.Session {
+		return nil
+	}
+	resources, err := tx.ListResources(ctx, parent.ID)
+	if err != nil {
+		return err
+	}
+	for _, r := range resources {
+		r.ExecutionID = exec.ID
+		r.Generation, r.Count = 0, 0
+		r.CheckpointRef = ""
+		if err := registerResourceTx(ctx, tx, &r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (k *Kernel) RegisterResource(ctx context.Context, execID uuid.UUID, req RegisterResourceRequest) (ResourceView, error) {
 	if !resourceKeyPattern.MatchString(req.Key) {
 		return ResourceView{}, fmt.Errorf("%w: key must match %s", domain.ErrValidation, resourceKeyPattern)
@@ -140,20 +188,11 @@ func (k *Kernel) RegisterResource(ctx context.Context, execID uuid.UUID, req Reg
 			EverySteps:    req.EverySteps,
 			OnCompletion:  req.OnCompletion == nil || *req.OnCompletion,
 		}
-		ev, err := tx.Append(ctx, execID, domain.EventResourceRegistered, map[string]any{
-			"key":            r.Key,
-			"driver_id":      r.DriverID,
-			"configuration":  r.Config,
-			"coverage_reuse": r.CoverageReuse,
-			"every_steps":    r.EverySteps,
-			"on_completion":  r.OnCompletion,
-		})
-		if err != nil {
+		if err := registerResourceTx(ctx, tx, &r); err != nil {
 			return err
 		}
-		r.RegisteredSeq = ev.EventSeq
 		view = ResourceView{Resource: r}
-		return tx.PutResource(ctx, r)
+		return nil
 	})
 	return view, err
 }

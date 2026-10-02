@@ -49,9 +49,10 @@ if __name__ == "__main__":
 ```
 
 On first use, the SDK creates the resource from its initial environment or the
-fork's selected checkpoint. Later dispatches open the recorded binding. Calls
-with the same key within a dispatch return the same handle. The SDK captures a
-baseline if no checkpoint covers the starting state.
+fork's selected checkpoint. Later dispatches reopen the recorded binding.
+Session turns reuse their completed parent's binding and start a new checkpoint
+count. Calls with the same key within a dispatch return the same handle. The SDK
+captures a baseline when the starting state is uncovered.
 
 Keep sandbox IDs in bindings; tool arguments and results replay across forks,
 which use different sandboxes.
@@ -67,7 +68,8 @@ Tools and local steps run one at a time while an execution has resources.
 
 ## Checkpoint policy
 
-Each resource has its own policy, preserved across dispatches and forks:
+Each resource has its own policy, preserved across dispatches, session turns,
+and forks:
 
 | Option | Default | When to capture |
 |--------|---------|-----------------|
