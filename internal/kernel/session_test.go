@@ -354,9 +354,8 @@ func TestSessionAdmissionRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireExecutionStatus(t, k, ctx, exec.ID, domain.ExecutionRunning)
-	if view := registerWorkspace(t, k, ctx, exec.ID, kernel.RegisterResourceRequest{}); string(view.Binding) != `{"sandbox_id":"parent"}` {
-		t.Fatalf("resource after admission: %+v", view)
-	}
+	view := registerWorkspace(t, k, ctx, exec.ID, kernel.RegisterResourceRequest{})
+	requireJSON(t, view.Binding, `{"sandbox_id":"parent"}`)
 }
 
 func TestSessionRetentionPreservesNonterminalExecutions(t *testing.T) {
@@ -455,15 +454,20 @@ func requirePreviousState(t *testing.T, k *kernel.Kernel, ctx context.Context, i
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireJSON(t, raw, want)
+}
+
+func requireJSON(t *testing.T, raw json.RawMessage, want string) {
+	t.Helper()
 	var got, expected any
 	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("previous state %s: %v", raw, err)
+		t.Fatalf("JSON %s: %v", raw, err)
 	}
 	if err := json.Unmarshal([]byte(want), &expected); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, expected) {
-		t.Fatalf("previous state: want %s, got %s", want, raw)
+		t.Fatalf("JSON: want %s, got %s", want, raw)
 	}
 }
 

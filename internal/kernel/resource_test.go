@@ -117,18 +117,20 @@ func TestSessionContinuesResourceBindingsAndForksRestoreSeparately(t *testing.T)
 		}
 
 		view := registerWorkspace(t, k, ctx, second.ID, kernel.RegisterResourceRequest{})
-		if string(view.Binding) != string(binding) || view.CheckpointRef != "" || view.Covered {
+		if view.CheckpointRef != "" || view.Covered {
 			t.Fatalf("continued workspace: %+v", view)
 		}
+		requireJSON(t, view.Binding, string(binding))
 		if view.Count != 0 || view.Generation != 0 || view.EverySteps != 3 || view.OnCompletion {
 			t.Fatalf("continued policy and progress: %+v", view)
 		}
 		database, err := k.RegisterResource(ctx, second.ID, kernel.RegisterResourceRequest{
 			Key: "database", DriverID: "database.v1", Lease: leaseOf(t, k, second.ID),
 		})
-		if err != nil || string(database.Binding) != `{"database":"original"}` {
-			t.Fatalf("continued database: %+v, %v", database, err)
+		if err != nil {
+			t.Fatal(err)
 		}
+		requireJSON(t, database.Binding, `{"database":"original"}`)
 		if err := k.PublishCheckpoints(ctx, second.ID, kernel.PublishCheckpointsRequest{
 			Captures: []kernel.ResourceCapture{
 				{Key: "workspace", CheckpointRef: "second-workspace"},
@@ -157,13 +159,12 @@ func TestSessionContinuesResourceBindingsAndForksRestoreSeparately(t *testing.T)
 		}
 		followup := createInSession(t, k, ctx, "agent-1", "branch")
 		view = registerWorkspace(t, k, ctx, followup.ID, policy)
-		if string(view.Binding) != string(forkBinding) || view.CheckpointRef != "" || view.Covered {
+		if view.CheckpointRef != "" || view.Covered {
 			t.Fatalf("fork session continuation: %+v", view)
 		}
+		requireJSON(t, view.Binding, string(forkBinding))
 		view = registerWorkspace(t, k, ctx, second.ID, policy)
-		if string(view.Binding) != string(binding) {
-			t.Fatalf("source binding after the fork: %+v", view)
-		}
+		requireJSON(t, view.Binding, string(binding))
 	})
 }
 
