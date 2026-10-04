@@ -12,12 +12,8 @@ const (
 	DecisionJudge           = "judge"
 )
 
-// Rule IDs for decisions the kernel makes without a policy rule. Policy tests
-// skip them.
-const (
-	RuleIndeterminateRetry = "__indeterminate_retry"
-	RuleForkEffect         = "__fork_effect"
-)
+// Policy tests skip decisions from the kernel's retry guard.
+const RuleIndeterminateRetry = "__indeterminate_retry"
 
 type PolicyResult struct {
 	Decision       string               `json:"decision" yaml:"decision"`

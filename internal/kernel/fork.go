@@ -47,6 +47,10 @@ func (k *Kernel) ForkExecution(ctx context.Context, sourceID uuid.UUID, req Fork
 			return domain.Execution{}, fmt.Errorf("%w: invalid policy bundle: %v", domain.ErrValidation, err)
 		}
 	}
+	policyBundle := req.PolicyBundle
+	if policyBundle == "" {
+		policyBundle = source.PolicyBundle
+	}
 
 	now := time.Now().UTC()
 	exec := domain.Execution{
@@ -58,7 +62,7 @@ func (k *Kernel) ForkExecution(ctx context.Context, sourceID uuid.UUID, req Fork
 		ForkSeq:           req.AtSeq,
 		Input:             source.Input,
 		Status:            domain.ExecutionPending,
-		PolicyBundle:      req.PolicyBundle,
+		PolicyBundle:      policyBundle,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}

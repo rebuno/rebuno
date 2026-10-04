@@ -181,8 +181,9 @@ running. Best-effort, never persisted, and separate from the event log. See
 
 Returns `201` with the new execution. The fork reruns the source's input and
 replays the steps it recorded up to event `at_seq`. `session` is optional and,
-when given, must have no executions yet. An optional `policy_bundle`
-governs the fork in place of the agent's bundle and requires `policies:write`.
+when given, must have no executions yet. The fork inherits the source's
+execution-specific policy bundle, falling back to the agent's bundle. An
+optional `policy_bundle` overrides that policy and requires `policies:write`.
 See [Forks](/architecture#forks).
 
 For registered [resources](/architecture#external-resources), `restoration`

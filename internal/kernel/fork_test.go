@@ -10,6 +10,7 @@ import (
 	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
+	"github.com/rebuno/rebuno/internal/policy"
 )
 
 func runStep(t *testing.T, k *kernel.Kernel, ctx context.Context, id uuid.UUID, target, idempotency, result string) domain.StepDecision {
@@ -86,32 +87,66 @@ func TestForkReplaysStepsRecordedBeforeTheForkPoint(t *testing.T) {
 	}
 }
 
-func TestForkRequiresApprovalForAtMostOnceEffects(t *testing.T) {
-	k, _, ctx := sessionKernels(t, "memory")
-	source := createInSession(t, k, ctx, "agent-1", "main")
-	at := latestSeq(t, k, ctx, source.ID)
-
-	fork, err := k.ForkExecution(ctx, source.ID, kernel.ForkRequest{AtSeq: at})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fork.Status != domain.ExecutionRunning || fork.Session != "" {
-		t.Fatalf("fork without a session: %+v", fork)
-	}
-	dec := runStep(t, k, ctx, fork.ID, "open_pr", "at_most_once", `"#43"`)
-	if dec.Decision != "blocked" || dec.ApprovalID == nil {
-		t.Fatalf("at_most_once effect: %+v", dec)
-	}
-	approval, err := k.GetApproval(ctx, *dec.ApprovalID)
-	if err != nil || approval.StepID != dec.StepID {
-		t.Fatalf("approval: %+v, %v", approval, err)
-	}
-	if err := k.GrantApproval(ctx, *dec.ApprovalID, kernel.GrantApprovalRequest{DecidedBy: "test"}); err != nil {
-		t.Fatal(err)
-	}
-	if dec := runStep(t, k, ctx, fork.ID, "search", "safe_to_retry", `{}`); dec.Decision != "proceed" {
-		t.Fatalf("safe_to_retry effect: %+v", dec)
-	}
+func TestForkAtMostOnceEffectsFollowAgentPolicy(t *testing.T) {
+	onEachBackend(t, func(t *testing.T, k *kernel.Kernel, ctx context.Context) {
+		bundle := `rules:
+  - id: allow-write
+    when:
+      target: write
+    then:
+      decision: allow
+  - id: deny-remove
+    when:
+      target: remove
+    then:
+      decision: deny
+  - id: approve-publish
+    when:
+      target: publish
+    then:
+      decision: require_approval
+`
+		if err := k.LoadPolicyBundle(ctx, "agent-1", bundle); err != nil {
+			t.Fatal(err)
+		}
+		deps := k.Deps()
+		deps.Policy = policy.NewBundleResolver(deps.Agents, policy.PermissiveEngine{}, nil)
+		k = kernel.New(kernel.DefaultConfig(), deps)
+		source := createInSession(t, k, ctx, "agent-1", "main")
+		runStep(t, k, ctx, source.ID, "write", "at_most_once", `"recorded"`)
+		at := latestSeq(t, k, ctx, source.ID)
+		for _, tc := range []struct{ target, decision string }{
+			{"write", "proceed"}, {"remove", "denied"}, {"publish", "blocked"},
+		} {
+			t.Run(tc.target, func(t *testing.T) {
+				fork, err := k.ForkExecution(ctx, source.ID, kernel.ForkRequest{AtSeq: at})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fork.Status != domain.ExecutionRunning || fork.Session != "" {
+					t.Fatalf("fork without a session: %+v", fork)
+				}
+				if dec := runStep(t, k, ctx, fork.ID, "write", "at_most_once", `{}`); dec.Decision != "replay" || string(dec.Result) != `"recorded"` {
+					t.Fatalf("copied effect: %+v", dec)
+				}
+				dec := runStep(t, k, ctx, fork.ID, tc.target, "at_most_once", `"new"`)
+				if dec.Decision != tc.decision {
+					t.Fatalf("live effect: %+v", dec)
+				}
+				if tc.decision == "blocked" {
+					if dec.ApprovalID == nil {
+						t.Fatal("missing policy approval")
+					}
+					if err := k.GrantApproval(ctx, *dec.ApprovalID, kernel.GrantApprovalRequest{DecidedBy: "test"}); err != nil {
+						t.Fatal(err)
+					}
+					if dec := runStep(t, k, ctx, fork.ID, tc.target, "at_most_once", `"approved"`); dec.Decision != "proceed" {
+						t.Fatalf("approved effect: %+v", dec)
+					}
+				}
+			})
+		}
+	})
 }
 
 func TestCreateContinuesANamedParent(t *testing.T) {
@@ -151,23 +186,48 @@ func TestCreateContinuesANamedParent(t *testing.T) {
 }
 
 func TestForkPolicyOverride(t *testing.T) {
-	k, _, ctx := sessionKernels(t, "memory")
-	source := createInSession(t, k, ctx, "agent-1", "main")
-	at := latestSeq(t, k, ctx, source.ID)
-	deny := "rules:\n  - id: no-search\n    when:\n      target: search\n    then:\n      decision: deny\n"
+	onEachBackend(t, func(t *testing.T, k *kernel.Kernel, ctx context.Context) {
+		source := createInSession(t, k, ctx, "agent-1", "main")
+		at := latestSeq(t, k, ctx, source.ID)
+		deny := "rules:\n  - id: no-search\n    when:\n      target: search\n    then:\n      decision: deny\n"
 
-	writer := auth.WithClient(ctx, []domain.Scope{domain.ScopeExecutionsWrite})
-	if _, err := k.ForkExecution(writer, source.ID, kernel.ForkRequest{Session: "strict", AtSeq: at, PolicyBundle: deny}); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("override without policies:write: %v", err)
-	}
-	fork, err := k.ForkExecution(ctx, source.ID, kernel.ForkRequest{Session: "strict", AtSeq: at, PolicyBundle: deny})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dec := runStep(t, k, ctx, fork.ID, "search", "safe_to_retry", `{}`); dec.Decision != "denied" {
-		t.Fatalf("fork under the override: %+v", dec)
-	}
-	if dec := runStep(t, k, ctx, source.ID, "search", "safe_to_retry", `{}`); dec.Decision != "proceed" {
-		t.Fatalf("source under the agent policy: %+v", dec)
-	}
+		writer := auth.WithClient(ctx, []domain.Scope{domain.ScopeExecutionsWrite})
+		if _, err := k.ForkExecution(writer, source.ID, kernel.ForkRequest{Session: "strict", AtSeq: at, PolicyBundle: deny}); !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("override without policies:write: %v", err)
+		}
+		fork, err := k.ForkExecution(ctx, source.ID, kernel.ForkRequest{Session: "strict", AtSeq: at, PolicyBundle: deny})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dec := runStep(t, k, ctx, fork.ID, "search", "at_most_once", `{}`); dec.Decision != "denied" {
+			t.Fatalf("fork under the override: %+v", dec)
+		}
+		if dec := runStep(t, k, ctx, source.ID, "search", "at_most_once", `{}`); dec.Decision != "proceed" {
+			t.Fatalf("source under the agent policy: %+v", dec)
+		}
+
+		forkAt := latestSeq(t, k, ctx, fork.ID)
+		inherited, err := k.ForkExecution(writer, fork.ID, kernel.ForkRequest{AtSeq: forkAt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dec := runStep(t, k, ctx, inherited.ID, "search", "at_most_once", `{}`); dec.Decision != "denied" {
+			t.Fatalf("copied denial: %+v", dec)
+		}
+		if dec := runStep(t, k, ctx, inherited.ID, "search", "at_most_once", `{}`); dec.Decision != "denied" {
+			t.Fatalf("live call under the inherited policy: %+v", dec)
+		}
+
+		allow := "rules:\n  - id: allow-search\n    when:\n      target: search\n    then:\n      decision: allow\n"
+		replaced, err := k.ForkExecution(ctx, fork.ID, kernel.ForkRequest{AtSeq: forkAt, PolicyBundle: allow})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if dec := runStep(t, k, ctx, replaced.ID, "search", "at_most_once", `{}`); dec.Decision != "denied" {
+			t.Fatalf("copied denial under the override: %+v", dec)
+		}
+		if dec := runStep(t, k, ctx, replaced.ID, "search", "at_most_once", `{}`); dec.Decision != "proceed" {
+			t.Fatalf("live call under the override: %+v", dec)
+		}
+	})
 }

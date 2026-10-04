@@ -154,16 +154,6 @@ func (k *Kernel) decideStep(
 	if err != nil {
 		return domain.StepDecision{}, false, err
 	}
-	if polResult.Decision == domain.DecisionAllow && exec.ForkSeq > 0 && req.Idempotency == "at_most_once" {
-		polResult = domain.PolicyResult{
-			Decision: domain.DecisionRequireApproval,
-			Reason:   "forked_effect",
-			RuleID:   domain.RuleForkEffect,
-			ApprovalConfig: domain.PolicyApprovalConfig{
-				Message: "This execution is a fork, so its at_most_once effects require approval.",
-			},
-		}
-	}
 	k.d.Observer.RecordPolicyDecision(polResult.Decision)
 	return k.recordStepDecision(ctx, exec, stepID, req, argsHash, occurrence, polResult)
 }
