@@ -174,15 +174,15 @@ the agent's bundle. Forking with a bundle requires the `policies:write` scope.
 
 ### External resources
 
-An agent can register external state, such as a sandbox, as a resource. Its SDK
-captures checkpoints on a per-resource schedule. The kernel stores bindings,
+An agent can register external state, such as a sandbox, as a resource and
+optionally enable checkpoints. The kernel stores bindings,
 checkpoint references, and coverage boundaries; captured contents stay with the
 provider. See [Python resources](/sdk/python/resources) or
 [TypeScript resources](/sdk/typescript/resources) for SDK usage.
 
 Session turns inherit their completed parent's resource registrations and
-bindings. The SDK opens each resource and captures a baseline. Generations,
-counts, and checkpoint history belong to each execution.
+bindings. The SDK opens each resource and captures a baseline when checkpointing
+is enabled. Generations, counts, and checkpoint history belong to each execution.
 
 A live step advances the affected resource's generation before running and ends
 its checkpoint coverage. Captures require the current generation and no active

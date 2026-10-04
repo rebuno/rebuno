@@ -1,10 +1,11 @@
 ---
 title: "Resources"
-description: "Checkpoint external state so a fork can restore it"
+description: "Reuse external state across executions and checkpoint it for forks"
 ---
 
-A resource is external state, such as a sandbox. `resource()` returns a handle
-that the SDK checkpoints during execution and restores in a fork.
+A resource is external state, such as a sandbox. `resource()` returns its handle
+and reuses its binding across dispatches and session turns. Checkpointing is
+optional.
 
 This example uses the [Vercel AI SDK](/sdk/typescript/frameworks/vercel-ai-sdk)
 and the E2B driver below. Install `e2b` and set `E2B_API_KEY` for sandbox access.
@@ -64,7 +65,8 @@ On first use, the SDK creates the resource from its initial environment or the
 fork's selected checkpoint. Later dispatches reopen the recorded binding.
 Session turns reuse their completed parent's binding and start a new checkpoint
 count. Calls with the same key within a dispatch return the same handle. The SDK
-captures a baseline when the starting state is uncovered.
+captures a baseline when checkpointing is enabled and the starting state is
+uncovered.
 
 Keep sandbox IDs in bindings; tool arguments and results replay across forks,
 which use different sandboxes.
@@ -81,8 +83,9 @@ Tools and local steps run one at a time while an execution has resources.
 
 ## Checkpoint policy
 
-Pass a `checkpoints` options object for each resource. The kernel preserves its
-policy across dispatches, session turns, and forks:
+Checkpointing defaults to none. Pass a `checkpoints` object to enable it,
+including on an existing resource. Its binding is preserved. Once enabled, the
+policy is preserved across dispatches, session turns, and forks:
 
 | Option | Default | When to capture |
 |--------|---------|-----------------|
@@ -103,7 +106,7 @@ Pass an object implementing `ResourceDriver<Handle, Binding>`:
 | `configuration` | Optional JSON settings, excluding credentials. |
 | `create(checkpointRef?)` | Create an isolated resource from the checkpoint or initial environment; return `{ handle, binding }`. |
 | `open(binding)` | Return a handle for the existing resource. |
-| `checkpoint(handle)` | Return an immutable checkpoint reference and leave the handle usable. |
+| `checkpoint(handle)` | Required when checkpointing is enabled. Return an immutable checkpoint reference and leave the handle usable. |
 
 Methods can return values or promises. `resource()` infers the handle type from
 the driver. The kernel stores the JSON binding and checkpoint references; the

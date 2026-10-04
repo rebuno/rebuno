@@ -105,7 +105,7 @@ func registerResourceTx(ctx context.Context, tx store.TxStore, r *domain.Resourc
 		"every_steps":    r.EverySteps,
 		"on_completion":  r.OnCompletion,
 	}}}
-	if len(r.Binding) > 0 {
+	if r.RegisteredSeq == 0 && len(r.Binding) > 0 {
 		events = append(events, store.EventRecord{Type: domain.EventResourceBound, Payload: map[string]any{
 			"key": r.Key, "binding": r.Binding,
 		}})
@@ -114,7 +114,9 @@ func registerResourceTx(ctx context.Context, tx store.TxStore, r *domain.Resourc
 	if err != nil {
 		return err
 	}
-	r.RegisteredSeq = recorded[0].EventSeq
+	if r.RegisteredSeq == 0 {
+		r.RegisteredSeq = recorded[0].EventSeq
+	}
 	return tx.PutResource(ctx, *r)
 }
 
@@ -135,6 +137,7 @@ func inheritSessionResources(ctx context.Context, tx store.TxStore, exec domain.
 	}
 	for _, r := range resources {
 		r.ExecutionID = exec.ID
+		r.RegisteredSeq = 0
 		r.Generation, r.Count = 0, 0
 		r.CheckpointRef = ""
 		if err := registerResourceTx(ctx, tx, &r); err != nil {
@@ -152,11 +155,9 @@ func (k *Kernel) RegisterResource(ctx context.Context, execID uuid.UUID, req Reg
 		return ResourceView{}, fmt.Errorf("%w: driver_id is required", domain.ErrValidation)
 	}
 	if req.EverySteps < 0 {
-		return ResourceView{}, fmt.Errorf("%w: every_steps must be positive", domain.ErrValidation)
+		return ResourceView{}, fmt.Errorf("%w: every_steps must be non-negative", domain.ErrValidation)
 	}
-	if req.EverySteps == 0 {
-		req.EverySteps = 1
-	}
+	onCompletion := req.EverySteps > 0 && (req.OnCompletion == nil || *req.OnCompletion)
 	fingerprint, err := identity.ComputeArgsHash(req.Configuration)
 	if err != nil {
 		return ResourceView{}, fmt.Errorf("%w: invalid configuration: %v", domain.ErrValidation, err)
@@ -176,6 +177,12 @@ func (k *Kernel) RegisterResource(ctx context.Context, execID uuid.UUID, req Reg
 			if r.DriverID != req.DriverID || stored != fingerprint || r.CoverageReuse != req.CoverageReuse {
 				return fmt.Errorf("%w: resource %q is registered with another driver, configuration, or coverage_reuse", domain.ErrConflict, r.Key)
 			}
+			if r.EverySteps == 0 && req.EverySteps > 0 {
+				r.EverySteps, r.OnCompletion = req.EverySteps, onCompletion
+				if err := registerResourceTx(ctx, tx, &r); err != nil {
+					return err
+				}
+			}
 			view, err = resourceView(ctx, tx, r)
 			return err
 		}
@@ -186,7 +193,7 @@ func (k *Kernel) RegisterResource(ctx context.Context, execID uuid.UUID, req Reg
 			Config:        req.Configuration,
 			CoverageReuse: req.CoverageReuse,
 			EverySteps:    req.EverySteps,
-			OnCompletion:  req.OnCompletion == nil || *req.OnCompletion,
+			OnCompletion:  onCompletion,
 		}
 		if err := registerResourceTx(ctx, tx, &r); err != nil {
 			return err
@@ -269,7 +276,7 @@ func touchResources(resources []domain.Resource, step *domain.Step) []domain.Ste
 		t := domain.StepResource{Key: r.Key, Generation: r.Generation + 1}
 		if affects {
 			affected = append(affected, r.Key)
-			t.Due = (r.Count+1)%r.EverySteps == 0
+			t.Due = r.EverySteps > 0 && (r.Count+1)%r.EverySteps == 0
 		}
 		touched = append(touched, t)
 	}

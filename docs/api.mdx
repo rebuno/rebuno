@@ -331,10 +331,11 @@ Registers a resource and returns its current state:
 }
 ```
 
-`key` matches `[A-Za-z0-9_.-]{1,128}`. Defaults: `every_steps=1`,
-`on_completion=true`, `coverage_reuse=false`. Re-registering preserves the
-policy. Differences in `driver_id`, `configuration`, or `coverage_reuse` return
-`409 conflict`. The response adds:
+`key` matches `[A-Za-z0-9_.-]{1,128}`. Defaults: `every_steps=0` disables
+checkpointing, and `coverage_reuse=false`. With a positive interval,
+`on_completion` defaults to true. Registration can enable checkpointing on an
+existing resource; enabled policies are preserved. Differences in `driver_id`,
+`configuration`, or `coverage_reuse` return `409 conflict`. The response adds:
 
 | Field | Meaning |
 |-------|---------|

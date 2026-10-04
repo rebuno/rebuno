@@ -83,8 +83,8 @@ For streaming and transport details, consult
 - For external state a fork must restore, call
   `await resource("workspace", { driver, checkpoints: { everySteps: 5 } })`
   in the handler and declare writers with `resources: ["workspace"]` on tools.
-  `resources` defaults to none. Session turns reopen resources; forks create
-  separate ones. See
+  Checkpointing and `resources` default to none. Session turns reopen resources;
+  forks create separate ones. See
   [Resources](https://github.com/rebuno/rebuno/blob/main/docs/sdk/typescript/resources.mdx).
 
 Backend code uses `new Client()`, then

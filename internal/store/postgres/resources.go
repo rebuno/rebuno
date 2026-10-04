@@ -16,6 +16,8 @@ func putResource(ctx context.Context, q Querier, r domain.Resource) error {
 			on_completion, registered_seq, generation, count, binding, checkpoint_ref
 		) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
 		ON CONFLICT (execution_id, key) DO UPDATE SET
+			every_steps    = EXCLUDED.every_steps,
+			on_completion  = EXCLUDED.on_completion,
 			generation     = EXCLUDED.generation,
 			count          = EXCLUDED.count,
 			binding        = EXCLUDED.binding,

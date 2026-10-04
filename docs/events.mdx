@@ -77,7 +77,7 @@ Resource payloads carry `key`.
 
 | Type | When |
 |------|------|
-| `resource.registered` | Registration with `driver_id`, `configuration`, `coverage_reuse`, `every_steps`, and `on_completion`. |
+| `resource.registered` | Resource registered or checkpointing enabled, with `driver_id`, `configuration`, `coverage_reuse`, `every_steps`, and `on_completion`. |
 | `resource.initialized` | Fork initialization with `generation` and optional `checkpoint_ref`; no reference means initial state. |
 | `resource.bound` | Physical resource assigned, with its `binding`. |
 | `resource.checkpointed` | Capture accepted, with `generation`, `checkpoint_ref`, and coverage start `covered_seq`. |

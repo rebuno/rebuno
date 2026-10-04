@@ -23,6 +23,9 @@ func onEachBackend(t *testing.T, test func(t *testing.T, k *kernel.Kernel, ctx c
 
 func registerWorkspace(t *testing.T, k *kernel.Kernel, ctx context.Context, id uuid.UUID, req kernel.RegisterResourceRequest) kernel.ResourceView {
 	t.Helper()
+	if req.EverySteps == 0 {
+		req.EverySteps = 1
+	}
 	req.Key, req.DriverID, req.Lease = "workspace", "test.v1", leaseOf(t, k, id)
 	view, err := k.RegisterResource(ctx, id, req)
 	if err != nil {
@@ -85,6 +88,58 @@ func forkPointCovered(t *testing.T, k *kernel.Kernel, ctx context.Context, id uu
 		}
 	}
 	return true
+}
+
+func TestResourceWithoutCheckpointsContinuesAndCanEnableItsPolicy(t *testing.T) {
+	onEachBackend(t, func(t *testing.T, k *kernel.Kernel, ctx context.Context) {
+		first := createInSession(t, k, ctx, "agent-1", "main")
+		view, err := k.RegisterResource(ctx, first.ID, kernel.RegisterResourceRequest{
+			Key: "workspace", DriverID: "test.v1", Lease: leaseOf(t, k, first.ID),
+		})
+		if err != nil || view.EverySteps != 0 || view.OnCompletion || view.Covered {
+			t.Fatalf("resource without checkpoints: %+v, %v", view, err)
+		}
+		binding := json.RawMessage(`{"sandbox_id":"original"}`)
+		if err := k.BindResource(ctx, first.ID, "workspace", kernel.BindResourceRequest{
+			Binding: binding, Lease: leaseOf(t, k, first.ID),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		dec := submitTool(t, k, ctx, first.ID, "write", []string{"workspace"})
+		if len(dec.Resources) != 1 || dec.Resources[0].Due {
+			t.Fatalf("write without checkpoints: %+v", dec)
+		}
+		completeTool(t, k, ctx, first.ID, dec, "")
+		if err := k.CompleteExecution(ctx, first.ID, leaseOf(t, k, first.ID), json.RawMessage(`{}`), nil); err != nil {
+			t.Fatal(err)
+		}
+		second := createInSession(t, k, ctx, "agent-1", "main")
+		atSeq := latestSeq(t, k, ctx, second.ID)
+		view = registerWorkspace(t, k, ctx, second.ID, kernel.RegisterResourceRequest{EverySteps: 3})
+		requireJSON(t, view.Binding, string(binding))
+		if view.EverySteps != 3 || !view.OnCompletion || view.Covered || view.Count != 0 {
+			t.Fatalf("enabled checkpoints: %+v", view)
+		}
+		fork, err := k.ForkExecution(ctx, second.ID, kernel.ForkRequest{AtSeq: atSeq})
+		if err != nil {
+			t.Fatal(err)
+		}
+		selection, ok := fork.Restoration["workspace"]
+		if !ok || selection.CheckpointRef != "" || selection.Covered {
+			t.Fatalf("fork before checkpointing: %+v", fork.Restoration)
+		}
+		publish(t, k, ctx, second.ID, 0, "baseline")
+		for n := range 3 {
+			dec := submitTool(t, k, ctx, second.ID, "write", []string{"workspace"})
+			if dec.Resources[0].Due != (n == 2) {
+				t.Fatalf("checkpoint cadence at write %d: %+v", n+1, dec)
+			}
+			completeTool(t, k, ctx, second.ID, dec, "checkpoint")
+		}
+		if !forkPointCovered(t, k, ctx, second.ID, latestSeq(t, k, ctx, second.ID)) {
+			t.Fatal("checkpoint does not cover the completed write")
+		}
+	})
 }
 
 func TestSessionContinuesResourceBindingsAndForksRestoreSeparately(t *testing.T) {

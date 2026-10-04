@@ -80,8 +80,8 @@ For custom transports and streaming, consult
 - For external state a fork must restore, such as a sandbox, call
   `await resource("workspace", driver=..., checkpoints=CheckpointPolicy(every_steps=5))`
   in the handler and declare writers with `@tool(..., resources=["workspace"])`.
-  `resources` defaults to none. Session turns reopen resources; forks create
-  separate ones. See
+  Checkpointing and `resources` default to none. Session turns reopen resources;
+  forks create separate ones. See
   [Resources](https://github.com/rebuno/rebuno/blob/main/docs/sdk/python/resources.mdx).
 - Offload blocking work with `asyncio.to_thread` so lease heartbeats run.
   Await effects within the handler's lifetime.
