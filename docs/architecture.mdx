@@ -284,9 +284,12 @@ replicas. The waiting queue is transient; execution state remains in Postgres.
 An SSE subscriber stays on the replica that accepted it. Deltas are broadcast to
 every replica, so nothing needs routing. See [Live streaming](/streaming).
 
-Singleton background work (approval expiry, execution deadlines, cleanup) uses a
-second advisory lock, taken on one fixed key rather than per execution. A replica
-that fails to take it skips the tick instead of waiting for it.
+Singleton background work uses advisory locks on fixed keys rather than per
+execution. Approval expiry and cleanup share the configured leader lock; the
+dedicated deadline loop uses that key with a `:deadlines` suffix, so cleanup does
+not hold up deadline checks. When the dedicated loop is disabled, deadline checks
+run with the singleton sweep. A replica that fails to take either lock skips the
+tick instead of waiting for it.
 
 See [Agents](/agents), [Tools and effects](/tools), [Policy](/policy), and
 [Events](/events) for the details behind each of these.
