@@ -1,15 +1,16 @@
 ---
-title: "E2B"
-description: "Guardrails and durable execution for a coding agent working in an E2B sandbox"
+title: "Vercel"
+description: "Guardrails and durable execution for a coding agent working in a Vercel Sandbox"
 ---
 
-[E2B](https://e2b.dev) runs code in isolated cloud sandboxes. A coding agent's
-tools work in a sandbox checkout while its model loop runs in the Rebuno agent.
-Each tool call passes through [policy](/policy) and becomes a recorded step.
+[Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) runs code in isolated
+cloud sandboxes. A coding agent's tools work in a sandbox checkout while its
+model loop runs in the Rebuno agent. Each tool call passes through
+[policy](/policy) and becomes a recorded step.
 
 The workspace is a [resource](/sdk/python/resources): later dispatches reopen
-it, and forks create separate sandboxes from its checkpoints. It pauses while
-a call waits for approval.
+it, and forks create separate sandboxes from its checkpoints. It stops while a
+call waits for approval.
 
 ## Register the workspace
 
@@ -17,33 +18,37 @@ The handler registers a sandbox with a checkpoint policy:
 
 ```python
 from rebuno import CheckpointPolicy, resource
-from workspace_resource import E2BResource
+from workspace_resource import VercelResource
 
 workspace = await resource(
     "workspace",
-    driver=E2BResource(REPO, token),
+    driver=VercelResource(REPO, token),
     checkpoints=CheckpointPolicy(every_steps=5),
 )
 ```
 
-The example's [`E2BResource`](https://github.com/rebuno/rebuno/blob/main/examples/integrations/e2b/workspace_resource.py)
+The example's [`VercelResource`](https://github.com/rebuno/rebuno/blob/main/examples/integrations/sandbox/vercel/workspace_resource.py)
 implements three operations:
 
 - `create(checkpoint_ref=None)` creates a sandbox from the selected snapshot
   or a fresh checkout, and configures its Git branch.
-- `open(binding)` connects to the sandbox ID recorded for this execution.
-- `checkpoint(handle)` creates a snapshot and replaces the handle's client,
-  since [E2B snapshots](https://docs.e2b.dev/sandbox/snapshots) drop active connections.
+- `open(binding)` resumes the sandbox name recorded for this execution.
+- `checkpoint(handle)` creates a
+  [snapshot](https://vercel.com/docs/vercel-sandbox/concepts/snapshots) and
+  resumes the sandbox, since taking a snapshot stops its session.
 
-The SDK captures a baseline, then checkpoints after every fifth live tool call
+The checkpoint policy is optional. Without it, dispatches and session turns
+still reopen the same sandbox, but forks start from a fresh checkout. With it,
+the SDK captures a baseline, then checkpoints after every fifth live tool call
 that declares a workspace change, and on completion. Rebuno stores the sandbox
-binding and snapshot references; E2B stores the files and memory.
+binding and snapshot IDs; Vercel stores the files.
 
 Each new sandbox gets a unique Git branch, and shell commands push the current
 branch. Reopening a workspace preserves its branch.
 
-`on_timeout: "pause"` preserves the sandbox when a worker dies. Missing
-sandboxes or selected snapshots fail the execution.
+A sandbox session stops after its 10-minute execution limit and keeps its
+files, and `open` resumes it. Missing sandboxes or selected snapshots fail the
+execution.
 
 ## Wrap the tools
 
@@ -52,24 +57,31 @@ of none:
 
 ```python
 from rebuno import tool
+from vercel.sandbox import SandboxPathNotFoundError
 
 
 @tool("shell", resources=["workspace"])
 async def shell(command: str) -> str:
     """Run a shell command in the repository and return its exit code and output."""
-    ...
+    result = await workspace.run_process(
+        "bash", ["-c", command], cwd=WORKDIR, kill_after=120, capture_output=True
+    )
+    return f"exit code {result.returncode}\n{result.stdout}{result.stderr}"[-10000:]
 
 
 @tool("read_file")
 async def read_file(path: str) -> str:
     """Return a file's contents. The path is relative to the repository root."""
-    return await workspace.files.read(f"{WORKDIR}/{path}")
+    try:
+        return await workspace.fs.read_text(f"{WORKDIR}/{path}")
+    except SandboxPathNotFoundError:
+        return f"{path} does not exist"
 
 
 @tool("write_file", resources=["workspace"])
 async def write_file(path: str, content: str) -> str:
     """Replace a file's contents, creating it if needed. The path is relative to the repository root."""
-    await workspace.files.write(f"{WORKDIR}/{path}", content)
+    await workspace.fs.write_text(f"{WORKDIR}/{path}", content)
     return f"wrote {path}"
 ```
 
@@ -80,25 +92,31 @@ that must not repeat.
 
 ## Keep credentials out of the sandbox
 
-Cloning and pushing need a GitHub token. The driver adds a network rule that
-sets the `Authorization` header on requests to `github.com` at E2B's egress
-proxy:
+Cloning and pushing need a GitHub token. The driver creates the sandbox with a
+[network policy](https://vercel.com/docs/vercel-sandbox/concepts/firewall)
+that sets the `Authorization` header on requests to `github.com` and allows
+other domains unchanged:
 
 ```python
 credentials = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-await sandbox.update_network(
+policy = NetworkPolicy.custom(
     {
-        "rules": {
-            "github.com": [
-                {"transform": {"headers": {"Authorization": f"Basic {credentials}"}}}
-            ]
-        }
+        "*": [],
+        "github.com": [
+            NetworkPolicyRule(
+                transform=[
+                    NetworkPolicyTransform(
+                        headers={"Authorization": f"Basic {credentials}"}
+                    )
+                ]
+            )
+        ],
     }
 )
 ```
 
 git works as usual inside the sandbox, and nothing in it can read the token.
-The driver sets the rule when creating or opening a sandbox, so resumed
+The driver applies the policy when creating or opening a sandbox, so resumed
 workspaces use the token the worker currently holds.
 
 Opening the pull request is a separate tool that calls GitHub's API from the
@@ -115,9 +133,9 @@ The rule covers only `github.com`, so the sandbox can push a branch but cannot
 use that token to call the API. Protect the default branch with a GitHub ruleset
 that requires a pull request.
 
-## Pause while waiting
+## Stop while waiting
 
-The handler pauses the workspace when the model loop finishes or waits for
+The handler stops the workspace when the model loop finishes or waits for
 approval:
 
 ```python
@@ -131,11 +149,11 @@ finally:
         await workspace.pause()
 ```
 
-The check reads `execution().suspension` because a framework can catch `Blocked`
-inside its loop. After approval, the next dispatch replays up to the held call
-and the driver opens the same sandbox. A dispatch superseded by another worker
-leaves the sandbox running for that worker. A completion checkpoint briefly
-resumes a paused sandbox and pauses it again after capture.
+`pause()` stops the sandbox. Files persist and running processes end. The check
+reads `execution().suspension` because a framework can catch `Blocked` inside
+its loop. After approval, the next dispatch replays up to the held call and the
+driver resumes the same sandbox. A completion checkpoint briefly resumes a
+stopped sandbox and stops it again after capture.
 
 ## Sessions
 
@@ -165,12 +183,12 @@ pushes update the same pull request. See [Sessions](/sdk/python/agents#sessions)
 rebuno exec fork <execution-id> --at <event-seq> --session fix-tests-fork
 ```
 
-A fork restores the selected checkpoint into a separate sandbox. At an
-uncovered point it uses the newest earlier checkpoint; copied tool results
-still replay through the requested event and may describe changes missing from
-that sandbox. See [Fork coverage](/sdk/python/resources#fork-coverage).
+A fork creates a separate sandbox from the selected snapshot. At an uncovered
+point it uses the newest earlier checkpoint; copied tool results still replay
+through the requested event and may describe changes missing from that sandbox.
+See [Fork coverage](/sdk/python/resources#fork-coverage).
 
-Snapshots restore sandbox state; GitHub branches and pull requests persist.
+Snapshots restore sandbox files; GitHub branches and pull requests persist.
 
 ## Write the policy
 
@@ -201,35 +219,35 @@ Sandbox tools are allowed. Opening a pull request waits for approval.
 
 ## Run it
 
-[`examples/integrations/e2b`](https://github.com/rebuno/rebuno/tree/main/examples/integrations/e2b)
+[`examples/integrations/sandbox/vercel`](https://github.com/rebuno/rebuno/tree/main/examples/integrations/sandbox/vercel)
 has the full agent, resource driver, policy, and dev kernel config.
 
-Set `E2B_API_KEY`, `REPO` (the repository as `owner/name`), `GITHUB_TOKEN`,
-`LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY`. The token needs read and write
-access to the repository's contents and pull requests. Start the kernel and
-agent from that directory:
+Set `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, `REPO` (the
+repository as `owner/name`), `GITHUB_TOKEN`, `LLM_MODEL`, `LLM_BASE_URL`, and
+`LLM_API_KEY`. The token needs read and write access to the repository's
+contents and pull requests. Start the kernel and agent from that directory:
 
 ```bash
-cd examples/integrations/e2b
+cd examples/integrations/sandbox/vercel
 rebuno dev --config rebuno.yaml
 ```
 
 ```bash
-pip install rebuno e2b httpx2 langchain langchain-openai
+pip install rebuno vercel httpx2 langchain langchain-openai
 python agent.py
 ```
 
 Create an execution:
 
 ```bash
-rebuno exec create e2b '{"task": "The tests are failing. Fix the bug and open a pull request."}' --session fix-tests
+rebuno exec create vercel '{"task": "The tests are failing. Fix the bug and open a pull request."}' --session fix-tests
 ```
 
 The `open_pr` call appears in `rebuno exec watch`. See
 [Approvals](/policy#approvals) to approve it. Continue the same session with:
 
 ```bash
-rebuno exec create e2b '{"task": "Also add a test for the edge case."}' --session fix-tests
+rebuno exec create vercel '{"task": "Also add a test for the edge case."}' --session fix-tests
 ```
 
 To see a re-dispatch, stop the agent after a few tool calls and start it again.

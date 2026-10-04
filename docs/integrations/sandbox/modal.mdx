@@ -1,0 +1,237 @@
+---
+title: "Modal"
+description: "Guardrails and durable execution for a coding agent working in a Modal sandbox"
+---
+
+[Modal](https://modal.com) runs code in isolated cloud sandboxes. A coding
+agent's tools work in a sandbox checkout while its model loop runs in the Rebuno
+agent. Each tool call passes through [policy](/policy) and becomes a recorded
+step.
+
+The workspace is a [resource](/sdk/python/resources): later dispatches reopen
+it, and forks create separate sandboxes from its checkpoints.
+
+## Register the workspace
+
+The handler registers a sandbox with a checkpoint policy:
+
+```python
+from rebuno import CheckpointPolicy, resource
+from workspace_resource import ModalResource
+
+workspace = await resource(
+    "workspace",
+    driver=ModalResource(REPO, token),
+    checkpoints=CheckpointPolicy(every_steps=5),
+)
+```
+
+The example's [`ModalResource`](https://github.com/rebuno/rebuno/blob/main/examples/integrations/sandbox/modal/workspace_resource.py)
+implements three operations:
+
+- `create(checkpoint_ref=None)` creates a sandbox from the selected snapshot
+  image or a fresh checkout, and configures its Git branch.
+- `open(binding)` connects to the sandbox ID recorded for this execution.
+- `checkpoint(handle)` captures a
+  [filesystem snapshot](https://modal.com/docs/guide/sandbox-snapshots) and
+  returns its image ID.
+
+The checkpoint policy is optional. Without it, dispatches and session turns
+still reopen the same sandbox, but forks start from a fresh checkout. With it,
+the SDK captures a baseline, then checkpoints after every fifth live tool call
+that declares a workspace change, and on completion. Rebuno stores the sandbox
+binding and image IDs; Modal stores the files.
+
+Each new sandbox gets a unique Git branch, and shell commands push the current
+branch. Reopening a workspace preserves its branch.
+
+Modal sandboxes cannot pause. The sandbox runs until its one-hour timeout,
+including while a call waits for approval or after a worker dies. Missing
+sandboxes or selected snapshots fail the execution.
+
+## Wrap the tools
+
+`shell` and `write_file` declare workspace changes. `read_file` uses the default
+of none:
+
+```python
+from modal.exception import SandboxFilesystemNotFoundError
+from rebuno import tool
+
+
+@tool("shell", resources=["workspace"])
+async def shell(command: str) -> str:
+    """Run a shell command in the repository and return its exit code and output."""
+    process = await workspace.exec.aio(
+        "bash", "-c", command, workdir=WORKDIR, timeout=120
+    )
+    stdout = await process.stdout.read.aio()
+    stderr = await process.stderr.read.aio()
+    exit_code = await process.wait.aio()
+    return f"exit code {exit_code}\n{stdout}{stderr}"[-10000:]
+
+
+@tool("read_file")
+async def read_file(path: str) -> str:
+    """Return a file's contents. The path is relative to the repository root."""
+    try:
+        return await workspace.filesystem.read_text.aio(f"{WORKDIR}/{path}")
+    except SandboxFilesystemNotFoundError:
+        return f"{path} does not exist"
+
+
+@tool("write_file", resources=["workspace"])
+async def write_file(path: str, content: str) -> str:
+    """Replace a file's contents, creating it if needed. The path is relative to the repository root."""
+    await workspace.filesystem.write_text.aio(content, f"{WORKDIR}/{path}")
+    return f"wrote {path}"
+```
+
+The model also uses `shell` to commit and push the branch. These tools use
+`safe_to_retry`, so an interrupted command can run again. See
+[idempotency](/sdk/python/tools#idempotency) when adding commands with effects
+that must not repeat.
+
+## Keep credentials out of the sandbox
+
+Cloning and pushing need a GitHub token. The driver stores it in a named Modal
+secret and creates the sandbox with an outbound policy that sets the
+`Authorization` header on requests to `github.com`:
+
+```python
+credentials = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+name = f"rebuno-github-{hashlib.sha256(credentials.encode()).hexdigest()[:16]}"
+await modal.Secret.objects.create.aio(
+    name, {"GITHUB_BASIC": credentials}, allow_existing=True
+)
+policy = modal.experimental.OutboundPolicy().with_header_replacement(
+    domain="github.com",
+    secret=modal.Secret.from_name(name),
+    headers={"Authorization": "Basic $GITHUB_BASIC"},
+)
+sandbox = await modal.Sandbox.create.aio(
+    app=app, image=image, timeout=3600, _experimental_outbound_policy=policy
+)
+```
+
+Modal resolves the secret outside the sandbox, so git works as usual and
+nothing in the sandbox can read the token. The secret name comes from a hash of
+the token, so each token gets its own secret and running sandboxes keep theirs.
+The driver applies the policy when opening a sandbox, so resumed workspaces use
+the token the worker currently holds. Outbound policies are an experimental
+Modal API.
+
+Opening the pull request is a separate tool that calls GitHub's API from the
+agent:
+
+```python
+@tool("open_pr", idempotency="at_most_once")
+async def open_pr(title: str, body: str) -> str:
+    """Open a pull request from the pushed branch."""
+    ...
+```
+
+The policy covers only `github.com`, so the sandbox can push a branch but cannot
+use that token to call the API. Protect the default branch with a GitHub ruleset
+that requires a pull request.
+
+## Sessions
+
+The handler reads the previous completed turn with `previous()` and returns its
+conversation in `Result.state`:
+
+```python
+from langchain_core.messages import messages_to_dict
+from rebuno import Result, previous
+
+prior = await previous() or {}
+...
+return Result(
+    output={"answer": result["messages"][-1].text},
+    state={
+        "messages": messages_to_dict(result["messages"]),
+    },
+)
+```
+
+Executions in the same session reuse the workspace and Git branch, so later
+pushes update the same pull request. A session turn that starts after the
+sandbox's timeout fails. See [Sessions](/sdk/python/agents#sessions).
+
+## Fork the workspace
+
+```bash
+rebuno exec fork <execution-id> --at <event-seq> --session fix-tests-fork
+```
+
+A fork creates a separate sandbox from the selected snapshot image. At an
+uncovered point it uses the newest earlier checkpoint; copied tool results still
+replay through the requested event and may describe changes missing from that
+sandbox. See [Fork coverage](/sdk/python/resources#fork-coverage).
+
+Snapshots restore sandbox files; GitHub branches and pull requests persist.
+
+## Write the policy
+
+```yaml
+default_action: deny
+rules:
+  - id: allow-llm
+    when:
+      step_kind: llm_call
+    then:
+      decision: allow
+
+  - id: allow-sandbox
+    when:
+      targets: [shell, read_file, write_file]
+    then:
+      decision: allow
+
+  - id: open-pr
+    when:
+      target: open_pr
+    then:
+      decision: require_approval
+      reason: opening a pull request needs approval
+```
+
+Sandbox tools are allowed. Opening a pull request waits for approval.
+
+## Run it
+
+[`examples/integrations/sandbox/modal`](https://github.com/rebuno/rebuno/tree/main/examples/integrations/sandbox/modal)
+has the full agent, resource driver, policy, and dev kernel config.
+
+Authenticate with `modal token new`, or set `MODAL_TOKEN_ID` and
+`MODAL_TOKEN_SECRET`. Set `REPO` (the repository as `owner/name`),
+`GITHUB_TOKEN`, `LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY`. The token needs
+read and write access to the repository's contents and pull requests. Start the
+kernel and agent from that directory:
+
+```bash
+cd examples/integrations/sandbox/modal
+rebuno dev --config rebuno.yaml
+```
+
+```bash
+pip install rebuno modal httpx2 langchain langchain-openai
+python agent.py
+```
+
+Create an execution:
+
+```bash
+rebuno exec create modal '{"task": "The tests are failing. Fix the bug and open a pull request."}' --session fix-tests
+```
+
+The `open_pr` call appears in `rebuno exec watch`. See
+[Approvals](/policy#approvals) to approve it. Continue the same session with:
+
+```bash
+rebuno exec create modal '{"task": "Also add a test for the edge case."}' --session fix-tests
+```
+
+To see a re-dispatch, stop the agent after a few tool calls and start it again.
+The kernel dispatches the execution once its lease expires, two minutes by
+default. [`lease_timeout_seconds`](/agents) sets a shorter lease for the agent.

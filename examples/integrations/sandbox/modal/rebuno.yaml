@@ -1,0 +1,5 @@
+agents:
+  - id: modal
+    webhook_url: http://localhost:5000/webhook
+    secret: modal-secret
+    policy_file: policy.yaml

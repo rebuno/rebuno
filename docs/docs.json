@@ -80,7 +80,15 @@
             "group": "Integrations",
             "icon": "plug",
             "pages": [
-              "integrations/e2b",
+              {
+                "group": "Sandbox",
+                "pages": [
+                  "integrations/sandbox/e2b",
+                  "integrations/sandbox/daytona",
+                  "integrations/sandbox/modal",
+                  "integrations/sandbox/vercel"
+                ]
+              },
               "integrations/executor"
             ]
           },

@@ -1,26 +1,20 @@
 import os
 
 import httpx2
-from e2b import (
-    CommandExitException,
-    FileNotFoundException,
-    TimeoutException,
-)
 from langchain.agents import create_agent
 from langchain_core.messages import messages_from_dict, messages_to_dict
 from langchain_openai import ChatOpenAI
+from modal.exception import SandboxFilesystemNotFoundError
 from rebuno import (
     Agent,
-    Blocked,
     CheckpointPolicy,
     Result,
-    execution,
     http_client,
     previous,
     resource,
     tool,
 )
-from workspace_resource import WORKDIR, E2BResource
+from workspace_resource import WORKDIR, ModalResource
 
 REPO = os.environ["REPO"]
 
@@ -30,40 +24,44 @@ async def process(task: str) -> Result:
     token = os.environ["GITHUB_TOKEN"]
     workspace = await resource(
         "workspace",
-        driver=E2BResource(REPO, token),
+        driver=ModalResource(REPO, token),
+        # Optional. Without it, the session still reopens the same sandbox;
+        # checkpoints are only needed to fork it.
         checkpoints=CheckpointPolicy(every_steps=5),
     )
 
     @tool("shell", resources=["workspace"])
     async def shell(command: str) -> str:
         """Run a shell command in the repository and return its exit code and output."""
-        try:
-            result = await workspace.commands.run(command, cwd=WORKDIR, timeout=120)
-        except CommandExitException as e:
-            result = e
-        except TimeoutException:
-            return "timed out after 120 seconds"
-        return f"exit code {result.exit_code}\n{result.stdout}{result.stderr}"[-10000:]
+        process = await workspace.exec.aio(
+            "bash", "-c", command, workdir=WORKDIR, timeout=120
+        )
+        stdout = await process.stdout.read.aio()
+        stderr = await process.stderr.read.aio()
+        exit_code = await process.wait.aio()
+        return f"exit code {exit_code}\n{stdout}{stderr}"[-10000:]
 
     @tool("read_file")
     async def read_file(path: str) -> str:
         """Return a file's contents. The path is relative to the repository root."""
         try:
-            return await workspace.files.read(f"{WORKDIR}/{path}")
-        except FileNotFoundException:
+            return await workspace.filesystem.read_text.aio(f"{WORKDIR}/{path}")
+        except SandboxFilesystemNotFoundError:
             return f"{path} does not exist"
 
     @tool("write_file", resources=["workspace"])
     async def write_file(path: str, content: str) -> str:
         """Replace a file's contents, creating it if needed. The path is relative to the repository root."""
-        await workspace.files.write(f"{WORKDIR}/{path}", content)
+        await workspace.filesystem.write_text.aio(content, f"{WORKDIR}/{path}")
         return f"wrote {path}"
 
     @tool("open_pr", idempotency="at_most_once")
     async def open_pr(title: str, body: str) -> str:
         """Open a pull request from the pushed branch."""
-        result = await workspace.commands.run("git branch --show-current", cwd=WORKDIR)
-        branch = result.stdout.strip()
+        process = await workspace.exec.aio(
+            "git", "branch", "--show-current", workdir=WORKDIR
+        )
+        branch = (await process.stdout.read.aio()).strip()
         async with httpx2.AsyncClient(
             headers={"Authorization": f"Bearer {token}"}
         ) as github:
@@ -94,19 +92,14 @@ and a short description. Later pushes to the branch update the same pull
 request.""",
     )
 
-    result = None
-    try:
-        result = await graph.ainvoke(
-            {
-                "messages": [
-                    *messages_from_dict(prior.get("messages", [])),
-                    {"role": "user", "content": task},
-                ]
-            }
-        )
-    finally:
-        if result is not None or isinstance(execution().suspension, Blocked):
-            await workspace.pause()
+    result = await graph.ainvoke(
+        {
+            "messages": [
+                *messages_from_dict(prior.get("messages", [])),
+                {"role": "user", "content": task},
+            ]
+        }
+    )
 
     return Result(
         output={"answer": result["messages"][-1].text},
@@ -118,8 +111,8 @@ request.""",
 
 if __name__ == "__main__":
     agent = Agent(
-        "e2b",
-        secret="e2b-secret",
+        "modal",
+        secret="modal-secret",
         base_url=os.environ.get("REBUNO_URL", "http://localhost:8080"),
     )
     agent.run(process, port=5000)

@@ -1,0 +1,5 @@
+agents:
+  - id: vercel
+    webhook_url: http://localhost:5000/webhook
+    secret: vercel-secret
+    policy_file: policy.yaml

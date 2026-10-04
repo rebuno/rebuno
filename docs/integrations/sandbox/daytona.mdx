@@ -1,0 +1,257 @@
+---
+title: "Daytona"
+description: "Guardrails and durable execution for a coding agent working in a Daytona sandbox"
+---
+
+[Daytona](https://daytona.io) runs code in isolated cloud sandboxes. A coding
+agent's tools work in a sandbox checkout while its model loop runs in the Rebuno
+agent. Each tool call passes through [policy](/policy) and becomes a recorded
+step.
+
+The workspace is a [resource](/sdk/python/resources): later dispatches reopen
+it, and forks create separate sandboxes from its checkpoints. It stops while a
+call waits for approval.
+
+## Register the workspace
+
+The handler registers a sandbox with a checkpoint policy:
+
+```python
+from rebuno import CheckpointPolicy, resource
+from workspace_resource import DaytonaResource
+
+workspace = await resource(
+    "workspace",
+    driver=DaytonaResource(REPO, token),
+    checkpoints=CheckpointPolicy(every_steps=5),
+)
+```
+
+The example's [`DaytonaResource`](https://github.com/rebuno/rebuno/blob/main/examples/integrations/sandbox/daytona/workspace_resource.py)
+implements three operations:
+
+- `create(checkpoint_ref=None)` creates a sandbox from the selected snapshot
+  or a fresh checkout, and configures its Git branch.
+- `open(binding)` gets the sandbox ID recorded for this execution and starts
+  the sandbox if it is stopped.
+- `checkpoint(handle)` creates a named
+  [Daytona snapshot](https://www.daytona.io/docs/snapshots) of the sandbox.
+
+The checkpoint policy is optional. Without it, dispatches and session turns
+still reopen the same sandbox, but forks start from a fresh checkout. With it,
+the SDK captures a baseline, then checkpoints after every fifth live tool call
+that declares a workspace change, and on completion. Rebuno stores the sandbox
+binding and snapshot names; Daytona stores the files.
+
+Snapshots are named `rebuno-<id>` and stay in the Daytona organization until
+deleted.
+
+Each new sandbox gets a unique Git branch, and shell commands push the current
+branch. Reopening a workspace preserves its branch.
+
+Daytona stops idle sandboxes and keeps their files, and `open` starts them
+again. Missing sandboxes or selected snapshots fail the execution.
+
+## Wrap the tools
+
+`shell` and `write_file` declare workspace changes. `read_file` uses the default
+of none:
+
+```python
+from daytona import DaytonaFileNotFoundError, DaytonaProcessExecutionTimeoutError
+from rebuno import tool
+
+
+@tool("shell", resources=["workspace"])
+async def shell(command: str) -> str:
+    """Run a shell command in the repository and return its exit code and output."""
+    try:
+        result = await workspace.process.exec(command, cwd=WORKDIR, timeout=120)
+    except DaytonaProcessExecutionTimeoutError:
+        return "timed out after 120 seconds"
+    return f"exit code {result.exit_code}\n{result.result}"[-10000:]
+
+
+@tool("read_file")
+async def read_file(path: str) -> str:
+    """Return a file's contents. The path is relative to the repository root."""
+    try:
+        return (await workspace.fs.download_file(f"{WORKDIR}/{path}")).decode()
+    except DaytonaFileNotFoundError:
+        return f"{path} does not exist"
+
+
+@tool("write_file", resources=["workspace"])
+async def write_file(path: str, content: str) -> str:
+    """Replace a file's contents, creating it if needed. The path is relative to the repository root."""
+    await workspace.fs.upload_file(content.encode(), f"{WORKDIR}/{path}")
+    return f"wrote {path}"
+```
+
+The model also uses `shell` to commit and push the branch. These tools use
+`safe_to_retry`, so an interrupted command can run again. See
+[idempotency](/sdk/python/tools#idempotency) when adding commands with effects
+that must not repeat.
+
+## Keep credentials out of the sandbox
+
+Cloning and pushing need a GitHub token. The driver stores it as a
+[Daytona secret](https://www.daytona.io/docs/secrets) limited to `github.com`
+and mounts the secret into each sandbox as `GITHUB_AUTH`:
+
+```python
+credentials = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+await daytona.secret.create(
+    CreateSecretParams(name="rebuno-github", value=credentials, hosts=["github.com"])
+)
+sandbox = await daytona.create(
+    CreateSandboxFromSnapshotParams(
+        snapshot=checkpoint_ref, secrets={"GITHUB_AUTH": "rebuno-github"}
+    )
+)
+await sandbox.process.exec(
+    "git config --global http.https://github.com/.extraheader"
+    ' "Authorization: Basic $GITHUB_AUTH"'
+)
+```
+
+Inside the sandbox, `GITHUB_AUTH` holds a placeholder. Daytona replaces it with
+the secret's value on requests to `github.com`, so git works as usual and
+nothing in the sandbox can read the token. The driver updates the secret when
+creating or opening a sandbox, so resumed workspaces use the token the worker
+currently holds.
+
+Opening the pull request is a separate tool that calls GitHub's API from the
+agent:
+
+```python
+@tool("open_pr", idempotency="at_most_once")
+async def open_pr(title: str, body: str) -> str:
+    """Open a pull request from the pushed branch."""
+    ...
+```
+
+The secret covers only `github.com`, so the sandbox can push a branch but cannot
+use that token to call the API. Protect the default branch with a GitHub ruleset
+that requires a pull request.
+
+## Stop while waiting
+
+The handler stops the workspace when the model loop finishes or waits for
+approval:
+
+```python
+from rebuno import Blocked, execution
+
+result = None
+try:
+    result = await graph.ainvoke({"messages": [*history, {"role": "user", "content": task}]})
+finally:
+    if result is not None or isinstance(execution().suspension, Blocked):
+        await workspace.pause()
+```
+
+`pause()` stops the sandbox. Files persist and running processes end. The check
+reads `execution().suspension` because a framework can catch `Blocked` inside
+its loop. After approval, the next dispatch replays up to the held call and the
+driver starts the same sandbox. A completion checkpoint briefly starts a stopped
+sandbox and stops it again after capture.
+
+## Sessions
+
+The handler reads the previous completed turn with `previous()` and returns its
+conversation in `Result.state`:
+
+```python
+from langchain_core.messages import messages_to_dict
+from rebuno import Result, previous
+
+prior = await previous() or {}
+...
+return Result(
+    output={"answer": result["messages"][-1].text},
+    state={
+        "messages": messages_to_dict(result["messages"]),
+    },
+)
+```
+
+Executions in the same session reuse the workspace and Git branch, so later
+pushes update the same pull request. See [Sessions](/sdk/python/agents#sessions).
+
+## Fork the workspace
+
+```bash
+rebuno exec fork <execution-id> --at <event-seq> --session fix-tests-fork
+```
+
+A fork creates a separate sandbox from the selected snapshot. At an uncovered
+point it uses the newest earlier checkpoint; copied tool results still replay
+through the requested event and may describe changes missing from that sandbox.
+See [Fork coverage](/sdk/python/resources#fork-coverage).
+
+Snapshots restore sandbox files; GitHub branches and pull requests persist.
+
+## Write the policy
+
+```yaml
+default_action: deny
+rules:
+  - id: allow-llm
+    when:
+      step_kind: llm_call
+    then:
+      decision: allow
+
+  - id: allow-sandbox
+    when:
+      targets: [shell, read_file, write_file]
+    then:
+      decision: allow
+
+  - id: open-pr
+    when:
+      target: open_pr
+    then:
+      decision: require_approval
+      reason: opening a pull request needs approval
+```
+
+Sandbox tools are allowed. Opening a pull request waits for approval.
+
+## Run it
+
+[`examples/integrations/sandbox/daytona`](https://github.com/rebuno/rebuno/tree/main/examples/integrations/sandbox/daytona)
+has the full agent, resource driver, policy, and dev kernel config.
+
+Set `DAYTONA_API_KEY`, `REPO` (the repository as `owner/name`), `GITHUB_TOKEN`,
+`LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY`. The token needs read and write
+access to the repository's contents and pull requests. Start the kernel and
+agent from that directory:
+
+```bash
+cd examples/integrations/sandbox/daytona
+rebuno dev --config rebuno.yaml
+```
+
+```bash
+pip install rebuno daytona httpx2 langchain langchain-openai
+python agent.py
+```
+
+Create an execution:
+
+```bash
+rebuno exec create daytona '{"task": "The tests are failing. Fix the bug and open a pull request."}' --session fix-tests
+```
+
+The `open_pr` call appears in `rebuno exec watch`. See
+[Approvals](/policy#approvals) to approve it. Continue the same session with:
+
+```bash
+rebuno exec create daytona '{"task": "Also add a test for the edge case."}' --session fix-tests
+```
+
+To see a re-dispatch, stop the agent after a few tool calls and start it again.
+The kernel dispatches the execution once its lease expires, two minutes by
+default. [`lease_timeout_seconds`](/agents) sets a shorter lease for the agent.

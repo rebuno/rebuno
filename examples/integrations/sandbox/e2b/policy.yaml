@@ -1,0 +1,20 @@
+default_action: deny
+rules:
+  - id: allow-llm
+    when:
+      step_kind: llm_call
+    then:
+      decision: allow
+
+  - id: allow-sandbox
+    when:
+      targets: [shell, read_file, write_file]
+    then:
+      decision: allow
+
+  - id: open-pr
+    when:
+      target: open_pr
+    then:
+      decision: require_approval
+      reason: opening a pull request needs approval
