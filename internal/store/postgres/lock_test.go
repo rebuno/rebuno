@@ -14,10 +14,14 @@ import (
 	"github.com/rebuno/rebuno/internal/store"
 )
 
-func advisoryLockCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
+func advisoryLockCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, key string) int {
 	t.Helper()
+	k := uint64(hashKey(key))
 	var n int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'`).Scan(&n); err != nil {
+	err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks
+		WHERE locktype = 'advisory' AND classid = $1::bigint::oid AND objid = $2::bigint::oid AND objsubid = 1`,
+		int64(k>>32), int64(uint32(k))).Scan(&n)
+	if err != nil {
 		t.Fatalf("query pg_locks: %v", err)
 	}
 	return n
@@ -28,10 +32,10 @@ func TestRunLockedReleasesLockAfterContextCancel(t *testing.T) {
 	pool := testPool(t)
 	s := NewStore(pool)
 
-	before := advisoryLockCount(t, ctx, pool)
+	key := uuid.NewString()
 
 	lockCtx, cancel := context.WithCancel(ctx)
-	err := s.RunLocked(lockCtx, "leak-test-key", func(context.Context) error {
+	err := s.RunLocked(lockCtx, key, func(context.Context) error {
 		cancel()
 		return nil
 	})
@@ -39,8 +43,8 @@ func TestRunLockedReleasesLockAfterContextCancel(t *testing.T) {
 		t.Fatal("expected commit with a canceled context to fail")
 	}
 
-	if after := advisoryLockCount(t, ctx, pool); after != before {
-		t.Fatalf("advisory lock leaked: count was %d before, %d after", before, after)
+	if n := advisoryLockCount(t, ctx, pool, key); n != 0 {
+		t.Fatalf("advisory lock leaked: %d held after RunLocked returned", n)
 	}
 }
 
