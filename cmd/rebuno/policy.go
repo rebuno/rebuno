@@ -143,7 +143,9 @@ func policyReport(ctx context.Context, bundle, bundlePath string, opts policyTes
 	if err := policy.NormalizeCases(cases, opts.agentID); err != nil {
 		return policy.Report{}, err
 	}
-	engine.Judge = policy.NewJudge(config.FromEnv().TypeSafeAPIKey)
+	if engine.Judge, err = policy.LoadJudge(config.FromEnv().JudgeConfigPath); err != nil {
+		return policy.Report{}, err
+	}
 	return policy.Run(ctx, engine, cases)
 }
 

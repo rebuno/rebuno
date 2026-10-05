@@ -1,0 +1,16 @@
+url: https://api.typesafe.ai/v1/systemone
+headers:
+  Authorization: Bearer ${TYPESAFE_API_KEY}
+body: |
+  {
+    "model": "jev-latest",
+    "state": {"tool_call": {{json .ToolCall}}},
+    "questions": {
+      "decision": {
+        "type": "choice",
+        "instructions": {{if .Instructions}}{"question": {{json .Question}}, "note": {{json .Instructions}}}{{else}}{{json .Question}}{{end}},
+        "criteria": {{json .Criteria}}
+      }
+    }
+  }
+probabilities: answers.decision.probabilities

@@ -30,7 +30,7 @@ type Config struct {
 	OTELInsecure           bool
 	DBMaxConns             int
 	DBMinConns             int
-	TypeSafeAPIKey         string
+	JudgeConfigPath        string
 }
 
 func Default() Config {
@@ -138,8 +138,8 @@ func FromEnv() Config {
 			cfg.DBMinConns = n
 		}
 	}
-	if v := os.Getenv("REBUNO_TYPESAFE_API_KEY"); v != "" {
-		cfg.TypeSafeAPIKey = v
+	if v := os.Getenv("REBUNO_JUDGE_CONFIG"); v != "" {
+		cfg.JudgeConfigPath = v
 	}
 	return cfg
 }

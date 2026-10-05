@@ -50,7 +50,10 @@ func runDev(cfg config.Config, configPath string) error {
 	defer cancel()
 
 	s := memstore.NewStore()
-	judge := policy.NewJudge(cfg.TypeSafeAPIKey)
+	judge, err := policy.LoadJudge(cfg.JudgeConfigPath)
+	if err != nil {
+		return err
+	}
 	deps := kernel.Deps{
 		APIKeys:     s,
 		Events:      s,

@@ -221,7 +221,7 @@ execution's usage at all, it lets the step through.
 
 ### Judge
 
-A rule that decides `judge` hands the call to TypeSafe's jev model, which picks
+A rule that decides `judge` hands the call to a decision model, which picks
 `allow`, `deny`, or `require_approval`. It suits tools whose calls are too varied
 to list as predicates, such as a shell. Text in the arguments can steer the
 model, so put `deny` rules for commands known to be dangerous above it.
@@ -255,9 +255,50 @@ model, so put `deny` rules for commands known to be dangerous above it.
 | `threshold` | The probability, from 0 to 1, the model's top choice needs to stand. Default `0.6`. |
 | `fallback` | The decision when no choice reaches `threshold`, or when the model cannot be reached. Default `require_approval`. |
 
-The kernel sends the agent id, tool name, and arguments to TypeSafe, using the
-API key in `REBUNO_TYPESAFE_API_KEY` ([Deployment](/deployment#configuration)).
-Without a key, `judge` rules deny.
+The model is any HTTP API that returns a probability for each decision. A YAML
+file named by `REBUNO_JUDGE_CONFIG` ([Deployment](/deployment#configuration))
+describes the request and where the probabilities are in the response. Without
+it, `judge` rules deny.
+
+```yaml
+url: https://api.typesafe.ai/v1/systemone
+headers:
+  Authorization: Bearer ${TYPESAFE_API_KEY}
+body: |
+  {
+    "model": "jev-latest",
+    "state": {"tool_call": {{json .ToolCall}}},
+    "questions": {
+      "decision": {
+        "type": "choice",
+        "instructions": {{if .Instructions}}{"question": {{json .Question}}, "note": {{json .Instructions}}}{{else}}{{json .Question}}{{end}},
+        "criteria": {{json .Criteria}}
+      }
+    }
+  }
+probabilities: answers.decision.probabilities
+timeout: 5s
+```
+
+| Field | Meaning |
+|-------|---------|
+| `url` | Endpoint the kernel POSTs to. `${VAR}` expands from the environment. |
+| `headers` | Request headers. `${VAR}` expands from the environment. |
+| `body` | Go [text/template](https://pkg.go.dev/text/template) for the JSON request body. `json` encodes a value. |
+| `probabilities` | Dot-separated path in the response to an object mapping `allow`, `deny`, and `require_approval` to probabilities. Array elements are addressed by index. |
+| `timeout` | Request timeout. Default `5s`. |
+
+The body template receives:
+
+| Value | Content |
+|-------|---------|
+| `.ToolCall` | `agent_id`, `tool`, and `arguments` of the call. |
+| `.Question` | The question the model answers about the call. |
+| `.Criteria` | Each decision mapped to a description of when it applies. |
+| `.Instructions` | The rule's `instructions`, or empty. |
+
+[`examples/judges`](https://github.com/rebuno/rebuno/tree/main/examples/judges)
+holds provider configs.
 
 ## Testing a bundle
 

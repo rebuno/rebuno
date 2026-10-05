@@ -61,7 +61,13 @@ func TestJudgeRuleDecision(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			engine.Judge = &Judge{url: srv.URL, apiKey: "key", client: srv.Client()}
+			t.Setenv("TYPESAFE_API_KEY", "key")
+			judge, err := LoadJudge("../../examples/judges/typesafe.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			judge.url = srv.URL
+			engine.Judge = judge
 			res, err := engine.Evaluate(context.Background(), domain.PolicyInput{Target: "bash", Args: json.RawMessage(`{"command":"ls"}`)})
 			if err != nil {
 				t.Fatal(err)
@@ -73,13 +79,16 @@ func TestJudgeRuleDecision(t *testing.T) {
 	}
 }
 
-func TestJudgeRuleWithoutAPIKeyDenies(t *testing.T) {
+func TestJudgeRuleWithoutJudgeConfigDenies(t *testing.T) {
 	bundle := strings.Replace(judgeBundle, "fallback: deny", "fallback: allow", 1)
 	engine, err := NewRuleEngineFromBundle(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine.Judge = NewJudge("")
+	engine.Judge, err = LoadJudge("")
+	if err != nil {
+		t.Fatal(err)
+	}
 	res, err := engine.Evaluate(context.Background(), domain.PolicyInput{Target: "bash"})
 	if err != nil {
 		t.Fatal(err)

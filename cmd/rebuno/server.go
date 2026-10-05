@@ -97,7 +97,10 @@ func runServer(cfg config.Config, configPath string) error {
 		logger.Info("agents provisioned from config", "count", len(agents), "path", configPath)
 	}
 
-	judge := policy.NewJudge(cfg.TypeSafeAPIKey)
+	judge, err := policy.LoadJudge(cfg.JudgeConfigPath)
+	if err != nil {
+		return err
+	}
 	deps := kernel.Deps{
 		APIKeys:     s,
 		Events:      s,
