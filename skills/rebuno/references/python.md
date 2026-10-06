@@ -83,6 +83,9 @@ For custom transports and streaming, consult
   Checkpointing and `resources` default to none. Session turns reopen resources;
   forks create separate ones. See
   [Resources](https://github.com/rebuno/rebuno/blob/main/docs/sdk/python/resources.mdx).
+- To delegate to another agent, return `await subagent("researcher", input)`
+  from a tool body. Its `Client` needs the `executions:write` scope. Let
+  `Blocked` unwind: the execution suspends while every call in flight waits.
 - Offload blocking work with `asyncio.to_thread` so lease heartbeats run.
   Await effects within the handler's lifetime.
 

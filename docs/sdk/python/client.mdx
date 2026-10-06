@@ -54,7 +54,8 @@ fork = await client.fork(execution.id, at_seq=214)
 ```
 
 `create` and `get` return an [`Execution`](#models). Poll `get` or read the
-event log to watch it progress.
+event log to watch it progress. `create` also takes `idempotency_key` and
+`spawned_by`; see [Create an execution](/api#create-an-execution).
 
 ## Event log and steps
 
@@ -101,7 +102,8 @@ all subclasses of `rebuno.RebunoError`. See [Errors](/sdk/python/errors).
 additions won't break you.
 
 - `Execution`: `id`, `agent_id`, `input`, `status`, `output`,
-  `failure_reason`, `session`, `parent_execution_id`, `forked_from`, `fork_seq`. `status` is an `ExecutionStatus`, one of `pending`,
+  `failure_reason`, `session`, `parent_execution_id`, `forked_from`, `fork_seq`,
+  `idempotency_key`, `spawned_by`. `status` is an `ExecutionStatus`, one of `pending`,
   `running`, `blocked`, `completed`, `failed`, `cancelled`.
 - `Step`: `step_id`, `execution_id`, `kind`, `target`, `args_hash`,
   `occurrence`, `status`, `idempotency`, `args`, `result`, `error`.

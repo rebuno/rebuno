@@ -42,7 +42,8 @@ await client.fork(execution.id, { atSeq: 214 });
 ```
 
 `create` and `get` return an [`Execution`](#types). Poll `get` or read the event
-log to watch it progress.
+log to watch it progress. `create` also takes `idempotencyKey` and `spawnedBy`;
+see [Create an execution](/api#create-an-execution).
 
 `fork` also returns `restoration` when resources are registered. Each resource
 key maps to `{ checkpointRef, checkpointSeq, covered }`, describing the state
@@ -93,7 +94,7 @@ all subclasses of `RebunoError`. See [Errors](/sdk/typescript/errors).
 
 - `Execution`: `id`, `agentId`, `input`, `status`, `output`,
   `failureReason`, `session`, `parentExecutionId`, `forkedFrom`, `forkSeq`,
-  `restoration`. `status` is an `ExecutionStatus`, one of `pending`,
+  `restoration`, `idempotencyKey`, `spawnedBy`. `status` is an `ExecutionStatus`, one of `pending`,
   `running`, `blocked`, `completed`, `failed`, `cancelled`.
 - `Step`: `stepId`, `executionId`, `kind`, `target`, `argsHash`, `occurrence`,
   `status`, `idempotency`, `args`, `result`, `error`.

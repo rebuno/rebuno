@@ -78,6 +78,9 @@ For streaming and transport details, consult
 - `step(name, fn, args?, idempotency?)` passes the whole argument object to `fn`.
   After importing `step`, `await step("timestamp", () => Date.now())` records a
   stable value. Use JSON arguments/results.
+- To delegate to another agent, return `subagent("researcher", input)` from a
+  tool body. Its `Client` needs the `executions:write` scope. Let `Blocked`
+  unwind: the execution suspends while every call in flight waits.
 - Offload blocking work to a worker so lease heartbeats run; await effects
   within the handler's lifetime.
 - For external state a fork must restore, call

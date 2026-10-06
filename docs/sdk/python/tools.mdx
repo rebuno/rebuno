@@ -80,6 +80,29 @@ The LLM sees that as the tool's result and can pick a different path, rather
 than the denial crashing the run. A denied `rebuno.step()` raises `PolicyError`
 normally, since nothing reads its result as a tool response.
 
+### Subagents
+
+`subagent()` runs another agent as a [subagent](/architecture#subagents) of the
+calling tool. Return its result from the tool body:
+
+```python
+from rebuno import subagent, tool
+
+@tool
+async def research(topic: str) -> dict:
+    return await subagent("researcher", {"topic": topic})
+```
+
+The tool's result is the subagent's `output`, and a failed or cancelled
+subagent raises `ToolError`. Other tool calls keep running while it waits. Once
+every call in flight waits, the execution suspends and releases its worker. The
+handler reruns after they settle and replays their outcomes, so concurrent tool
+calls can each start a subagent.
+
+The subagent is created with a [`Client`](/sdk/python/client), which needs a key
+with the `executions:write` scope. Pass `client=`, or set `REBUNO_URL` and
+`REBUNO_API_KEY`. Calling `subagent()` outside a tool body raises `RuntimeError`.
+
 ### Blocking work
 
 <Warning>
