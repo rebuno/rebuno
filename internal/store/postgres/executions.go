@@ -13,7 +13,8 @@ import (
 
 const executionColumns = `id, agent_id, input, status, output, failure_reason,
 	created_at, updated_at, deadline_at, COALESCE(session, ''), parent_execution_id,
-	forked_from, COALESCE(fork_seq, 0), COALESCE(policy_bundle, '')`
+	forked_from, COALESCE(fork_seq, 0), COALESCE(policy_bundle, ''), COALESCE(idempotency_key, ''),
+	spawned_by_execution_id, COALESCE(spawned_by_step_id, '')`
 
 func (s *Store) CreateExecution(ctx context.Context, exec domain.Execution) error {
 	return createExecution(ctx, s.q(ctx), exec)
@@ -24,6 +25,11 @@ func (q querier) CreateExecution(ctx context.Context, exec domain.Execution) err
 }
 
 func createExecution(ctx context.Context, q Querier, exec domain.Execution) error {
+	var spawnedByID *uuid.UUID
+	var spawnedByStep string
+	if exec.SpawnedBy != nil {
+		spawnedByID, spawnedByStep = &exec.SpawnedBy.ExecutionID, exec.SpawnedBy.StepID
+	}
 	createdAt := exec.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -35,12 +41,13 @@ func createExecution(ctx context.Context, q Querier, exec domain.Execution) erro
 
 	_, err := q.Exec(ctx, `
 		INSERT INTO executions (id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at, session,
-			parent_execution_id, forked_from, fork_seq, policy_bundle)
+			parent_execution_id, forked_from, fork_seq, policy_bundle, idempotency_key, spawned_by_execution_id, spawned_by_step_id)
 		VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8, $9, NULLIF($10, ''),
-			$11::uuid, $12::uuid, NULLIF($13, 0), NULLIF($14, ''))
+			$11::uuid, $12::uuid, NULLIF($13, 0), NULLIF($14, ''), NULLIF($15, ''), $16::uuid, NULLIF($17, ''))
 	`, exec.ID.String(), exec.AgentID, rawArg(exec.Input), string(exec.Status),
 		rawArg(exec.Output), exec.FailureReason, createdAt, updatedAt, timeArg(exec.DeadlineAt), exec.Session,
-		uuidArg(exec.ParentExecutionID), uuidArg(exec.ForkedFrom), exec.ForkSeq, exec.PolicyBundle,
+		uuidArg(exec.ParentExecutionID), uuidArg(exec.ForkedFrom), exec.ForkSeq, exec.PolicyBundle, exec.IdempotencyKey,
+		uuidArg(spawnedByID), spawnedByStep,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -99,9 +106,11 @@ func listExecutions(ctx context.Context, q Querier, filter domain.ExecutionFilte
 		  AND ($2 = '' OR status = $2)
 		  AND ($3::uuid IS NULL OR id < $3::uuid)
 		  AND ($5 = '' OR session = $5)
+		  AND ($6 = '' OR idempotency_key = $6)
+		  AND ($7::uuid IS NULL OR spawned_by_execution_id = $7::uuid)
 		ORDER BY id DESC
 		LIMIT $4
-	`, filter.AgentID, string(filter.Status), cursor, limit+1, filter.Session)
+	`, filter.AgentID, string(filter.Status), cursor, limit+1, filter.Session, filter.IdempotencyKey, uuidArg(filter.SpawnedBy))
 	if err != nil {
 		return domain.ExecutionPage{}, fmt.Errorf("list executions: %w", err)
 	}
@@ -198,6 +207,44 @@ func listExpiredExecutions(ctx context.Context, q Querier, now time.Time) ([]dom
 	return out, nil
 }
 
+func (s *Store) ListUnsettledSubagents(ctx context.Context) ([]domain.Execution, error) {
+	return listUnsettledSubagents(ctx, s.q(ctx))
+}
+
+func (q querier) ListUnsettledSubagents(ctx context.Context) ([]domain.Execution, error) {
+	return listUnsettledSubagents(ctx, q.q)
+}
+
+func listUnsettledSubagents(ctx context.Context, q Querier) ([]domain.Execution, error) {
+	rows, err := q.Query(ctx, `
+		SELECT `+executionColumns+`
+		FROM executions
+		WHERE id IN (
+			SELECT c.id
+			FROM executions c
+			JOIN executions p ON p.id = c.spawned_by_execution_id
+			JOIN steps s ON s.step_id = c.spawned_by_step_id
+			WHERE (c.status IN ('completed', 'failed', 'cancelled')
+			       AND s.status = 'executing' AND p.status NOT IN ('completed', 'failed', 'cancelled'))
+			   OR (c.status NOT IN ('completed', 'failed', 'cancelled')
+			       AND p.status IN ('completed', 'failed', 'cancelled'))
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list unsettled subagents: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Execution
+	for rows.Next() {
+		exec, err := scanExecution(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, exec)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) DeleteExecutionsCreatedBefore(ctx context.Context, before time.Time) error {
 	return deleteExecutionsCreatedBefore(ctx, s.q(ctx), before)
 }
@@ -225,12 +272,14 @@ func deleteExecutionsCreatedBefore(ctx context.Context, q Querier, before time.T
 func scanExecution(row pgx.Row) (domain.Execution, error) {
 	var exec domain.Execution
 	var idStr, status string
-	var parentID, forkedFrom, input, output *string
+	var parentID, forkedFrom, spawnedByID, input, output *string
+	var spawnedByStep string
 
 	if err := row.Scan(
 		&idStr, &exec.AgentID, &input, &status,
 		&output, &exec.FailureReason, &exec.CreatedAt, &exec.UpdatedAt, &exec.DeadlineAt,
-		&exec.Session, &parentID, &forkedFrom, &exec.ForkSeq, &exec.PolicyBundle,
+		&exec.Session, &parentID, &forkedFrom, &exec.ForkSeq, &exec.PolicyBundle, &exec.IdempotencyKey,
+		&spawnedByID, &spawnedByStep,
 	); err != nil {
 		return domain.Execution{}, err
 	}
@@ -240,6 +289,13 @@ func scanExecution(row pgx.Row) (domain.Execution, error) {
 	}
 	if exec.ForkedFrom, err = optionalUUID(forkedFrom); err != nil {
 		return domain.Execution{}, fmt.Errorf("parse forked_from: %w", err)
+	}
+	spawnedBy, err := optionalUUID(spawnedByID)
+	if err != nil {
+		return domain.Execution{}, fmt.Errorf("parse spawned_by: %w", err)
+	}
+	if spawnedBy != nil {
+		exec.SpawnedBy = &domain.SpawnedBy{ExecutionID: *spawnedBy, StepID: spawnedByStep}
 	}
 
 	id, err := parseUUID(idStr)

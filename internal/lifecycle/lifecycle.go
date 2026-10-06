@@ -16,6 +16,7 @@ type Kernel interface {
 	ExpireApprovals(ctx context.Context, now time.Time) error
 	CancelExpiredExecutions(ctx context.Context, now time.Time) error
 	AdmitQueued(ctx context.Context) error
+	SettleSubagents(ctx context.Context) error
 	Cleanup(ctx context.Context, retain time.Duration, now time.Time) error
 }
 
@@ -114,6 +115,7 @@ func (m *Manager) deadlineTick(ctx context.Context) error {
 		return errors.Join(
 			m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC()),
 			m.kernel.AdmitQueued(ctx),
+			m.kernel.SettleSubagents(ctx),
 		)
 	})
 }

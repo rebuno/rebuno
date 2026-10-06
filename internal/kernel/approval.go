@@ -59,7 +59,6 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 			evts := []store.EventRecord{
 				{Type: domain.EventApprovalGranted, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalGranted, req.DecidedBy, req.Rationale)},
 				{Type: domain.EventStepAllowed, Payload: payload.Step(approval.StepID, step.Kind, step.Target, "")},
-				{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
 			}
 			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 				return err
@@ -72,11 +71,7 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 			if err := tx.UpdateApproval(ctx, approval); err != nil {
 				return err
 			}
-			if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
-				return err
-			}
-			// Resume the execution by enqueueing a dispatch atomically.
-			return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
+			return k.resumeIfIdleTx(ctx, tx, approval.ExecutionID, now)
 		})
 	}); err != nil {
 		return err
@@ -120,7 +115,6 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 			evts := []store.EventRecord{
 				{Type: domain.EventApprovalDenied, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
 				{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
-				{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
 			}
 			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 				return err
@@ -134,12 +128,9 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 			if err := tx.Upsert(ctx, step); err != nil {
 				return err
 			}
-			if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
-				return err
-			}
 			// Resume rather than fail: a refusal is something the handler is told,
 			// like any other denied step, so it can report or route around it.
-			return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
+			return k.resumeIfIdleTx(ctx, tx, approval.ExecutionID, now)
 		})
 	}); err != nil {
 		return err

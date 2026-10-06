@@ -32,6 +32,7 @@ type ExecutionStore interface {
 	GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error)
 	ListExecutions(ctx context.Context, filter domain.ExecutionFilter) (domain.ExecutionPage, error)
 	ListIdleSessions(ctx context.Context, now time.Time) ([]string, error)
+	ListUnsettledSubagents(ctx context.Context) ([]domain.Execution, error)
 	NextPendingInSession(ctx context.Context, session string, now time.Time) (domain.Execution, error)
 	SessionHead(ctx context.Context, session, agentID string) (domain.Execution, error)
 	SetExecutionParent(ctx context.Context, id, parent uuid.UUID) error

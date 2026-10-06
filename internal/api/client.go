@@ -26,10 +26,12 @@ type ClientKernel interface {
 }
 
 type CreateExecutionRequest struct {
-	AgentID           string          `json:"agent_id"`
-	Input             json.RawMessage `json:"input"`
-	Session           string          `json:"session,omitempty"`
-	ParentExecutionID *uuid.UUID      `json:"parent_execution_id,omitempty"`
+	AgentID           string            `json:"agent_id"`
+	Input             json.RawMessage   `json:"input"`
+	Session           string            `json:"session,omitempty"`
+	ParentExecutionID *uuid.UUID        `json:"parent_execution_id,omitempty"`
+	IdempotencyKey    string            `json:"idempotency_key,omitempty"`
+	SpawnedBy         *domain.SpawnedBy `json:"spawned_by,omitempty"`
 }
 
 type PreviousStateResponse struct {
@@ -42,7 +44,7 @@ func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{Session: req.Session, ParentExecutionID: req.ParentExecutionID})
+	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{Session: req.Session, ParentExecutionID: req.ParentExecutionID, IdempotencyKey: req.IdempotencyKey, SpawnedBy: req.SpawnedBy})
 	if err != nil {
 		WriteError(w, err)
 		return

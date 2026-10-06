@@ -30,4 +30,6 @@ const (
 	ReasonDispatchExhausted      = "dispatch_exhausted"
 	ReasonClientCancelled        = "client_cancelled"
 	ReasonDeadlineExceeded       = "deadline_exceeded"
+	ReasonParentTerminal         = "parent_agent_terminal"
+	ReasonAwaitingSteps          = "awaiting_steps"
 )

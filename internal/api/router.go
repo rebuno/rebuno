@@ -72,6 +72,7 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(hmac).Post("/v0/executions/{id}/heartbeat", r.heartbeat)
 	mux.With(hmac).Post("/v0/executions/{id}/complete", r.agentCompleteExecution)
 	mux.With(hmac).Post("/v0/executions/{id}/fail", r.agentFailExecution)
+	mux.With(hmac).Post("/v0/executions/{id}/suspend", r.suspend)
 	mux.With(hmac).Post("/v0/executions/{id}/resources", r.registerResource)
 	mux.With(hmac).Post("/v0/executions/{id}/resources/checkpoints", r.publishCheckpoints)
 	mux.With(hmac).Post("/v0/executions/{id}/resources/{key}/binding", r.bindResource)

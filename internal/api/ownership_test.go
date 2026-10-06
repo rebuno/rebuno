@@ -41,6 +41,7 @@ func TestAgentCannotAccessAnotherAgentsExecution(t *testing.T) {
 		{"heartbeat", "POST", base + "/heartbeat", ""},
 		{"complete execution", "POST", base + "/complete", `{"output":{}}`},
 		{"fail execution", "POST", base + "/fail", `{"error":"failed"}`},
+		{"suspend", "POST", base + "/suspend", ""},
 		{"publish", "POST", base + "/steps/other-step/stream", `{"seq":1,"data":"foreign"}`},
 	}
 	for _, tc := range cases {

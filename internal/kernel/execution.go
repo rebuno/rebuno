@@ -131,6 +131,8 @@ func New(cfg Config, d Deps) *Kernel {
 type CreateExecutionOptions struct {
 	Session           string
 	ParentExecutionID *uuid.UUID
+	IdempotencyKey    string
+	SpawnedBy         *domain.SpawnedBy
 }
 
 func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json.RawMessage, options ...CreateExecutionOptions) (domain.Execution, error) {
@@ -142,8 +144,17 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 	if err := validateSession(session); err != nil {
 		return domain.Execution{}, err
 	}
+	if err := validateLabel("idempotency_key", opts.IdempotencyKey); err != nil {
+		return domain.Execution{}, err
+	}
+	if opts.SpawnedBy != nil && opts.IdempotencyKey == "" {
+		opts.IdempotencyKey = opts.SpawnedBy.StepID
+	}
 	if _, err := k.d.Agents.GetAgent(ctx, agentID); err != nil {
 		return domain.Execution{}, err
+	}
+	if existing, ok, err := k.executionByIdempotencyKey(ctx, agentID, opts.IdempotencyKey); err != nil || ok {
+		return existing, err
 	}
 	if opts.ParentExecutionID != nil {
 		parent, err := authorizedExecution(ctx, k.d.Executions, *opts.ParentExecutionID)
@@ -163,6 +174,8 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 		AgentID:           agentID,
 		Session:           session,
 		ParentExecutionID: opts.ParentExecutionID,
+		IdempotencyKey:    opts.IdempotencyKey,
+		SpawnedBy:         opts.SpawnedBy,
 		Input:             input,
 		Status:            domain.ExecutionPending,
 		CreatedAt:         now,
@@ -179,18 +192,40 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 	if exec.DeadlineAt != nil {
 		createdPayload["deadline_at"] = *exec.DeadlineAt
 	}
-	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := tx.CreateExecution(ctx, exec); err != nil {
-			return err
+	if exec.SpawnedBy != nil {
+		createdPayload["spawned_by"] = exec.SpawnedBy
+	}
+	create := func(ctx context.Context) error {
+		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
+			if err := tx.CreateExecution(ctx, exec); err != nil {
+				return err
+			}
+			if _, err := tx.Append(ctx, exec.ID, domain.EventExecutionCreated, createdPayload); err != nil {
+				return err
+			}
+			if session != "" {
+				return nil
+			}
+			return k.startExecutionTx(ctx, tx, &exec)
+		})
+	}
+	var err error
+	if exec.SpawnedBy == nil {
+		err = create(ctx)
+	} else {
+		err = k.d.UnitOfWork.RunLocked(ctx, lockKey(exec.SpawnedBy.ExecutionID), func(ctx context.Context) error {
+			if err := k.checkParentStep(ctx, exec); err != nil {
+				return err
+			}
+			return create(ctx)
+		})
+	}
+	if err != nil {
+		if errors.Is(err, domain.ErrConflict) {
+			if existing, ok, lookupErr := k.executionByIdempotencyKey(ctx, agentID, opts.IdempotencyKey); lookupErr == nil && ok {
+				return existing, nil
+			}
 		}
-		if _, err := tx.Append(ctx, exec.ID, domain.EventExecutionCreated, createdPayload); err != nil {
-			return err
-		}
-		if session != "" {
-			return nil
-		}
-		return k.startExecutionTx(ctx, tx, &exec)
-	}); err != nil {
 		return domain.Execution{}, err
 	}
 	k.d.Observer.RecordExecutionCreated()
@@ -226,10 +261,25 @@ func (k *Kernel) requireNewSession(ctx context.Context, session string) error {
 }
 
 func validateSession(session string) error {
-	if len(session) > 256 || !utf8.ValidString(session) || strings.ContainsRune(session, 0) || (session != "" && strings.TrimSpace(session) == "") {
-		return fmt.Errorf("%w: session must be a nonblank UTF-8 string of at most 256 bytes without NUL", domain.ErrValidation)
+	return validateLabel("session", session)
+}
+
+func validateLabel(name, value string) error {
+	if len(value) > 256 || !utf8.ValidString(value) || strings.ContainsRune(value, 0) || (value != "" && strings.TrimSpace(value) == "") {
+		return fmt.Errorf("%w: %s must be a nonblank UTF-8 string of at most 256 bytes without NUL", domain.ErrValidation, name)
 	}
 	return nil
+}
+
+func (k *Kernel) executionByIdempotencyKey(ctx context.Context, agentID, key string) (domain.Execution, bool, error) {
+	if key == "" {
+		return domain.Execution{}, false, nil
+	}
+	page, err := k.d.Executions.ListExecutions(ctx, domain.ExecutionFilter{AgentID: agentID, IdempotencyKey: key, Limit: 1})
+	if err != nil || len(page.Executions) == 0 {
+		return domain.Execution{}, false, err
+	}
+	return page.Executions[0], true, nil
 }
 
 func (k *Kernel) startExecutionTx(ctx context.Context, tx store.TxStore, exec *domain.Execution) error {
@@ -439,7 +489,7 @@ func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason strin
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionCancelled))
-	k.releaseSession(ctx, exec.Session)
+	k.afterTerminal(ctx, exec)
 	return nil
 }
 

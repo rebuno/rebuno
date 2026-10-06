@@ -33,6 +33,8 @@ type Execution struct {
 	ParentExecutionID *uuid.UUID      `json:"parent_execution_id,omitempty"`
 	ForkedFrom        *uuid.UUID      `json:"forked_from,omitempty"`
 	ForkSeq           int64           `json:"fork_seq,omitempty"`
+	IdempotencyKey    string          `json:"idempotency_key,omitempty"`
+	SpawnedBy         *SpawnedBy      `json:"spawned_by,omitempty"`
 	PolicyBundle      string          `json:"-"`
 	Input             json.RawMessage `json:"input"`
 	Status            ExecutionStatus `json:"status"`
@@ -45,13 +47,20 @@ type Execution struct {
 	Restoration map[string]ResourceSelection `json:"restoration,omitempty"`
 }
 
+type SpawnedBy struct {
+	ExecutionID uuid.UUID `json:"execution_id"`
+	StepID      string    `json:"step_id"`
+}
+
 // Cursor holds an execution ID. IDs are UUIDv7, so ordering by ID orders by creation.
 type ExecutionFilter struct {
-	AgentID string
-	Session string
-	Status  ExecutionStatus
-	Limit   int
-	Cursor  string
+	AgentID        string
+	Session        string
+	IdempotencyKey string
+	SpawnedBy      *uuid.UUID
+	Status         ExecutionStatus
+	Limit          int
+	Cursor         string
 }
 
 // Empty NextCursor means the last page; otherwise pass it back as ExecutionFilter.Cursor.

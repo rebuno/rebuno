@@ -24,6 +24,7 @@ type AgentKernel interface {
 	Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.Lease) error
 	CompleteExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, output, state json.RawMessage) error
 	FailExecution(ctx context.Context, execID uuid.UUID, lease domain.Lease, reason string) error
+	Suspend(ctx context.Context, execID uuid.UUID, lease domain.Lease) (bool, error)
 	RegisterResource(ctx context.Context, execID uuid.UUID, req kernel.RegisterResourceRequest) (kernel.ResourceView, error)
 	BindResource(ctx context.Context, execID uuid.UUID, key string, req kernel.BindResourceRequest) error
 	PublishCheckpoints(ctx context.Context, execID uuid.UUID, req kernel.PublishCheckpointsRequest) error
@@ -54,6 +55,10 @@ type CompleteExecutionRequest struct {
 
 type FailExecutionRequest struct {
 	Error string `json:"error"`
+}
+
+type SuspendResponse struct {
+	Suspended bool `json:"suspended"`
 }
 
 func (rt *Router) getStep(w http.ResponseWriter, r *http.Request) {
@@ -232,6 +237,25 @@ func (rt *Router) agentFailExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteNoContent(w)
+}
+
+func (rt *Router) suspend(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, domain.ErrValidation)
+		return
+	}
+	lease, err := leaseFrom(r)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	suspended, err := rt.agent.Suspend(r.Context(), id, lease)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteJSON(w, SuspendResponse{Suspended: suspended}, http.StatusOK)
 }
 
 func (rt *Router) registerResource(w http.ResponseWriter, r *http.Request) {

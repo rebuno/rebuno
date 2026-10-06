@@ -53,7 +53,7 @@ func (k *Kernel) CompleteExecution(ctx context.Context, execID uuid.UUID, lease 
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionCompleted))
-	k.releaseSession(ctx, exec.Session)
+	k.afterTerminal(ctx, exec)
 	return nil
 }
 
@@ -91,7 +91,7 @@ func (k *Kernel) failExecution(ctx context.Context, execID uuid.UUID, lease doma
 		return err
 	}
 	k.d.Observer.RecordExecutionTerminal(string(domain.ExecutionFailed))
-	k.releaseSession(ctx, exec.Session)
+	k.afterTerminal(ctx, exec)
 	return nil
 }
 

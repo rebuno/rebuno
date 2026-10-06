@@ -117,6 +117,28 @@ optional and, when given, must have no executions yet. Sessions are global to th
 kernel, so executions for two different agents in one session also run one at a
 time. See [Sessions](/architecture#sessions).
 
+Add an optional `idempotency_key` to make the create safe to retry. A create
+with the key of an existing execution of the same agent returns that execution,
+and the request's other fields are ignored. Keys follow the same rules as
+`session` and are released when retention deletes the execution.
+
+Add `spawned_by` to run the execution as a subagent of a step:
+
+```json
+{
+  "agent_id": "researcher",
+  "input": { "query": "hello" },
+  "spawned_by": { "execution_id": "0192...", "step_id": "9a3f…" }
+}
+```
+
+The step must be executing in the named parent execution. When the subagent
+settles, the kernel records its outcome as the step's. The parent keeps running
+until its agent [suspends](#suspend) it. `idempotency_key` defaults to the
+`step_id`. Returns `409` when the step is not executing or the parent is
+terminal, and `400` when the step belongs to another execution or the session
+matches the parent's. See [Subagents](/architecture#subagents).
+
 ### Get an execution
 
 `GET /v0/executions/{id}` · bearer or HMAC
@@ -130,9 +152,9 @@ time. See [Sessions](/architecture#sessions).
 }
 ```
 
-`session` and `parent_execution_id` are present when set. Unless named at
-creation, the parent is set when an execution in a session starts. A fork also
-carries `forked_from` and `fork_seq`.
+`session`, `parent_execution_id`, `idempotency_key`, and `spawned_by` are
+present when set. Unless named at creation, the parent is set when an execution
+in a session starts. A fork also carries `forked_from` and `fork_seq`.
 
 ### Get the previous state
 
@@ -375,6 +397,19 @@ step that is no longer executing returns `409 conflict`. See
 
 Touches the dispatch lease so a long-running dispatch is not reclaimed as
 stalled.
+
+### Suspend
+
+`POST /v0/executions/{id}/suspend` · HMAC → `200`
+
+```json
+{ "suspended": true }
+```
+
+Blocks the execution and releases its dispatch while any of its steps is
+waiting. The kernel redispatches it once none are, and the handler replays the
+recorded outcomes. `suspended` is `false` when no step is waiting, so the
+handler reads the settled steps and continues.
 
 ### Report execution outcome
 

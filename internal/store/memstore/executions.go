@@ -34,6 +34,12 @@ func (s *Store) listExecutionsLocked(filter domain.ExecutionFilter) domain.Execu
 		if filter.Session != "" && e.Session != filter.Session {
 			continue
 		}
+		if filter.IdempotencyKey != "" && e.IdempotencyKey != filter.IdempotencyKey {
+			continue
+		}
+		if filter.SpawnedBy != nil && (e.SpawnedBy == nil || e.SpawnedBy.ExecutionID != *filter.SpawnedBy) {
+			continue
+		}
 		if filter.Status != "" && e.Status != filter.Status {
 			continue
 		}
@@ -62,6 +68,14 @@ func (s *Store) CreateExecution(ctx context.Context, exec domain.Execution) erro
 func (s *Store) createExecutionLocked(ctx context.Context, exec domain.Execution) error {
 	if _, ok := s.executions[exec.ID]; ok {
 		return domain.ErrConflict
+	}
+	for _, e := range s.executions {
+		if exec.IdempotencyKey != "" && e.AgentID == exec.AgentID && e.IdempotencyKey == exec.IdempotencyKey {
+			return domain.ErrConflict
+		}
+		if exec.SpawnedBy != nil && e.SpawnedBy != nil && e.SpawnedBy.StepID == exec.SpawnedBy.StepID {
+			return domain.ErrConflict
+		}
 	}
 	exec.Status = domain.ExecutionPending
 	if exec.CreatedAt.IsZero() {
@@ -249,6 +263,36 @@ func (s *Store) listIdleSessionsLocked(now time.Time) []string {
 	}
 	sort.Strings(sessions)
 	return sessions
+}
+
+func (s *Store) ListUnsettledSubagents(context.Context) ([]domain.Execution, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.listUnsettledSubagentsLocked(), nil
+}
+
+func (tx *txStore) ListUnsettledSubagents(context.Context) ([]domain.Execution, error) {
+	return tx.listUnsettledSubagentsLocked(), nil
+}
+
+func (s *Store) listUnsettledSubagentsLocked() []domain.Execution {
+	var out []domain.Execution
+	for _, child := range s.executions {
+		if child.SpawnedBy == nil {
+			continue
+		}
+		parent, ok := s.executions[child.SpawnedBy.ExecutionID]
+		step, stepOK := s.steps[child.SpawnedBy.StepID]
+		if !ok || !stepOK {
+			continue
+		}
+		settle := child.Status.IsTerminal() && step.Status == domain.StepExecuting && !parent.Status.IsTerminal()
+		orphaned := !child.Status.IsTerminal() && parent.Status.IsTerminal()
+		if settle || orphaned {
+			out = append(out, child)
+		}
+	}
+	return out
 }
 
 func (s *Store) NextPendingInSession(_ context.Context, session string, now time.Time) (domain.Execution, error) {

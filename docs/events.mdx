@@ -38,14 +38,14 @@ execution continues an earlier one in its session.
 
 | Type | When |
 |------|------|
-| `execution.created` | Client created the execution. |
+| `execution.created` | Client created the execution. Payload carries `spawned_by` for a [subagent](/architecture#subagents). |
 | `execution.forked` | Fork created. Payload carries `source_execution_id`, `fork_seq`, `policy_override`, and resource `restoration` when present. |
 | `execution.started` | The execution began running and its first dispatch is queued. |
-| `execution.blocked` | Paused on a human approval. |
-| `execution.resumed` | An approval was granted, denied, or expired, and work continues. |
+| `execution.blocked` | Paused on a human approval, or suspended with `reason` `awaiting_steps`. |
+| `execution.resumed` | No step is waiting anymore, and work continues. |
 | `execution.completed` | Terminal, success. Payload carries the `output`. |
 | `execution.failed` | Terminal, failure. Payload carries a `reason`. |
-| `execution.cancelled` | Terminal. The payload's `reason` is `client_cancelled` or `deadline_exceeded`. |
+| `execution.cancelled` | Terminal. The payload's `reason` is `client_cancelled`, `deadline_exceeded`, or `parent_agent_terminal`. |
 
 ## Step events
 

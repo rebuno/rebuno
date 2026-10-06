@@ -42,6 +42,10 @@ func (f *fakeKernel) AdmitQueued(ctx context.Context) error {
 	return nil
 }
 
+func (f *fakeKernel) SettleSubagents(ctx context.Context) error {
+	return nil
+}
+
 func (f *fakeKernel) Cleanup(ctx context.Context, retain time.Duration, now time.Time) error {
 	atomic.AddInt32(&f.cleanups, 1)
 	return nil

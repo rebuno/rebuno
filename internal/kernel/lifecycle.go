@@ -82,7 +82,6 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 			evts := []store.EventRecord{
 				{Type: domain.EventApprovalExpired, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
 				{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
-				{Type: domain.EventExecutionResumed, Payload: payload.Execution(approval.ExecutionID, domain.ExecutionRunning, nil, "")},
 			}
 			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
 				return err
@@ -96,12 +95,9 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 			if err := tx.UpdateApproval(ctx, approval); err != nil {
 				return err
 			}
-			if err := tx.UpdateExecutionStatus(ctx, approval.ExecutionID, domain.ExecutionRunning, nil, ""); err != nil {
-				return err
-			}
 			// An approval nobody answered is a refusal like any other: resume and
 			// let the handler decide what to do without it.
-			return k.enqueueDispatchTx(ctx, tx, approval.ExecutionID, now)
+			return k.resumeIfIdleTx(ctx, tx, approval.ExecutionID, now)
 		})
 	}); err != nil || !expired {
 		return err

@@ -62,6 +62,10 @@ func (k *KernelAPI) FailStep(ctx context.Context, execID uuid.UUID, stepID strin
 	return k.Inner.FailExecutionStep(ctx, execID, stepID, req)
 }
 
+func (k *KernelAPI) Suspend(ctx context.Context, execID uuid.UUID, lease domain.Lease) (bool, error) {
+	return k.Inner.Suspend(ctx, execID, lease)
+}
+
 func (k *KernelAPI) Heartbeat(ctx context.Context, execID uuid.UUID, lease domain.Lease) error {
 	return k.Inner.Heartbeat(ctx, execID, lease)
 }

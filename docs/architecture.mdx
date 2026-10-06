@@ -48,9 +48,10 @@ stateDiagram-v2
     blocked --> cancelled
 ```
 
-`blocked` means the execution is paused waiting on a human approval. It re-enters
-`running` when the approval resolves. A step parked by a rate limit leaves the
-execution `running`. `pending` means the execution has not started.
+`blocked` means the execution is paused waiting on a human approval or a
+subagent. It re-enters `running` once no step is waiting. A step parked by a
+rate limit leaves the execution `running`. `pending` means the execution has not
+started.
 
 A step moves through these states:
 
@@ -150,6 +151,31 @@ must be new, so later turns continue the branch.
 Retention deletes a session's executions only once every execution in the
 session is terminal and older than the retention cutoff, so a retained
 execution's parent stays readable.
+
+## Subagents
+
+An agent runs a subagent by creating an execution with `spawned_by`, which names
+the parent execution and one of its executing steps, usually a tool call. The
+subagent's outcome becomes the step's: its `output` is the step's result when it
+completes, and otherwise the step fails with reason `subagent_failed` or
+`subagent_cancelled`.
+
+Starting a subagent leaves the parent running, so concurrent tool calls in one
+turn can each start one. Once every in-flight call is waiting, the agent
+[suspends](/api#suspend). If any step still waits, the kernel blocks the parent
+and releases its dispatch, so no worker holds it while its subagents run. When
+the last waiting step settles, the kernel redispatches the parent and its
+handler replays the recorded outcomes.
+
+A subagent's `idempotency_key` defaults to the step's `step_id`, and a step
+starts at most one subagent, so a `safe_to_retry` step that runs again finds the
+subagent it already started. Only an executing step can start a subagent, so an
+orphaned `at_most_once` step that the kernel failed as `indeterminate` cannot. A
+subagent cannot join its parent's session.
+
+When a parent reaches a terminal state, its live subagents are cancelled with
+reason `parent_agent_terminal`, and so on down the tree. A periodic sweep retries
+settlement and cancellation that a crash interrupted.
 
 ## Forks
 
