@@ -195,6 +195,39 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Uber",
+        "icon": "code",
+        "groups": [
+          {
+            "group": "Get started",
+            "icon": "rocket",
+            "expanded": true,
+            "pages": [
+              "uber/overview",
+              "uber/getting-started"
+            ]
+          },
+          {
+            "group": "Configure",
+            "icon": "sliders",
+            "pages": [
+              "uber/models",
+              "uber/sandboxes",
+              "uber/mcp",
+              "uber/configuration"
+            ]
+          },
+          {
+            "group": "Operations",
+            "icon": "server",
+            "pages": [
+              "uber/terminal-client",
+              "uber/deployment"
+            ]
+          }
+        ]
       }
     ]
   },

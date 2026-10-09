@@ -1,0 +1,61 @@
+---
+title: "Terminal client"
+description: "Work with Uber from a terminal"
+---
+
+`uber` is a terminal client built from pi's components. It talks to the
+kernel, so it runs on any machine that can reach it:
+
+```bash
+npm install -g @rebuno/uber
+REBUNO_URL=https://rebuno.example.com REBUNO_API_KEY=... uber
+```
+
+Run it inside a clone of the repository to work on. A new session works on the
+`origin` remote's GitHub repository. The agent works from GitHub, so push
+what it should see.
+
+`uber` starts a new session, and `uber <name>` opens or creates
+`<you>/<name>`. Each prompt is an execution in the session. Calls that need approval show
+pi's selector with the policy's reason. Esc cancels the running execution.
+
+| Command | Effect |
+|---------|--------|
+| `/sessions [all]` | Switch to one of your sessions, or with `all`, anyone's |
+| `/new [name]` | Start a new session |
+| `/model [model]` | Choose the session's model |
+| `/mcp` | Choose the MCP servers for your sessions |
+| `/extensions` | Choose the agent's optional extensions for your sessions |
+| `/session` | Show the session's repository, model, thinking level, MCP servers, extensions, calls, and tokens |
+| `/settings` | Choose the theme and the thinking level |
+| `/fork` | [Fork](/architecture#forks) the latest turn after one of its tool calls |
+
+Any other `/name`, such as one of the agent's
+[prompt templates](/uber/configuration), goes to the agent as the task. Commands
+that your own pi extensions register run only in pi.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `REBUNO_URL` | `http://localhost:8080` | The kernel |
+| `REBUNO_API_KEY` | none | The API key |
+| `REBUNO_DASHBOARD_URL` | `http://localhost:3000` | The dashboard the footer links to |
+| `UBER_AGENT_ID` | `uber` | The agent's ID |
+
+List the agent's models, MCP servers, and
+[optional extensions](/uber/configuration#extensions) that you use in
+`uber.json` in your pi configuration. `/model` offers the models, as
+`provider/id`. `/mcp` and `/extensions` turn the others on and off, and every
+turn sends the ones that are on:
+
+```json
+{
+  "models": ["anthropic/claude-sonnet-5-5", "openai/gpt-6-sol"],
+  "mcpServers": { "github": {}, "linear": { "enabled": false } },
+  "extensions": { "pi-plan-mode": {} }
+}
+```
+
+The client uses your pi configuration (`~/.pi/agent`) for its theme, built in,
+from `themes/`, or from a package, for tool renderers from extensions, and for the thinking
+level, pi's `defaultThinkingLevel`, which every turn sends. It never runs an
+extension's tools or hooks.

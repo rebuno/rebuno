@@ -1,0 +1,57 @@
+---
+title: "Models"
+description: "Choose Uber's models"
+---
+
+Uber uses pi's built-in providers, with API keys from the environment
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and so on). Choose the default model and
+the models a session can switch to in `settings.json`, as in pi:
+
+```json
+{
+  "defaultProvider": "openai",
+  "defaultModel": "gpt-6-sol",
+  "enabledModels": ["openai/*", "anthropic/*"]
+}
+```
+
+Add other providers, such as an OpenAI-compatible gateway, in `models.json`,
+as in pi:
+
+```json
+{
+  "providers": {
+    "gateway": {
+      "baseUrl": "https://llm.example.com/v1",
+      "api": "openai-completions",
+      "apiKey": "$GATEWAY_API_KEY",
+      "models": [{ "id": "claude-sonnet-5-5", "reasoning": true }]
+    }
+  }
+}
+```
+
+Providers that extensions register with `pi.registerProvider()` work the same
+way.
+
+A turn's `model` switches the session's model, as `provider/id`. The session
+keeps it for later turns, and subagents use it:
+
+```bash
+rebuno exec create uber '{"task": "Review the change.", "model": "openai/gpt-6-sol"}' --session fix-tests
+```
+
+A turn's `thinking` sets the session's thinking level the same way: `off`,
+`minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. A model that reasons less
+uses its nearest level. Mark a `models.json` model that reasons with
+`"reasoning": true`; any other model uses `off`.
+
+## Recording
+
+Every model call is a recorded `llm_call` whose target is the model ID, so
+[policy](/policy) can allow, deny, or require approval per model.
+
+Providers work when their API accepts a custom `fetch`: `openai-completions`,
+`openai-responses`, `azure-openai-responses`, `anthropic-messages`, and
+`mistral-conversations`. Models on other APIs, such as Google's, Bedrock, and
+Codex, are left out.

@@ -1,0 +1,98 @@
+---
+title: "Configuration"
+description: "Configure Uber the way you configure pi"
+---
+
+The config directory is pi's agent directory for the session, like
+`~/.pi/agent`. It is `config/`, or `UBER_CONFIG_DIR`:
+
+| Path | Contents |
+|------|----------|
+| `settings.json` | Pi settings, such as `packages`, `extensions`, `compaction`, and the [default model](/uber/models) |
+| `models.json` | [Model providers](/uber/models) |
+| `mcp.json` | [MCP servers](/uber/mcp) |
+| `extensions/` | Extensions |
+| `prompts/` | Prompt templates |
+| `AGENTS.md` | Context for every repository |
+| `SYSTEM.md`, `APPEND_SYSTEM.md` | A replacement for, or an addition to, pi's system prompt |
+
+The repository's own `AGENTS.md` and skills, in `.pi/skills` or
+`.agents/skills`, are read from the workspace. Its `.pi` settings and
+extensions are not.
+
+Pi installs `packages` into the config directory, so it must be writable. To
+install them ahead of time, run:
+
+```bash
+PI_CODING_AGENT_DIR=config pi install npm:<package>
+```
+
+## Context
+
+`AGENTS.md` holds guidance for every repository, added to the prompt before
+the repository's own:
+
+```markdown
+# Working on our repositories
+
+- Run the tests and the linter before you push.
+- Keep changes small and focused on the task.
+- Never commit secrets, and never edit CI workflows unless the task asks for it.
+```
+
+## Prompt templates
+
+Each file in `prompts/` is a task template, named after the file. A task such
+as `/review security` expands `prompts/review.md` on the agent:
+
+```markdown
+---
+description: Review the current branch against main
+argument-hint: "[focus]"
+---
+Review the changes on this branch compared to main. Focus on ${@:-correctness, security, and missing tests}. List problems with file and line references. Do not change any files.
+```
+
+## Extensions
+
+Extensions work as in pi. A tool an extension registers runs as a recorded
+step under policy. A tool marked `readOnlyHint` is `safe_to_retry`; any other
+runs `at_most_once`. Hooks run again on each replay, so wrap side effects in
+[`step()`](/sdk/typescript/steps). `ctx.ui` calls do nothing.
+
+A replay returns a tool's recorded result without running it. Entries the tool
+appended with `pi.appendEntry()` are appended again, and `session_start` fires
+again before the first tool that runs, so an extension that rebuilds its state
+from the session on `session_start`, as pi recommends, keeps it. State held only
+in memory is lost when a turn resumes, such as after an approval.
+
+Extensions load for every session unless `settings.json` turns them off, as
+`pi config` does. A session can turn those back on by name: a package's name,
+or an extension's file name without its extension. A turn's `extensions` lists
+them, and the session keeps the list until a turn sends another:
+
+```json
+{
+  "packages": [{ "source": "npm:pi-plan-mode", "extensions": [] }],
+  "extensions": ["-extensions/todo.ts"]
+}
+```
+
+```bash
+rebuno exec create uber '{"task": "Plan the migration.", "extensions": ["pi-plan-mode"]}' --session migration
+```
+
+## Environment
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `SANDBOX` | `local` | `local`, or a [sandbox module](/uber/sandboxes) |
+| `CHECKPOINT_STEPS` | `0` | Tool calls between [checkpoints](/uber/sandboxes#checkpoints); `0` turns them off |
+| `UBER_AGENT_ID` | `uber` | The agent's ID |
+| `UBER_CONFIG_DIR` | `config/` | The config directory |
+| `WORKSPACE_DIR` | `workspace/` | Where `SANDBOX=local` keeps worktrees |
+| `REPO` | none | The repository when a session names none |
+| `PORT` | `5000` | The webhook port |
+| `REBUNO_URL` | `http://localhost:8080` | The kernel |
+| `REBUNO_API_KEY` | none | The key subagents are created with, with the `executions:write` scope |
+| `LLM_MAX_RETRIES` | `2` | Provider retries per model call |

@@ -1,0 +1,41 @@
+---
+title: "Uber"
+sidebarTitle: "Overview"
+description: "A governed, cloud-hosted coding agent built on Pi"
+---
+
+Uber is a coding agent that a team deploys once and shares. It runs in the
+cloud with one set of credentials and one set of rules:
+
+- **Governed:** one [policy](/policy) decides every model call and tool call,
+  and risky actions wait for approval.
+- **Recorded:** every step is in the execution history, so any run can be
+  inspected or [forked](/architecture#forks) from any step.
+- **Isolated:** the agent can work in a [sandbox](/uber/sandboxes) that never
+  holds a credential.
+- **Durable:** sessions survive crashes and restarts, and anyone can pick one up from the
+  terminal client.
+
+Uber is built on [Pi](https://github.com/earendil-works/pi). It runs pi's own
+session, with pi's system prompt, tools, compaction, and extensions, so it is
+configured the way pi is.
+
+The source is at [github.com/rebuno/uber](https://github.com/rebuno/uber).
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/uber/getting-started">
+    Run the agent and give it a task.
+  </Card>
+
+  <Card title="Terminal client" icon="terminal" href="/uber/terminal-client">
+    Work with the agent from a terminal.
+  </Card>
+
+  <Card title="Sandboxes" icon="box" href="/uber/sandboxes">
+    Run the tools in E2B, Daytona, Modal, or Vercel.
+  </Card>
+
+  <Card title="Deployment" icon="server" href="/uber/deployment">
+    Run the agent's image.
+  </Card>
+</Columns>

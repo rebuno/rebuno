@@ -1,0 +1,88 @@
+---
+title: "Sandboxes"
+description: "Run Uber's tools on the worker or in a sandbox"
+---
+
+By default the tools run in a git worktree on the worker. Set `SANDBOX` to a
+sandbox module's `index.ts` to run them in a sandbox instead:
+
+| Module | Checkout | Credentials |
+|--------|----------|-------------|
+| `sandboxes/e2b` | `/home/user/repo` | `E2B_API_KEY` |
+| `sandboxes/daytona` | `/home/daytona/repo` | `DAYTONA_API_KEY` |
+| `sandboxes/modal` | `/workspace/repo` | `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` |
+| `sandboxes/vercel` | `/vercel/sandbox/repo` | `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID` |
+
+```bash
+cp -r sandboxes/e2b config/sandboxes/e2b
+(cd config/sandboxes/e2b && npm install --omit=dev)
+SANDBOX=config/sandboxes/e2b/index.ts pnpm start
+```
+
+The workspace is a [resource](/sdk/typescript/resources), so later turns and
+subagents reopen the same sandbox. Each execution works on its own branch,
+`rebuno/<execution id>`. The GitHub token never enters the sandbox: the
+provider adds it to the sandbox's requests to `github.com`.
+
+Sandboxes stop or pause when a turn ends or waits for approval. Modal
+sandboxes cannot pause and run until their one-hour timeout.
+
+## Checkpoints
+
+Checkpoints are off by default. `CHECKPOINT_STEPS=5` checkpoints the workspace
+after every fifth tool call that may change it, and a [fork](/architecture#forks)
+starts from the newest checkpoint before its fork point. Without checkpoints,
+a fork starts from a fresh clone.
+
+## On the worker
+
+Without `SANDBOX`, each workspace is a git worktree under `WORKSPACE_DIR`. A
+checkpoint commits the worktree, uncommitted files included, to a ref of its
+own.
+
+Commands run beside the agent's process and can reach its credentials. Use a
+sandbox for repositories you do not trust.
+
+## Write a sandbox module
+
+A module exports `workdir`, where the checkout appears to pi, and a function
+that returns the workspace's [resource driver](/sdk/typescript/resources):
+
+```ts
+import type { DriverContext, ResourceDriver, Workspace } from "@rebuno/uber-agent/workspace";
+
+export const workdir = "/home/user/repo";
+
+export default function driver({
+  repo,
+  token,
+  prepareCheckout,
+  CheckpointUnavailable,
+}: DriverContext): ResourceDriver<Workspace, { sandboxId: string }> {
+  return {
+    driverId: "acme.sandbox.v1",
+    configuration: { repo },
+    async create(checkpointRef) {
+      // Create the sandbox, from checkpointRef when given.
+      // Throw CheckpointUnavailable when that checkpoint is gone.
+      await prepareCheckout(workspace, repo, Boolean(checkpointRef));
+      return { handle: workspace, binding: workspace.binding };
+    },
+    async open(binding) {
+      // Reconnect to the sandbox with this dispatch's token.
+    },
+    // Optional: without it, the workspace has no checkpoints.
+    async checkpoint(workspace) {
+      // Snapshot the sandbox and return the snapshot's id.
+    },
+  };
+}
+```
+
+A `Workspace` reads files, writes files, and runs commands. The token is valid
+for an hour, so `open` applies the current one; never put it in the binding.
+`workdir` must be readable on the worker, outside `/root`, since pi's `edit`
+and `write` tools resolve paths there.
+
+Node runs `index.ts` by stripping its types, so use only erasable TypeScript:
+no enums, namespaces, or parameter properties.

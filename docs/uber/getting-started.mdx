@@ -1,0 +1,60 @@
+---
+title: "Quickstart"
+description: "Run Uber and give it a task"
+---
+
+Uber needs Node 24 or later and [pnpm](https://pnpm.io):
+
+```bash
+git clone https://github.com/rebuno/uber
+cd uber
+pnpm install
+```
+
+Set these in the environment or in `.env`:
+
+- A model provider's API key, such as `OPENAI_API_KEY`. See [Models](/uber/models).
+- `GITHUB_TOKEN`, a token that can read the repository. See [GitHub access](#github-access).
+- `REBUNO_AGENT_SECRET`, the agent's secret in `rebuno.yaml` (`uber-secret`).
+
+Start the kernel and the agent:
+
+```bash
+rebuno dev --config rebuno.yaml
+pnpm start
+```
+
+Install the [terminal client](/uber/terminal-client) and open a session from a
+clone of the repository you want to work on:
+
+```bash
+npm install -g @rebuno/uber
+cd ~/code/my-project
+uber
+```
+
+Ask it `Explain how this project is structured.` The agent clones the
+repository's GitHub `origin`, and its model output and tool calls stream into
+the client.
+
+## GitHub access
+
+The agent gets a GitHub token for the session's repository on each dispatch:
+
+- `GITHUB_TOKEN` is used as given.
+- `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (a PEM, or a base64-encoded PEM)
+  set a GitHub App installed on the repository. Each dispatch mints a token for
+  that repository, valid for an hour.
+
+Reading the repository needs read access to its contents. Pushing needs write
+access to contents, and the [GitHub MCP server](/uber/mcp) to pull requests,
+issues, and Actions. The token is never recorded.
+
+## From the CLI
+
+Each turn is an execution of the `uber` agent. `repo` names the repository, and
+later turns in the session keep it:
+
+```bash
+rebuno exec create uber '{"task": "Explain how this project is structured.", "repo": "owner/name"}' --session explain
+```

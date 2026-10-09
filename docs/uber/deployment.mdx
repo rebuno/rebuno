@@ -1,0 +1,36 @@
+---
+title: "Deployment"
+description: "Run Uber's image"
+---
+
+The image `ghcr.io/rebuno/uber` runs the agent on port 5000. Mount a
+[config directory](/uber/configuration) at `/config` and a volume at
+`/workspace`:
+
+```yaml
+services:
+  agent-uber:
+    image: ghcr.io/rebuno/uber:latest
+    env_file: .env
+    environment:
+      REBUNO_URL: http://kernel:8080
+    volumes:
+      - ./config:/config
+      - uber-workspace:/workspace
+
+volumes:
+  uber-workspace:
+```
+
+To use a [sandbox](/uber/sandboxes), add its module to the image:
+
+```dockerfile
+FROM ghcr.io/rebuno/uber:latest
+COPY sandboxes/e2b /sandboxes/e2b
+RUN cd /sandboxes/e2b && npm install --omit=dev
+ENV SANDBOX=/sandboxes/e2b/index.ts
+```
+
+Register the agent with the kernel at `http://agent-uber:5000/webhook`, with
+its secret in `REBUNO_AGENT_SECRET` and a [policy](/policy), such as the
+repository's `policy.yaml`.

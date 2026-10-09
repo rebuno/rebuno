@@ -1,0 +1,36 @@
+---
+title: "MCP servers"
+description: "Give Uber's sessions tools from MCP servers"
+---
+
+`config/mcp.json` lists the MCP servers a session can turn on, in pi's format.
+Servers authenticate with headers. In a header, `${GITHUB_TOKEN}` is the
+session's [GitHub token](/uber/getting-started#github-access), the one it uses
+for git, limited to its repository and renewed on every dispatch, so GitHub's
+MCP server needs no token of its own:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_TOKEN}",
+        "X-MCP-Tools": "issue_read,list_issues,search_issues,..."
+      }
+    }
+  }
+}
+```
+
+A turn's `mcp` lists the servers to turn on, from `mcp.json` or registered by an
+extension with `pi.registerMcpServer()`. The session keeps the list until a
+turn sends another, and subagents use it:
+
+```bash
+rebuno exec create uber '{"task": "Triage the open issues.", "mcp": ["github"]}' --session triage
+```
+
+Each server's tools are named `mcp__<server>__<tool>` and run as recorded steps
+under [policy](/policy). A server's tool list is recorded too, so a replay
+builds the same prompt without connecting.
