@@ -69,6 +69,7 @@
             "pages": [
               "architecture",
               "agents",
+              "clients",
               "tools",
               "llm-calls",
               "policy",

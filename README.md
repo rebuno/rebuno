@@ -64,6 +64,7 @@ Start here:
 Reference:
 
 - [Agents](https://docs.rebuno.io/agents): how an agent process receives work and drives its effects.
+- [Clients](https://docs.rebuno.io/clients): creating and viewing executions.
 - [Tools](https://docs.rebuno.io/tools): effects, step identity, and idempotency.
 - [LLM calls](https://docs.rebuno.io/llm-calls): intercepting LLM requests so they replay durably.
 - [Streaming](https://docs.rebuno.io/streaming): live token deltas while a step is running.

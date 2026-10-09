@@ -1,0 +1,51 @@
+---
+title: "Clients"
+description: "Creating and viewing executions"
+---
+
+A client is anything that creates and views executions. It also resolves the approvals
+executions wait on. The work inside an execution belongs to the
+[agent](/agents).
+
+Both SDKs include a `Client` class: [Python](/sdk/python/client) and
+[TypeScript](/sdk/typescript/client). Scoped API keys limit what a client can
+do, such as `executions:read` for one that only watches. See
+[Authentication](/api#authentication).
+
+## Create an execution
+
+A create names an agent and an input. The kernel records the execution and
+dispatches the agent, and the call returns without waiting for the run.
+
+| Option | Use it to |
+|--------|-----------|
+| `session` | Continue a chain of executions, such as the turns of a conversation. Executions in a session run one at a time, and each reads the state its parent completed with. See [Sessions](/architecture#sessions). |
+| `parent_execution_id` | Continue a specific completed execution, branching from an earlier turn. |
+| `idempotency_key` | Make the create safe to retry. A repeat returns the existing execution. |
+
+A fork reruns an existing execution from an event in its log. Steps recorded up
+to that point replay, and everything after runs live. See
+[Forks](/architecture#forks).
+
+## View an execution
+
+- **Status.** `GET /v0/executions/{id}` returns the current state. `blocked`
+  means the execution is waiting on an approval or a subagent.
+- **Event log.** Every state change in order. Poll it with `after_seq` to follow
+  progress. Events carry no step output, so read a step's result once
+  `step.succeeded` lands. See [Events](/events).
+- **Live stream.** Token deltas while a step runs. The stream is best-effort and
+  never persisted, so the recorded step result is the source of truth. See
+  [Client contract](/streaming#client-contract).
+
+## Approve or cancel an execution
+
+- **Approvals.** When policy requires approval for a step, the execution blocks
+  until a client grants or denies it. A grant lets the step run; a denial
+  surfaces a policy error to the agent at that step. See
+  [Approvals](/policy#approvals).
+- **Cancel.** Moves the execution to `cancelled` and stops further dispatch. Its
+  subagents are cancelled with it.
+
+See the [Client API](/api#client-api) and [Approvals](/api#approvals) for the
+exact request and response shapes.
