@@ -90,6 +90,23 @@ every call in flight waits, the execution suspends and releases its worker. The
 handler reruns after they settle and replays their outcomes, so concurrent tool
 calls can each start a subagent.
 
+Pass `{ session }` to continue a [conversation](/architecture#sessions) with a subagent. Subagents started
+with the same session run one at a time, and each continues from the last one
+that completed. The session must differ from the parent's. Derive it from the
+parent's session or ID so other parents cannot reuse it:
+
+```ts
+import { defineTool, execution, subagent } from "rebuno";
+
+const askResearcher = defineTool({
+  name: "ask_researcher",
+  execute: ({ question }: { question: string }) =>
+    subagent("researcher", { question }, {
+      session: `researcher:${execution().id}`,
+    }),
+});
+```
+
 The subagent is created with a [`Client`](/sdk/typescript/client), which needs a
 key with the `executions:write` scope. Pass `{ client }`, or set `REBUNO_URL`
 and `REBUNO_API_KEY`. Calling `subagent()` outside a tool body throws an
