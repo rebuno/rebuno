@@ -1,8 +1,8 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Rebuno",
-  "description": "An open-source execution runtime for production agents.",
+  "name": "Rebuno Docs",
+  "description": "Durable execution and guardrails for AI agents.",
   "colors": {
     "primary": "#0697F3",
     "light": "#0697F3",
