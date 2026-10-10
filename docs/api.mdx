@@ -169,10 +169,17 @@ it recorded no state. `state` is `null` for an execution with no parent.
 
 ### List executions
 
-`GET /v0/executions?agent_id=&session=&status=&cursor=&limit=` · bearer
+`GET /v0/executions?agent_id=&session=&status=&spawned_by=&parent_execution_id=&forked_from=&cursor=&limit=` · bearer
 
 Newest first. Keyset paging: pass the returned `next_cursor` back as `cursor`.
 `session` filters by exact session.
+
+The relationship filters each take an execution UUID:
+
+- `spawned_by` lists the execution's direct subagents.
+- `parent_execution_id` lists the executions that continue it, including forks
+  of those executions, which keep their source's parent.
+- `forked_from` lists its forks.
 
 ```json
 { "executions": [ ... ], "next_cursor": "0192..." }

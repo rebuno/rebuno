@@ -40,6 +40,12 @@ func (s *Store) listExecutionsLocked(filter domain.ExecutionFilter) domain.Execu
 		if filter.SpawnedBy != nil && (e.SpawnedBy == nil || e.SpawnedBy.ExecutionID != *filter.SpawnedBy) {
 			continue
 		}
+		if filter.ParentExecutionID != nil && (e.ParentExecutionID == nil || *e.ParentExecutionID != *filter.ParentExecutionID) {
+			continue
+		}
+		if filter.ForkedFrom != nil && (e.ForkedFrom == nil || *e.ForkedFrom != *filter.ForkedFrom) {
+			continue
+		}
 		if filter.Status != "" && e.Status != filter.Status {
 			continue
 		}

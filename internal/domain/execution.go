@@ -54,13 +54,15 @@ type SpawnedBy struct {
 
 // Cursor holds an execution ID. IDs are UUIDv7, so ordering by ID orders by creation.
 type ExecutionFilter struct {
-	AgentID        string
-	Session        string
-	IdempotencyKey string
-	SpawnedBy      *uuid.UUID
-	Status         ExecutionStatus
-	Limit          int
-	Cursor         string
+	AgentID           string
+	Session           string
+	IdempotencyKey    string
+	SpawnedBy         *uuid.UUID
+	ParentExecutionID *uuid.UUID
+	ForkedFrom        *uuid.UUID
+	Status            ExecutionStatus
+	Limit             int
+	Cursor            string
 }
 
 // Empty NextCursor means the last page; otherwise pass it back as ExecutionFilter.Cursor.

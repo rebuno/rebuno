@@ -15,10 +15,16 @@ The dashboard is a Next.js app that reads and drives a running kernel over the
 
 | Page | What it does |
 |------|--------------|
-| Executions | Lists executions and opens one to show its event log and steps side by side. Creates a new execution against any registered agent, or cancels a running one. |
+| Executions | Lists executions and opens one to show its event log and steps side by side, or its session and subagent tree. Creates a new execution against any registered agent, or cancels a running one. |
 | Agents | Lists registered agents, registers a new one, deletes one, and edits its policy bundle. |
 | Approvals | Lists approvals still pending, soonest timeout first, and grants or denies each one. |
 | Metrics | Kernel counters and latency quantiles: executions, steps, dispatch outcomes, policy decisions, replay hits, and queue depth. |
+
+## Sessions and subagent trees
+
+**View tree** on an execution shows the [session](/architecture#sessions) it
+belongs to: each turn in order, the [subagents](/architecture#subagents) it
+started beneath it, and any session that branched from it.
 
 ## Reaching the kernel
 

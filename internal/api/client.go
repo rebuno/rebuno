@@ -60,6 +60,20 @@ func (rt *Router) listExecutions(w http.ResponseWriter, r *http.Request) {
 		Status:  domain.ExecutionStatus(q.Get("status")),
 		Cursor:  q.Get("cursor"),
 	}
+	for name, target := range map[string]**uuid.UUID{
+		"spawned_by":          &filter.SpawnedBy,
+		"parent_execution_id": &filter.ParentExecutionID,
+		"forked_from":         &filter.ForkedFrom,
+	} {
+		if value := q.Get(name); value != "" {
+			id, err := uuid.Parse(value)
+			if err != nil {
+				WriteError(w, domain.ErrValidation)
+				return
+			}
+			*target = &id
+		}
+	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
