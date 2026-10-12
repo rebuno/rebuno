@@ -6,20 +6,20 @@ ticket, and email an internal summary after approval.
 Compatibility is re-checked weekly against the newest release of each framework.
 
 <!-- matrix:start -->
-Last checked: 2026-10-05.
+Last checked: 2026-10-12.
 
-Kernel `0.35.0`, Python SDK `0.24.0`, TypeScript SDK `0.22.0`
+Kernel `0.38.0`, Python SDK `0.27.0`, TypeScript SDK `0.25.0`
 
 | Framework | Tested | Status |
 | --- | --- | --- |
-| Claude Agent SDK (Python) | 0.2.163 | ✅ |
-| CrewAI | 1.15.23 | ✅ |
-| LangChain (Python) | 1.4.3 | ✅ |
+| Claude Agent SDK (Python) | 0.2.165 | ✅ |
+| CrewAI | 1.15.27 | ✅ |
+| LangChain (Python) | 1.4.4 | ✅ |
 | OpenAI Agents SDK (Python) | 0.23.1 | ✅ |
-| Pydantic AI | 2.54.0 | ✅ |
-| Vercel AI SDK | 7.0.127 | ✅ |
-| Claude Agent SDK (TypeScript) | 0.3.289 | ✅ |
-| LangChain.js | 1.5.15 | ✅ |
-| Mastra | 1.74.0 | ✅ |
-| OpenAI Agents SDK (TypeScript) | 0.18.0 | ✅ |
+| Pydantic AI | 2.55.0 | ✅ |
+| Vercel AI SDK | 7.0.137 | ✅ |
+| Claude Agent SDK (TypeScript) | 0.3.296 | ✅ |
+| LangChain.js | 1.5.16 | ✅ |
+| Mastra | 1.76.0 | ✅ |
+| OpenAI Agents SDK (TypeScript) | 0.20.0 | ✅ |
 <!-- matrix:end -->
