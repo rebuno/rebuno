@@ -14,7 +14,20 @@ func (s *Store) RegisterAgent(ctx context.Context, agent domain.Agent) error {
 	if agent.RegisteredAt.IsZero() {
 		agent.RegisteredAt = time.Now().UTC()
 	}
+	agent.AgentMetadata = s.agents[agent.ID].AgentMetadata
 	s.agents[agent.ID] = agent
+	return nil
+}
+
+func (s *Store) SetAgentMetadata(ctx context.Context, id string, metadata domain.AgentMetadata) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.agents[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	a.AgentMetadata = metadata
+	s.agents[id] = a
 	return nil
 }
 

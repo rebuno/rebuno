@@ -16,6 +16,8 @@ agent = Agent(
     base_url="http://localhost:8080",  # or REBUNO_URL
     webhook_path="/webhook",          # default
     kernel_timeout=35.0,              # default; timeout for agent→kernel calls
+    description="Answers prompts.",   # optional; published to the kernel
+    output_schema=None,               # optional JSON Schema or pydantic model
 )
 ```
 
@@ -46,6 +48,12 @@ async def process(input: dict) -> dict: ...
 Binding happens before your handler runs. A missing required field or a pydantic
 error fails the execution. The return value becomes the execution's `output` and
 has to be JSON-serializable.
+
+### Describing the agent
+
+The agent publishes its `description` and schemas to the
+[agent record](/agents#describe-an-agent) when it starts. The input schema comes
+from the handler's signature.
 
 ### Sessions
 

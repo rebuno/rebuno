@@ -150,11 +150,15 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 	if opts.SpawnedBy != nil && opts.IdempotencyKey == "" {
 		opts.IdempotencyKey = opts.SpawnedBy.StepID
 	}
-	if _, err := k.d.Agents.GetAgent(ctx, agentID); err != nil {
+	agent, err := k.d.Agents.GetAgent(ctx, agentID)
+	if err != nil {
 		return domain.Execution{}, err
 	}
 	if existing, ok, err := k.executionByIdempotencyKey(ctx, agentID, opts.IdempotencyKey); err != nil || ok {
 		return existing, err
+	}
+	if err := validateInput(agent, input); err != nil {
+		return domain.Execution{}, err
 	}
 	if opts.ParentExecutionID != nil {
 		parent, err := authorizedExecution(ctx, k.d.Executions, *opts.ParentExecutionID)
@@ -209,7 +213,6 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 			return k.startExecutionTx(ctx, tx, &exec)
 		})
 	}
-	var err error
 	if exec.SpawnedBy == nil {
 		err = create(ctx)
 	} else {

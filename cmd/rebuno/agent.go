@@ -66,6 +66,15 @@ func agentGetCmd() *cobra.Command {
 			fmt.Printf("  id          %s\n", a.ID)
 			fmt.Printf("  webhook     %s\n", a.WebhookURL)
 			fmt.Printf("  registered  %s\n", a.RegisteredAt.Format(time.RFC3339))
+			if a.Description != "" {
+				fmt.Printf("  description %s\n", a.Description)
+			}
+			if a.InputSchema != nil {
+				fmt.Printf("  input       %s\n", a.InputSchema)
+			}
+			if a.OutputSchema != nil {
+				fmt.Printf("  output      %s\n", a.OutputSchema)
+			}
 			if a.PolicyBundle == "" {
 				fmt.Println("  policy      none (permissive)")
 				return nil

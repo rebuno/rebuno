@@ -1,6 +1,7 @@
 package kernel_test
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -77,5 +78,36 @@ func TestRegisterAgentRejectsInvalidBundle(t *testing.T) {
 
 	if _, gerr := k.GetAgent(ctx, "agent-2"); gerr == nil {
 		t.Fatal("agent with invalid bundle should not be persisted")
+	}
+}
+
+func TestSetAgentMetadataRejectsInvalidSchema(t *testing.T) {
+	k, ctx := setup(t)
+
+	for _, schema := range []string{`{"type": 5}`, `{"$ref": "file:///etc/hostname"}`} {
+		err := k.SetAgentMetadata(ctx, "agent-1", domain.AgentMetadata{InputSchema: json.RawMessage(schema)})
+		if !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("schema %s: expected ErrValidation, got %v", schema, err)
+		}
+	}
+}
+
+func TestCreateExecutionValidatesInputSchema(t *testing.T) {
+	k, ctx := setup(t)
+
+	if err := k.SetAgentMetadata(ctx, "agent-1", domain.AgentMetadata{
+		InputSchema: json.RawMessage(`{"type": "object", "required": ["topic"], "properties": {"topic": {"type": "string"}}}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{"topic": 1}`)); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation, got %v", err)
+	}
+	if _, err := k.CreateExecution(ctx, "agent-1", nil); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected ErrValidation for missing input, got %v", err)
+	}
+	if _, err := k.CreateExecution(ctx, "agent-1", json.RawMessage(`{"topic": "go"}`)); err != nil {
+		t.Fatalf("matching input should be accepted, got %v", err)
 	}
 }

@@ -17,8 +17,11 @@ func (f fakeAgentStore) GetAgent(ctx context.Context, id string) (domain.Agent, 
 	return f.agent, f.err
 }
 func (f fakeAgentStore) RegisterAgent(ctx context.Context, a domain.Agent) error { return nil }
-func (f fakeAgentStore) ListAgents(ctx context.Context) ([]domain.Agent, error)  { return nil, nil }
-func (f fakeAgentStore) DeleteAgent(ctx context.Context, id string) error        { return nil }
+func (f fakeAgentStore) SetAgentMetadata(ctx context.Context, id string, m domain.AgentMetadata) error {
+	return nil
+}
+func (f fakeAgentStore) ListAgents(ctx context.Context) ([]domain.Agent, error) { return nil, nil }
+func (f fakeAgentStore) DeleteAgent(ctx context.Context, id string) error       { return nil }
 
 // A missing id fails in NewRuleEngine.
 const uncompilableBundle = `rules:

@@ -26,6 +26,37 @@ agents:
 `lease_timeout_seconds` overrides `REBUNO_DISPATCH_LEASE_TIMEOUT` for this
 agent. Omit it to use the kernel default. Values under ten seconds are ignored.
 
+## Describe an agent
+
+An agent describes itself to its callers by publishing a `description`, an
+`input_schema`, and an `output_schema` from its own code when it starts
+(`PUT /v0/agents/{id}/metadata`, see [Publish agent metadata](/api#publish-agent-metadata)).
+
+```json
+{
+  "description": "Researches a topic and returns a summary with sources.",
+  "input_schema": {
+    "type": "object",
+    "required": ["topic"],
+    "properties": { "topic": { "type": "string", "description": "What to research" } },
+    "examples": [{ "topic": "durable execution engines" }]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "summary": { "type": "string" },
+      "sources": { "type": "array", "items": { "type": "string" } }
+    }
+  }
+}
+```
+
+Callers read them from `GET /v0/agents/{id}` with the `agents:read` scope. The
+kernel rejects an execution whose `input` does not match `input_schema`; until
+the agent publishes one, input is not checked. `output_schema` documents the
+agent's `output` and is not enforced. Schemas are JSON Schema, and the standard
+`examples` keyword carries sample inputs.
+
 ## Dispatch lifecycle
 
 The kernel POSTs to the webhook every time it has work for an execution. The

@@ -28,6 +28,7 @@ type AgentKernel interface {
 	RegisterResource(ctx context.Context, execID uuid.UUID, req kernel.RegisterResourceRequest) (kernel.ResourceView, error)
 	BindResource(ctx context.Context, execID uuid.UUID, key string, req kernel.BindResourceRequest) error
 	PublishCheckpoints(ctx context.Context, execID uuid.UUID, req kernel.PublishCheckpointsRequest) error
+	SetAgentMetadata(ctx context.Context, agentID string, metadata domain.AgentMetadata) error
 }
 
 // The lease the kernel issued in the webhook, which every mutation sends back.
@@ -319,6 +320,19 @@ func (rt *Router) publishCheckpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := rt.agent.PublishCheckpoints(r.Context(), id, req); err != nil {
+		WriteError(w, err)
+		return
+	}
+	WriteNoContent(w)
+}
+
+func (rt *Router) setAgentMetadata(w http.ResponseWriter, r *http.Request) {
+	var req domain.AgentMetadata
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteError(w, err)
+		return
+	}
+	if err := rt.agent.SetAgentMetadata(r.Context(), chi.URLParam(r, "id"), req); err != nil {
 		WriteError(w, err)
 		return
 	}

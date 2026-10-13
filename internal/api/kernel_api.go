@@ -102,6 +102,10 @@ func (k *KernelAPI) FailExecution(ctx context.Context, execID uuid.UUID, lease d
 	return k.Inner.FailExecution(ctx, execID, lease, reason)
 }
 
+func (k *KernelAPI) SetAgentMetadata(ctx context.Context, agentID string, metadata domain.AgentMetadata) error {
+	return k.Inner.SetAgentMetadata(ctx, agentID, metadata)
+}
+
 func (k *KernelAPI) Register(ctx context.Context, agent domain.Agent) error {
 	return k.Inner.RegisterAgent(ctx, agent)
 }

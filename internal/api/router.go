@@ -81,6 +81,7 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.With(bearer(domain.ScopeAgentsRead)).Get("/v0/agents", r.listAgents)
 	mux.With(bearer(domain.ScopeAgentsRead)).Get("/v0/agents/{id}", r.getAgent)
 	mux.With(bearer(domain.ScopeAgentsWrite)).Delete("/v0/agents/{id}", r.deleteAgent)
+	mux.With(hmac).Put("/v0/agents/{id}/metadata", r.setAgentMetadata)
 	mux.With(bearer(domain.ScopePoliciesWrite)).Post("/v0/policies/{agent_id}", r.loadPolicy)
 	mux.With(bearer(domain.ScopePoliciesWrite, domain.ScopeExecutionsRead)).Post("/v0/policies/{agent_id}/test", r.testPolicy)
 	mux.With(bearer(domain.ScopeApprovalsRead)).Get("/v0/approvals", r.listApprovals)

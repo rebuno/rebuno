@@ -14,7 +14,7 @@ details}` envelope.
   case-sensitive. Dev mode allows anonymous access but checks supplied tokens.
 - **Agent routes** use the v1 HMAC signature described below. Agents can access
   only their assigned executions (`403 forbidden` otherwise).
-- **Agent routes that change durable state** also send `Rebuno-Dispatch-Id` and
+- **Agent routes that change an execution** also send `Rebuno-Dispatch-Id` and
   `Rebuno-Dispatch-Attempt`, copied from the webhook that delivered the run. A
   call from an attempt the kernel has already re-delivered gets
   `409 lease_superseded`.
@@ -98,6 +98,9 @@ That gives `Rebuno-Signature: v1=017dff4039ba40e90d3d8d566fdf51db427672f92d45ef4
 
 Returns `201` with the created execution. The kernel records `execution.created`
 and enqueues a dispatch.
+
+When the agent has published an [`input_schema`](#publish-agent-metadata),
+`input` must match it, or the create returns `400`. A missing `input` is validated as `null`.
 
 Add an optional `session` to continue a chain of executions, such as the turns
 of a conversation:
@@ -428,6 +431,14 @@ handler reads the settled steps and continues.
 `POST /v0/executions/{id}/fail` takes `{ "error": "..." }` → `204`. Records
 `execution.failed`.
 
+### Publish agent metadata
+
+`PUT /v0/agents/{id}/metadata` · HMAC takes `{ "description?", "input_schema?",
+"output_schema?" }` → `204`. It replaces the agent's metadata, so a field left
+out is cleared. An agent can publish only its own metadata. The schemas are
+JSON Schema documents (draft 2020-12 unless `$schema` names another) and must be
+self-contained: a `$ref` to another document returns `400`.
+
 ---
 
 ## Admin API
@@ -451,7 +462,7 @@ revoked key returns `409 conflict`. Existing requests and streams may finish.
 
 `POST /v0/agents` · bearer registers or upserts an agent. Body
 `{ "id", "webhook_url", "secret", "lease_timeout_seconds?" }`. Returns `201` and
-the stored agent.
+the stored agent. Registering again keeps the metadata the agent published.
 
 `GET /v0/agents` · bearer lists agents.
 
@@ -460,7 +471,8 @@ the stored agent.
 `DELETE /v0/agents/{id}` · bearer → `204`.
 
 An agent reads `{ "id", "webhook_url", "policy_bundle?", "registered_at",
-"lease_timeout_seconds?" }`. The secret is never returned.
+"lease_timeout_seconds?", "description?", "input_schema?", "output_schema?" }`.
+The secret is never returned.
 
 ### Policy
 

@@ -1,10 +1,15 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/policy"
 )
@@ -27,6 +32,59 @@ func validatePolicyBundle(bundle string) error {
 	}
 	if _, err := policy.NewRuleEngineFromBundle(bundle); err != nil {
 		return fmt.Errorf("%w: invalid policy bundle: %v", domain.ErrValidation, err)
+	}
+	return nil
+}
+
+func (k *Kernel) SetAgentMetadata(ctx context.Context, agentID string, metadata domain.AgentMetadata) error {
+	if err := auth.AuthorizeAgent(ctx, agentID); err != nil {
+		return err
+	}
+	for _, schema := range []*json.RawMessage{&metadata.InputSchema, &metadata.OutputSchema} {
+		if bytes.Equal(bytes.TrimSpace(*schema), []byte("null")) {
+			*schema = nil
+		}
+		if _, err := compileSchema(*schema); err != nil {
+			return err
+		}
+	}
+	return k.d.Agents.SetAgentMetadata(ctx, agentID, metadata)
+}
+
+func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid schema: %v", domain.ErrValidation, err)
+	}
+	c := jsonschema.NewCompiler()
+	c.UseLoader(jsonschema.SchemeURLLoader{})
+	if err := c.AddResource("urn:rebuno:schema", doc); err != nil {
+		return nil, fmt.Errorf("%w: invalid schema: %v", domain.ErrValidation, err)
+	}
+	schema, err := c.Compile("urn:rebuno:schema")
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid schema: %v", domain.ErrValidation, err)
+	}
+	return schema, nil
+}
+
+func validateInput(agent domain.Agent, input json.RawMessage) error {
+	schema, err := compileSchema(agent.InputSchema)
+	if err != nil || schema == nil {
+		return err
+	}
+	if len(input) == 0 {
+		input = json.RawMessage("null")
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(input))
+	if err != nil {
+		return fmt.Errorf("%w: invalid input: %v", domain.ErrValidation, err)
+	}
+	if err := schema.Validate(doc); err != nil {
+		return fmt.Errorf("%w: input does not match the agent's input_schema: %v", domain.ErrValidation, err)
 	}
 	return nil
 }

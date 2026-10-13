@@ -186,3 +186,27 @@ func TestAdministrativeRoutesRequireBearer(t *testing.T) {
 		t.Fatalf("bearer status %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestAgentPublishesOnlyItsOwnMetadata(t *testing.T) {
+	mux, k, ctx := setupRouter(t)
+	if err := k.RegisterAgent(ctx, domain.Agent{ID: "other", Secret: "other-secret", WebhookURL: "http://localhost"}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"description":"mine"}`)
+	for id, want := range map[string]int{testAgentID: http.StatusNoContent, "other": http.StatusForbidden} {
+		req := httptest.NewRequest(http.MethodPut, "/v0/agents/"+id+"/metadata", bytes.NewReader(body))
+		signAgentRequest(req, body)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+		if rr.Code != want {
+			t.Fatalf("%s: status %d, want %d: %s", id, rr.Code, want, rr.Body.String())
+		}
+	}
+	other, err := k.GetAgent(ctx, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.Description != "" {
+		t.Fatalf("another agent's metadata changed: %q", other.Description)
+	}
+}

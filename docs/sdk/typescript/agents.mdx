@@ -17,7 +17,9 @@ const agent = new Agent(
     baseUrl: "http://localhost:8080",  // or REBUNO_URL
     webhookPath: "/webhook",      // default
     kernelTimeout: 35000,         // ms; default; timeout for agent→kernel calls
-    inputSchema: mySchema,        // optional Standard Schema validator
+    description: "Answers prompts.",  // optional; published to the kernel
+    inputSchema: mySchema,        // optional; validates and is published
+    outputSchema: myOutputSchema, // optional; published
   },
 );
 ```
@@ -80,7 +82,14 @@ const agent = new Agent("dev-agent", {
 
 Validation happens before your handler runs. A failure fails the execution with
 the collected issue messages. Your handler receives the validated and coerced
-value. Without an `inputSchema`, `input` is passed through as-is.
+value, typed by the schema. An `outputSchema` types the handler's return value.
+Without an `inputSchema`, `input` is passed through as-is.
+
+### Describing the agent
+
+The agent publishes its `description` and schemas to the
+[agent record](/agents#describe-an-agent) when it starts. Schemas can be Zod,
+ArkType, or plain JSON Schema.
 
 ## `serve()` vs `fetch`
 

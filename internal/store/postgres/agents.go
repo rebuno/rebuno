@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
@@ -38,6 +39,34 @@ func registerAgent(ctx context.Context, q Querier, agent domain.Agent) error {
 	return nil
 }
 
+func (s *Store) SetAgentMetadata(ctx context.Context, id string, metadata domain.AgentMetadata) error {
+	res, err := s.q(ctx).Exec(ctx, `
+		UPDATE agents SET description = $2, input_schema = $3, output_schema = $4 WHERE id = $1
+	`, id, metadata.Description, rawArg(metadata.InputSchema), rawArg(metadata.OutputSchema))
+	if err != nil {
+		return fmt.Errorf("set agent metadata: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+const agentColumns = `id, webhook_url, secret, registered_at, policy_bundle, lease_timeout_seconds,
+	description, input_schema, output_schema`
+
+func scanAgent(row pgx.Row) (domain.Agent, error) {
+	var agent domain.Agent
+	var inputSchema, outputSchema *string
+	if err := row.Scan(&agent.ID, &agent.WebhookURL, &agent.Secret, &agent.RegisteredAt, &agent.PolicyBundle,
+		&agent.LeaseTimeoutSeconds, &agent.Description, &inputSchema, &outputSchema); err != nil {
+		return domain.Agent{}, err
+	}
+	agent.InputSchema = rawFromPtr(inputSchema)
+	agent.OutputSchema = rawFromPtr(outputSchema)
+	return agent, nil
+}
+
 func (s *Store) GetAgent(ctx context.Context, id string) (domain.Agent, error) {
 	return getAgent(ctx, s.q(ctx), id)
 }
@@ -47,9 +76,7 @@ func (q querier) GetAgent(ctx context.Context, id string) (domain.Agent, error) 
 }
 
 func getAgent(ctx context.Context, q Querier, id string) (domain.Agent, error) {
-	var agent domain.Agent
-	row := q.QueryRow(ctx, `SELECT id, webhook_url, secret, registered_at, policy_bundle, lease_timeout_seconds FROM agents WHERE id = $1`, id)
-	err := row.Scan(&agent.ID, &agent.WebhookURL, &agent.Secret, &agent.RegisteredAt, &agent.PolicyBundle, &agent.LeaseTimeoutSeconds)
+	agent, err := scanAgent(q.QueryRow(ctx, `SELECT `+agentColumns+` FROM agents WHERE id = $1`, id))
 	if err != nil {
 		return domain.Agent{}, mapNotFound(err)
 	}
@@ -57,19 +84,15 @@ func getAgent(ctx context.Context, q Querier, id string) (domain.Agent, error) {
 }
 
 func (s *Store) ListAgents(ctx context.Context) ([]domain.Agent, error) {
-	rows, err := s.q(ctx).Query(ctx, `
-		SELECT id, webhook_url, secret, registered_at, policy_bundle, lease_timeout_seconds
-		FROM agents
-		ORDER BY id
-	`)
+	rows, err := s.q(ctx).Query(ctx, `SELECT `+agentColumns+` FROM agents ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
 	defer rows.Close()
 	var out []domain.Agent
 	for rows.Next() {
-		var agent domain.Agent
-		if err := rows.Scan(&agent.ID, &agent.WebhookURL, &agent.Secret, &agent.RegisteredAt, &agent.PolicyBundle, &agent.LeaseTimeoutSeconds); err != nil {
+		agent, err := scanAgent(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan agent: %w", err)
 		}
 		out = append(out, agent)
