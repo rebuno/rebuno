@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"strconv"
@@ -114,7 +115,7 @@ func (j *Judge) decide(ctx context.Context, input domain.PolicyInput, cfg domain
 		fallback = domain.DecisionRequireApproval
 	}
 
-	probs, err := j.ask(ctx, input, cfg.Instructions)
+	probs, err := j.ask(ctx, input, cfg)
 	if err != nil {
 		return fallback, fmt.Sprintf("judge unavailable: %v", err)
 	}
@@ -130,7 +131,14 @@ func (j *Judge) decide(ctx context.Context, input domain.PolicyInput, cfg domain
 	return top, fmt.Sprintf("judge: %s %.2f", top, p)
 }
 
-func (j *Judge) ask(ctx context.Context, input domain.PolicyInput, instructions string) (map[string]float64, error) {
+func (j *Judge) ask(ctx context.Context, input domain.PolicyInput, cfg domain.JudgeConfig) (map[string]float64, error) {
+	question := cfg.Question
+	if question == "" {
+		question = judgeQuestion
+	}
+	criteria := maps.Clone(judgeCriteria)
+	maps.Copy(criteria, cfg.Criteria)
+
 	var buf bytes.Buffer
 	err := j.body.Execute(&buf, judgeRequest{
 		ToolCall: map[string]any{
@@ -138,9 +146,9 @@ func (j *Judge) ask(ctx context.Context, input domain.PolicyInput, instructions 
 			"tool":      input.Target,
 			"arguments": input.Args,
 		},
-		Question:     judgeQuestion,
-		Criteria:     judgeCriteria,
-		Instructions: instructions,
+		Question:     question,
+		Criteria:     criteria,
+		Instructions: cfg.Instructions,
 	})
 	if err != nil {
 		return nil, err

@@ -243,6 +243,10 @@ model, so put `deny` rules for commands known to be dangerous above it.
       decision: judge
       judge:
         instructions: commands run in a disposable build container
+        criteria:
+          allow: Reads files or runs builds and tests inside the workspace.
+          deny: Reaches the network or writes outside the workspace.
+          require_approval: Installs packages or changes the container's configuration.
         threshold: 0.6              # default 0.6
         fallback: require_approval  # allow | deny | require_approval (default)
       approval_config:
@@ -251,9 +255,20 @@ model, so put `deny` rules for commands known to be dangerous above it.
 
 | Field | Meaning |
 |-------|---------|
+| `question` | The question the model answers about the call. Optional. |
+| `criteria` | Descriptions of when `allow`, `deny`, and `require_approval` apply, keyed by decision. The model scores all three; a decision left out keeps its default description. Optional. |
 | `instructions` | Context about where the call runs, passed to the model with it. Optional. |
 | `threshold` | The probability, from 0 to 1, the model's top choice needs to stand. Default `0.6`. |
 | `fallback` | The decision when no choice reaches `threshold`, or when the model cannot be reached. Default `require_approval`. |
+
+Without `question`, the model answers: "Should `tool_call` run automatically, be
+blocked, or wait for a human to approve it?" The default criteria are:
+
+| Decision | Default description |
+|----------|---------------------|
+| `allow` | Safe to run unattended: a routine action whose effects are easy to undo or minor if unwanted. |
+| `deny` | Harmful in any context: destroys data, exposes secrets, or runs untrusted code. |
+| `require_approval` | Possibly fine, but consequential or hard to undo, so a human should confirm. |
 
 The model is any HTTP API that returns a probability for each decision. A YAML
 file named by `REBUNO_JUDGE_CONFIG` ([Deployment](/deployment#configuration))
@@ -293,8 +308,8 @@ The body template receives:
 | Value | Content |
 |-------|---------|
 | `.ToolCall` | `agent_id`, `tool`, and `arguments` of the call. |
-| `.Question` | The question the model answers about the call. |
-| `.Criteria` | Each decision mapped to a description of when it applies. |
+| `.Question` | The rule's `question`, or the default question. |
+| `.Criteria` | Each decision mapped to a description of when it applies, with the rule's `criteria` in place of the defaults. |
 | `.Instructions` | The rule's `instructions`, or empty. |
 
 [`examples/judges`](https://github.com/rebuno/rebuno/tree/main/examples/judges)

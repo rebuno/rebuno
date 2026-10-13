@@ -27,9 +27,11 @@ type PolicyResult struct {
 }
 
 type JudgeConfig struct {
-	Instructions string  `json:"instructions,omitempty" yaml:"instructions,omitempty"`
-	Threshold    float64 `json:"threshold,omitempty" yaml:"threshold,omitempty"`
-	Fallback     string  `json:"fallback,omitempty" yaml:"fallback,omitempty"`
+	Question     string            `json:"question,omitempty" yaml:"question,omitempty"`
+	Criteria     map[string]string `json:"criteria,omitempty" yaml:"criteria,omitempty"`
+	Instructions string            `json:"instructions,omitempty" yaml:"instructions,omitempty"`
+	Threshold    float64           `json:"threshold,omitempty" yaml:"threshold,omitempty"`
+	Fallback     string            `json:"fallback,omitempty" yaml:"fallback,omitempty"`
 }
 
 type BudgetConfig struct {

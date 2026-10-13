@@ -79,6 +79,57 @@ func TestJudgeRuleDecision(t *testing.T) {
 	}
 }
 
+func TestJudgeRuleQuestionAndCriteriaReachModel(t *testing.T) {
+	var req struct {
+		Questions struct {
+			Decision struct {
+				Instructions string            `json:"instructions"`
+				Criteria     map[string]string `json:"criteria"`
+			} `json:"decision"`
+		} `json:"questions"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"answers": map[string]any{"decision": map[string]any{"probabilities": map[string]float64{"allow": 1}}},
+		})
+	}))
+	defer srv.Close()
+
+	engine, err := NewRuleEngineFromBundle(`rules:
+  - id: email
+    when:
+      target: send_email
+    then:
+      decision: judge
+      judge:
+        question: Should this email go out without review?
+        criteria:
+          deny: Sends customer data to an outside address.
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Judge, err = LoadJudge("../../examples/judges/typesafe.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Judge.url = srv.URL
+	if _, err := engine.Evaluate(context.Background(), domain.PolicyInput{Target: "send_email"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := req.Questions.Decision
+	if got.Instructions != "Should this email go out without review?" {
+		t.Errorf("question = %q", got.Instructions)
+	}
+	if got.Criteria["deny"] != "Sends customer data to an outside address." || got.Criteria["allow"] != judgeCriteria["allow"] {
+		t.Errorf("criteria = %v", got.Criteria)
+	}
+}
+
 func TestJudgeRuleWithoutJudgeConfigDenies(t *testing.T) {
 	bundle := strings.Replace(judgeBundle, "fallback: deny", "fallback: allow", 1)
 	engine, err := NewRuleEngineFromBundle(bundle)
@@ -108,6 +159,7 @@ func TestJudgeConfigIsValidatedAtLoad(t *testing.T) {
 		{"judge without decision judge", "allow", "threshold: 0.7", "judge is set"},
 		{"unknown fallback", "judge", "fallback: allow_all", "unknown fallback"},
 		{"threshold above one", "judge", "threshold: 70", "threshold 70"},
+		{"criteria for unknown decision", "judge", "criteria: {escalate: when unsure}", "unknown criteria"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

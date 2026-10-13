@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -88,11 +89,16 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 				return nil, fmt.Errorf("rule %q: %w", r.ID, err)
 			}
 		}
-		if r.Then.Judge != (domain.JudgeConfig{}) && r.Then.Decision != domain.DecisionJudge {
+		if !reflect.DeepEqual(r.Then.Judge, domain.JudgeConfig{}) && r.Then.Decision != domain.DecisionJudge {
 			return nil, fmt.Errorf("rule %q: judge is set but decision is %q", r.ID, r.Then.Decision)
 		}
 		if t := r.Then.Judge.Threshold; t < 0 || t > 1 {
 			return nil, fmt.Errorf("rule %q: threshold %v outside 0 to 1", r.ID, t)
+		}
+		for d := range r.Then.Judge.Criteria {
+			if err := oneOf("criteria", d, domain.DecisionAllow, domain.DecisionDeny, domain.DecisionRequireApproval); err != nil {
+				return nil, fmt.Errorf("rule %q: %w", r.ID, err)
+			}
 		}
 	}
 	rules := make([]Rule, len(cfg.Rules))
