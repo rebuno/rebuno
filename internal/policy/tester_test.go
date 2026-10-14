@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
@@ -82,7 +84,7 @@ func TestReplayCasesKeepsFirstDecision(t *testing.T) {
 		decisionEvent(domain.EventStepAllowed, "s2", "allow-safe-shell"),
 	}
 
-	cases := ReplayCases(steps, events)
+	cases := ReplayCases(steps, events, nil)
 	if len(cases) != 2 {
 		t.Fatalf("cases = %d, want 2", len(cases))
 	}
@@ -108,7 +110,7 @@ func TestReplayCasesSkipsKernelDecisions(t *testing.T) {
 	events := []domain.Event{
 		decisionEvent(domain.EventStepDenied, "s1", domain.RuleIndeterminateRetry),
 	}
-	cases := ReplayCases(steps, events)
+	cases := ReplayCases(steps, events, nil)
 	if cases[0].Expect != "" {
 		t.Fatalf("expect = %q, want empty", cases[0].Expect)
 	}
@@ -131,5 +133,83 @@ func TestLoadCasesAppliesFileDefaults(t *testing.T) {
 	}
 	if cases[1].AgentID != "other" || cases[1].Kind != domain.StepKindLLM {
 		t.Fatalf("case 1 = %+v", cases[1])
+	}
+}
+
+const fetchEmailBundle = `
+default_action: allow
+rules:
+  - id: no-email-after-fetch
+    when:
+      target: send_email
+      history:
+        - target: web_fetch
+          within: 1h
+    then: { decision: deny }
+`
+
+func TestCaseHistoryFeedsHistoryConditions(t *testing.T) {
+	engine, err := NewRuleEngineFromBundle(fetchEmailBundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases, err := LoadCases(`
+cases:
+  - name: after fetch
+    target: send_email
+    history:
+      - { target: web_fetch, ago: 10m }
+    expect: deny
+  - name: fetch outside window
+    target: send_email
+    history:
+      - { target: web_fetch, ago: 2h }
+    expect: allow
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(context.Background(), engine, cases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Failed != 0 {
+		t.Fatalf("failures: %+v", report.Results)
+	}
+}
+
+func TestReplayCasesSeeHistoryAsDecided(t *testing.T) {
+	engine, err := NewRuleEngineFromBundle(fetchEmailBundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execID := uuid.New()
+	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) *time.Time { t := t0.Add(d); return &t }
+	steps := []domain.Step{
+		{StepID: "email-1", ExecutionID: execID, Kind: domain.StepKindTool, Target: "send_email", Args: json.RawMessage(`{"n":1}`), StartedAt: at(0)},
+		{StepID: "fetch", ExecutionID: execID, Kind: domain.StepKindTool, Target: "web_fetch", Args: json.RawMessage(`{}`), StartedAt: at(time.Minute)},
+		{StepID: "email-2", ExecutionID: execID, Kind: domain.StepKindTool, Target: "send_email", Args: json.RawMessage(`{"n":2}`)},
+	}
+	decided := func(eventType, stepID, ruleID string, d time.Duration) domain.Event {
+		e := decisionEvent(eventType, stepID, ruleID)
+		e.OccurredAt = t0.Add(d)
+		return e
+	}
+	events := []domain.Event{
+		decided(domain.EventStepAllowed, "email-1", "default", 0),
+		decided(domain.EventStepAllowed, "fetch", "default", time.Minute),
+		decided(domain.EventStepDenied, "email-2", "no-email-after-fetch", 2*time.Minute),
+	}
+	cases := ReplayCases(steps, events, steps[:2])
+	if err := NormalizeCases(cases, "agent"); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(context.Background(), engine, cases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Failed != 0 {
+		t.Fatalf("failures: %+v", report.Results)
 	}
 }

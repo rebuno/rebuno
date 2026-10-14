@@ -64,6 +64,7 @@ not checked.
 | `agent_ids` | A list of agent ids; matches if the agent is in it. |
 | `step_kind` | `tool_call`, `llm_call`, or `local`. |
 | `arguments` | Predicates against fields inside the call's JSON arguments. See [Argument predicates](#argument-predicates). |
+| `history` | Clauses about steps policy allowed earlier. See [History conditions](#history-conditions). |
 
 ### Argument predicates
 
@@ -89,6 +90,7 @@ when:
 | `contains` | contains the substring |
 | `one_of` | is one of the listed strings |
 | `regex` | matches the RE2 regular expression |
+| `equals_arg` | equals the argument at this key of the call being decided. Only valid in [history clauses](#history-conditions). |
 
 A key with dots is a path into nested objects, so `config.environment` reads
 `environment` inside the `config` object. The rule does not match when a
@@ -105,6 +107,95 @@ when:
 
 A value that is not a string, such as a number or an object, is compared as
 compact JSON text: `{"force": true}` compares as `{"force":true}`.
+
+### History conditions
+
+`history` is a list of clauses about the steps policy allowed earlier: steps that
+started, whether they succeeded, failed, or are still running. Every clause must
+hold.
+
+```yaml
+  - id: refund-after-lookup
+    when:
+      target: issue_refund
+      history:
+        - target: lookup_order
+          within: 1h
+          arguments:
+            order_id:
+              equals_arg: order_id
+          result:
+            status:
+              equals: delivered
+        - target: verify_customer
+          arguments:
+            customer_id:
+              equals_arg: customer_id
+    then:
+      decision: allow
+```
+
+| Field | Meaning |
+|-------|---------|
+| `target`, `targets`, `step_kind`, `arguments` | Select earlier steps, as in a rule's `when` block. `equals_arg` compares an argument with the call being decided. |
+| `result` | Predicates against fields of the step's JSON result. Only succeeded steps match. |
+| `scope` | `execution` (default) or `session`. `session` reads every execution in the session, and falls back to the execution for one without a session. |
+| `within` | A Go duration. Only steps started that recently count. Omit it to read the whole scope. |
+| `sum` | An argument to add up across the selected steps. |
+| `distinct` | An argument whose distinct values are counted. |
+| `at_least`, `at_most` | Bounds on the count of selected steps, or on the `sum` or `distinct` total. Without either, `at_least: 1`. |
+
+The call being decided counts toward a clause it matches, unless the clause has
+`result`. A clause with `at_most: 3` on its own target allows the third call and
+refuses the fourth, and a `sum` includes the amount being requested. Steps still
+running count, so parallel calls cannot pass a cap before earlier ones finish.
+Denied steps and steps awaiting approval do not count.
+
+A clause with the default bound requires that something happened; `at_most: 0`
+requires that it did not. Either can carry the decision:
+
+```yaml
+  - id: no-email-after-fetch
+    when:
+      target: send_email
+      history:
+        - target: web_fetch
+          scope: session
+    then:
+      decision: deny
+      reason: the session has read untrusted web content
+```
+
+A selected step whose `sum` argument is missing or not a number fails the
+clause. Write a cap as an `allow` rule above a stricter one, so such a step
+falls through to the stricter rule:
+
+```yaml
+  - id: transfer-under-cap
+    when:
+      target: transfer
+      history:
+        - target: transfer
+          scope: session
+          within: 24h
+          sum: amount
+          at_most: 5000
+    then:
+      decision: allow
+  - id: transfer-over-cap
+    when:
+      target: transfer
+    then:
+      decision: require_approval
+```
+
+If the kernel cannot read history, the step is denied with reason
+`history_unavailable` under the rule being evaluated.
+
+The client names the session, so a new session starts with empty history. A
+session-scoped count or sum therefore limits a cooperating client; for a hard
+ceiling, use a [rate limit](#rate-limits) with `per_what: agent` or `global`. A
+clause that requires something to have happened denies in a new session.
 
 ## Rule decisions
 
@@ -347,6 +438,18 @@ which catches a case still decided correctly but by the wrong rule. Omit both to
 assert nothing. Unknown keys are rejected. A run also lists the rules no case
 reached, which is how a rule shadowed by a broader one above it shows up.
 
+`history` lists the allowed steps a case sees in every scope. Each takes
+`target`, `kind`, `args`, `result`, and `ago`, a Go duration before the decision:
+
+```yaml
+  - name: email after fetch
+    target: send_email
+    history:
+      - target: web_fetch
+        ago: 10m
+    expect: deny
+```
+
 `--target <name> --args '{...}'` probes a single input instead of running cases,
 printing its decision and rule.
 
@@ -355,7 +458,8 @@ recorded steps back through a bundle and fails the steps a change would now
 decide differently. The steps come from a running kernel, so replay names an
 agent with `--agent-id` and reaches a kernel the way every command does
 ([CLI](/cli)), or calls
-[`POST /v0/policies/{agent_id}/test`](/api#policy) directly.
+[`POST /v0/policies/{agent_id}/test`](/api#policy) directly. Each replayed step
+sees the history of its execution and session as it stood when it was decided.
 
 ```bash
 rebuno policy test shell.yaml --execution <id> --agent-id shell

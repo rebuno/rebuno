@@ -138,6 +138,14 @@ func (k *Kernel) decideStep(
 		Target:   req.Target,
 		Args:     req.Args,
 		StepKind: req.Kind,
+		Now:      time.Now().UTC(),
+		History: func(ctx context.Context, scope string, since time.Time) ([]domain.Step, error) {
+			session := ""
+			if scope == domain.HistoryScopeSession {
+				session = exec.Session
+			}
+			return k.d.Steps.ListAllowedSteps(ctx, execID, session, since)
+		},
 	}
 	engine := k.d.Policy
 	if exec.PolicyBundle != "" {

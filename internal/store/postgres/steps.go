@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -171,6 +172,51 @@ func listStepsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]d
 	`, execID.String())
 	if err != nil {
 		return nil, fmt.Errorf("list steps: %w", err)
+	}
+	steps, chunks, err := scanSteps(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := assembleArgs(ctx, q, steps, chunks); err != nil {
+		return nil, err
+	}
+	return steps, nil
+}
+
+func (s *Store) ListAllowedSteps(ctx context.Context, execID uuid.UUID, session string, since time.Time) ([]domain.Step, error) {
+	return listAllowedSteps(ctx, s.q(ctx), execID, session, since)
+}
+
+func (q querier) ListAllowedSteps(ctx context.Context, execID uuid.UUID, session string, since time.Time) ([]domain.Step, error) {
+	return listAllowedSteps(ctx, q.q, execID, session, since)
+}
+
+func listAllowedSteps(ctx context.Context, q Querier, execID uuid.UUID, session string, since time.Time) ([]domain.Step, error) {
+	const cols = `s.step_id, s.execution_id, s.kind, s.target, s.args_hash, s.occurrence, s.status,
+		       s.idempotency, s.args, s.result, s.error, s.started_at, s.completed_at,
+		       s.usage_input, s.usage_output, s.args_chunks, s.resources`
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if session != "" {
+		rows, err = q.Query(ctx, `
+			SELECT `+cols+`
+			FROM steps s
+			JOIN executions e ON e.id = s.execution_id
+			WHERE e.session = $1 AND s.started_at >= $2
+			ORDER BY s.started_at, s.step_id
+		`, session, since)
+	} else {
+		rows, err = q.Query(ctx, `
+			SELECT `+cols+`
+			FROM steps s
+			WHERE s.execution_id = $1 AND s.started_at >= $2
+			ORDER BY s.started_at, s.step_id
+		`, execID.String(), since)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list allowed steps: %w", err)
 	}
 	steps, chunks, err := scanSteps(rows)
 	if err != nil {

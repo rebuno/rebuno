@@ -25,6 +25,7 @@ type StepStore interface {
 	ListByExecution(ctx context.Context, execID uuid.UUID) ([]domain.Step, error)
 	ExecutionUsage(ctx context.Context, execID uuid.UUID) (int, error)
 	SessionUsage(ctx context.Context, session string) (int, error)
+	ListAllowedSteps(ctx context.Context, execID uuid.UUID, session string, since time.Time) ([]domain.Step, error)
 }
 
 type ExecutionStore interface {

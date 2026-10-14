@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/domain"
@@ -187,4 +188,37 @@ func (tx *txStore) ListByExecution(ctx context.Context, execID uuid.UUID) ([]dom
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StepID < out[j].StepID })
 	return out, nil
+}
+
+func (s *Store) ListAllowedSteps(ctx context.Context, execID uuid.UUID, session string, since time.Time) ([]domain.Step, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.listAllowedStepsLocked(execID, session, since), nil
+}
+
+func (tx *txStore) ListAllowedSteps(ctx context.Context, execID uuid.UUID, session string, since time.Time) ([]domain.Step, error) {
+	return tx.listAllowedStepsLocked(execID, session, since), nil
+}
+
+func (s *Store) listAllowedStepsLocked(execID uuid.UUID, session string, since time.Time) []domain.Step {
+	var out []domain.Step
+	for _, step := range s.steps {
+		if step.StartedAt == nil || step.StartedAt.Before(since) {
+			continue
+		}
+		if session != "" && s.executions[step.ExecutionID].Session != session {
+			continue
+		}
+		if session == "" && step.ExecutionID != execID {
+			continue
+		}
+		out = append(out, step)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].StartedAt.Equal(*out[j].StartedAt) {
+			return out[i].StartedAt.Before(*out[j].StartedAt)
+		}
+		return out[i].StepID < out[j].StepID
+	})
+	return out
 }

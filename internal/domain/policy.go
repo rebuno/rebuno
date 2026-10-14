@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
@@ -45,6 +46,11 @@ const (
 	BudgetScopeSession   = "session"
 )
 
+const (
+	HistoryScopeExecution = "execution"
+	HistoryScopeSession   = "session"
+)
+
 type RateLimitConfig struct {
 	MaxCalls       int           `json:"max_calls,omitempty" yaml:"max_calls,omitempty"`
 	Window         time.Duration `json:"window,omitempty" yaml:"window,omitempty"`
@@ -76,4 +82,6 @@ type PolicyInput struct {
 	Target   string
 	Args     json.RawMessage
 	StepKind StepKind
+	Now      time.Time
+	History  func(ctx context.Context, scope string, since time.Time) ([]Step, error)
 }

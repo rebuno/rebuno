@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -371,6 +372,163 @@ rules:
 			}
 			if res.Decision != tc.want {
 				t.Errorf("expected %s, got %s", tc.want, res.Decision)
+			}
+		})
+	}
+}
+
+func priorStep(target, args, result string, ago time.Duration, now time.Time) domain.Step {
+	started := now.Add(-ago)
+	return domain.Step{
+		Kind: domain.StepKindTool, Target: target, Args: json.RawMessage(args),
+		Result: json.RawMessage(result), Status: domain.StepSucceeded, StartedAt: &started,
+	}
+}
+
+func TestHistoryConditions(t *testing.T) {
+	bundle := `
+default_action: deny
+rules:
+  - id: sell-after-approval
+    when:
+      target: sell
+      history:
+        - target: approve_sale
+          within: 1h
+          arguments:
+            stock: { equals_arg: stock }
+          result:
+            approved: { equals: "true" }
+        - target: check_price
+          arguments:
+            stock: { equals_arg: stock }
+    then: { decision: allow }
+  - id: no-email-after-fetch
+    when:
+      target: send_email
+      history:
+        - scope: session
+          target: web_fetch
+    then: { decision: deny }
+  - id: email
+    when: { target: send_email }
+    then: { decision: allow }
+  - id: transfer-under-cap
+    when:
+      target: transfer
+      history:
+        - target: transfer
+          sum: amount
+          at_most: 100
+    then: { decision: allow }
+  - id: few-recipients
+    when:
+      target: notify
+      history:
+        - target: notify
+          distinct: user
+          at_most: 2
+    then: { decision: allow }
+`
+	engine, err := NewRuleEngineFromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	approved := func(stock string, ago time.Duration) domain.Step {
+		return priorStep("approve_sale", `{"stock":"`+stock+`"}`, `{"approved":true}`, ago, now)
+	}
+	priced := priorStep("check_price", `{"stock":"AMZN"}`, `{}`, time.Minute, now)
+
+	cases := []struct {
+		name   string
+		target string
+		args   string
+		prior  []domain.Step
+		want   string
+	}{
+		{"sell with matching approval and price check", "sell", `{"stock":"AMZN"}`, []domain.Step{approved("AMZN", time.Minute), priced}, domain.DecisionAllow},
+		{"sell missing one prerequisite", "sell", `{"stock":"AMZN"}`, []domain.Step{approved("AMZN", time.Minute)}, domain.DecisionDeny},
+		{"sell approved for another stock", "sell", `{"stock":"AMZN"}`, []domain.Step{approved("MSFT", time.Minute), priced}, domain.DecisionDeny},
+		{"sell approval outside window", "sell", `{"stock":"AMZN"}`, []domain.Step{approved("AMZN", 2*time.Hour), priced}, domain.DecisionDeny},
+		{"sell approval refused", "sell", `{"stock":"AMZN"}`, []domain.Step{priorStep("approve_sale", `{"stock":"AMZN"}`, `{"approved":false}`, time.Minute, now), priced}, domain.DecisionDeny},
+		{"email before fetch", "send_email", `{}`, nil, domain.DecisionAllow},
+		{"email after fetch", "send_email", `{}`, []domain.Step{priorStep("web_fetch", `{}`, `{}`, time.Minute, now)}, domain.DecisionDeny},
+		{"transfer within cap counting this call", "transfer", `{"amount":40}`, []domain.Step{priorStep("transfer", `{"amount":60}`, `{}`, time.Minute, now)}, domain.DecisionAllow},
+		{"transfer over cap counting this call", "transfer", `{"amount":41}`, []domain.Step{priorStep("transfer", `{"amount":60}`, `{}`, time.Minute, now)}, domain.DecisionDeny},
+		{"transfer with non-numeric prior amount", "transfer", `{"amount":1}`, []domain.Step{priorStep("transfer", `{"amount":"lots"}`, `{}`, time.Minute, now)}, domain.DecisionDeny},
+		{"repeat recipient", "notify", `{"user":"a"}`, []domain.Step{priorStep("notify", `{"user":"a"}`, `{}`, time.Minute, now), priorStep("notify", `{"user":"b"}`, `{}`, time.Minute, now)}, domain.DecisionAllow},
+		{"new recipient over limit", "notify", `{"user":"c"}`, []domain.Step{priorStep("notify", `{"user":"a"}`, `{}`, time.Minute, now), priorStep("notify", `{"user":"b"}`, `{}`, time.Minute, now)}, domain.DecisionDeny},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := engine.Evaluate(context.Background(), domain.PolicyInput{
+				Target: tc.target, Args: json.RawMessage(tc.args), StepKind: domain.StepKindTool, Now: now,
+				History: func(_ context.Context, _ string, since time.Time) ([]domain.Step, error) {
+					var out []domain.Step
+					for _, s := range tc.prior {
+						if !s.StartedAt.Before(since) {
+							out = append(out, s)
+						}
+					}
+					return out, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Decision != tc.want {
+				t.Fatalf("decision = %s (rule %s), want %s", res.Decision, res.RuleID, tc.want)
+			}
+		})
+	}
+}
+
+func TestHistoryUnavailableDenies(t *testing.T) {
+	engine, err := NewRuleEngineFromBundle(`
+default_action: allow
+rules:
+  - id: no-email-after-fetch
+    when:
+      target: send_email
+      history:
+        - target: web_fetch
+    then: { decision: deny }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := engine.Evaluate(context.Background(), domain.PolicyInput{
+		Target: "send_email", Args: json.RawMessage(`{}`),
+		History: func(context.Context, string, time.Time) ([]domain.Step, error) {
+			return nil, errors.New("store down")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Decision != domain.DecisionDeny || res.Reason != domain.ReasonHistoryUnavailable || res.RuleID != "no-email-after-fetch" {
+		t.Fatalf("result = %+v, want history_unavailable denial from no-email-after-fetch", res)
+	}
+}
+
+func TestHistoryBundleValidation(t *testing.T) {
+	cases := map[string]string{
+		"equals_arg outside history": `
+rules:
+  - id: r
+    when: { arguments: { a: { equals_arg: b } } }
+    then: { decision: allow }`,
+		"nested history": `
+rules:
+  - id: r
+    when: { history: [ { target: x, history: [ { target: y } ] } ] }
+    then: { decision: allow }`,
+	}
+	for name, bundle := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := NewRuleEngineFromBundle(bundle); err == nil {
+				t.Fatal("bundle accepted")
 			}
 		})
 	}

@@ -99,7 +99,8 @@ func (k *Kernel) backtestCases(ctx context.Context, agentID string, sel Executio
 }
 
 func (k *Kernel) replayCases(ctx context.Context, execID uuid.UUID) ([]policy.Case, error) {
-	if _, err := k.d.Executions.GetExecution(ctx, execID); err != nil {
+	exec, err := k.d.Executions.GetExecution(ctx, execID)
+	if err != nil {
 		return nil, fmt.Errorf("test policy: %w", err)
 	}
 	steps, err := k.d.Steps.ListByExecution(ctx, execID)
@@ -110,7 +111,11 @@ func (k *Kernel) replayCases(ctx context.Context, execID uuid.UUID) ([]policy.Ca
 	if err != nil {
 		return nil, fmt.Errorf("test policy: %w", err)
 	}
-	return policy.ReplayCases(steps, decisions), nil
+	allowed, err := k.d.Steps.ListAllowedSteps(ctx, execID, exec.Session, time.Time{})
+	if err != nil {
+		return nil, fmt.Errorf("test policy: %w", err)
+	}
+	return policy.ReplayCases(steps, decisions, allowed), nil
 }
 
 func (k *Kernel) decisionEvents(ctx context.Context, execID uuid.UUID) ([]domain.Event, error) {

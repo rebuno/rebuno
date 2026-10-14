@@ -27,6 +27,7 @@ const (
 	ReasonIndeterminate          = "indeterminate"
 	ReasonRateLimited            = "rate_limit_exceeded"
 	ReasonRateLimiterUnavailable = "rate_limiter_unavailable"
+	ReasonHistoryUnavailable     = "history_unavailable"
 	ReasonDispatchExhausted      = "dispatch_exhausted"
 	ReasonClientCancelled        = "client_cancelled"
 	ReasonDeadlineExceeded       = "deadline_exceeded"

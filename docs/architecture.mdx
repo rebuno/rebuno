@@ -270,6 +270,10 @@ or refuses it outright, depending on the rule's `max_wait`. A token budget turns
 an `allow` into a `deny` or a `require_approval` once the execution has spent its
 `max_tokens`.
 
+A rule can match on history: the steps policy allowed earlier in the execution
+or session. History is read under the execution lock, and a session runs one
+execution at a time, so a decision sees every step allowed before it.
+
 Policy only gates a call. It never rewrites the request. See
 [Policy](/policy).
 
