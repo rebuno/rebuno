@@ -54,8 +54,8 @@ fork = await client.fork(execution.id, at_seq=214)
 ```
 
 `create` and `get` return an [`Execution`](#models). Poll `get` or read the
-event log to watch it progress. `create` also takes `idempotency_key` and
-`spawned_by`; see [Create an execution](/api#create-an-execution).
+event log to watch it progress. `create` also takes `idempotency_key`,
+`spawned_by`, and `on_behalf_of`; see [Create an execution](/api#create-an-execution).
 
 ## Event log and steps
 
@@ -79,9 +79,9 @@ is created. Inspect and resolve them through `Client`:
 ```python
 pending = await client.list_approvals(status="pending")   # default status
 
-await client.grant_approval(pending[0].id, decided_by="alice", rationale="looks fine")
+await client.grant_approval(pending[0].id, rationale="looks fine")
 # or
-await client.deny_approval(pending[0].id, decided_by="alice", rationale="not allowed")
+await client.deny_approval(pending[0].id, rationale="not allowed")
 
 one = await client.get_approval(approval_id)
 ```
@@ -103,12 +103,13 @@ additions won't break you.
 
 - `Execution`: `id`, `agent_id`, `input`, `status`, `output`,
   `failure_reason`, `session`, `parent_execution_id`, `forked_from`, `fork_seq`,
-  `idempotency_key`, `spawned_by`. `status` is an `ExecutionStatus`, one of `pending`,
+  `idempotency_key`, `spawned_by`, `created_by`, `on_behalf_of`, `subject_groups`.
+  `status` is an `ExecutionStatus`, one of `pending`,
   `running`, `blocked`, `completed`, `failed`, `cancelled`.
 - `Step`: `step_id`, `execution_id`, `kind`, `target`, `args_hash`,
   `occurrence`, `status`, `idempotency`, `args`, `result`, `error`.
 - `Event`: `execution_id`, `event_seq`, `type`, `payload`, `occurred_at`.
 - `Approval`: `id`, `step_id`, `execution_id`, `status`, `message`,
-  `decided_by`, `rationale`.
+  `decided_by`, `asserted_by`, `rationale`.
 
 These live in `rebuno.types`.

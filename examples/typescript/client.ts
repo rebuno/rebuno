@@ -78,11 +78,11 @@ async function handleApproval(client: Client, approvalId: string, target: string
   while (true) {
     const choice = (await prompt(`  ${bold("Approve? [y/n]")}: `)).trim().toLowerCase();
     if (choice === "y" || choice === "yes") {
-      await client.grantApproval(approvalId, { decidedBy: "cli-user" });
+      await client.grantApproval(approvalId);
       break;
     }
     if (choice === "n" || choice === "no") {
-      await client.denyApproval(approvalId, { decidedBy: "cli-user", rationale: "denied by user" });
+      await client.denyApproval(approvalId, { rationale: "denied by user" });
       break;
     }
     console.log(red("  Please enter y or n."));

@@ -42,8 +42,8 @@ await client.fork(execution.id, { atSeq: 214 });
 ```
 
 `create` and `get` return an [`Execution`](#types). Poll `get` or read the event
-log to watch it progress. `create` also takes `idempotencyKey` and `spawnedBy`;
-see [Create an execution](/api#create-an-execution).
+log to watch it progress. `create` also takes `idempotencyKey`, `spawnedBy`, and
+`onBehalfOf`; see [Create an execution](/api#create-an-execution).
 
 `fork` also returns `restoration` when resources are registered. Each resource
 key maps to `{ checkpointRef, checkpointSeq, covered }`, describing the state
@@ -71,9 +71,9 @@ is created. Inspect and resolve them through `Client`:
 ```ts
 const pending = await client.listApprovals({ status: "pending" });
 
-await client.grantApproval(pending[0].id, { decidedBy: "alice", rationale: "looks fine" });
+await client.grantApproval(pending[0].id, { rationale: "looks fine" });
 // or
-await client.denyApproval(pending[0].id, { decidedBy: "alice", rationale: "not allowed" });
+await client.denyApproval(pending[0].id, { rationale: "not allowed" });
 
 const one = await client.getApproval(approvalId);
 ```
@@ -94,12 +94,13 @@ all subclasses of `RebunoError`. See [Errors](/sdk/typescript/errors).
 
 - `Execution`: `id`, `agentId`, `input`, `status`, `output`,
   `failureReason`, `session`, `parentExecutionId`, `forkedFrom`, `forkSeq`,
-  `restoration`, `idempotencyKey`, `spawnedBy`. `status` is an `ExecutionStatus`, one of `pending`,
+  `restoration`, `idempotencyKey`, `spawnedBy`, `createdBy`, `onBehalfOf`,
+  `subjectGroups`. `status` is an `ExecutionStatus`, one of `pending`,
   `running`, `blocked`, `completed`, `failed`, `cancelled`.
 - `Step`: `stepId`, `executionId`, `kind`, `target`, `argsHash`, `occurrence`,
   `status`, `idempotency`, `args`, `result`, `error`.
 - `Event`: `executionId`, `eventSeq`, `type`, `payload`, `occurredAt`.
 - `Approval`: `id`, `stepId`, `executionId`, `status`, `message`, `decidedBy`,
-  `rationale`.
+  `assertedBy`, `rationale`.
 
 All are exported as types from `rebuno`.

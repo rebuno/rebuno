@@ -91,10 +91,10 @@ async def handle_approval(client: Client, approval_id: str, target: str) -> None
     while True:
         choice = (await prompt(f"  {bold('Approve? [y/n]')}: ")).strip().lower()
         if choice in ("y", "yes"):
-            await client.grant_approval(approval_id, decided_by="cli-user")
+            await client.grant_approval(approval_id)
             break
         if choice in ("n", "no"):
-            await client.deny_approval(approval_id, decided_by="cli-user", rationale="denied by user")
+            await client.deny_approval(approval_id, rationale="denied by user")
             break
         print(red("  Please enter y or n."))
     print()
