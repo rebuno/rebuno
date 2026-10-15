@@ -25,8 +25,8 @@ deadlines, cleanup) is leader-elected through a Postgres advisory lock.
 
 ## Authentication
 
-Client and admin routes accept scoped API keys or the full-access bootstrap
-bearer token:
+Client and admin routes accept scoped API keys, OIDC tokens, or the
+full-access bootstrap bearer token:
 
 ```bash
 curl -X POST http://localhost:8080/v0/executions \
@@ -39,6 +39,28 @@ Both SDK clients read the token from `REBUNO_API_KEY` if you do not pass it
 explicitly. Agent routes do not use the bearer token at all. They authenticate
 with HMAC over the agent's registered secret. See
 [Authentication](/api#authentication).
+
+### OIDC
+
+Set `REBUNO_OIDC_ISSUER` and `REBUNO_OIDC_AUDIENCE` to accept JWTs from your
+identity provider. The kernel discovers the issuer's signing keys on boot and
+rejects tokens with a different issuer or audience, so give each deployment its
+own audience. The caller is identified as `user:<claim>` from
+`REBUNO_OIDC_USER_CLAIM`, and its scopes are the union of those mapped to its
+groups:
+
+```bash
+REBUNO_OIDC_ISSUER=https://corp.okta.com/oauth2/default
+REBUNO_OIDC_AUDIENCE=rebuno-prod
+REBUNO_OIDC_GROUP_SCOPES='{
+  "platform-admins": ["*"],
+  "support": ["executions:read", "executions:write", "approvals:read", "approvals:write"],
+  "auditors": ["executions:read", "approvals:read"]
+}'
+```
+
+`"*"` grants every scope. A user in no mapped group authenticates but is
+refused every route with `403 forbidden`.
 
 ## Provisioning agents
 
@@ -92,6 +114,11 @@ Additional environment-only settings:
 | `REBUNO_RETENTION` | `24h` | Creation-age cutoff for deleting terminal executions. Pending, running, and blocked executions are retained, and so is every execution in a session that has one retained. |
 | `REBUNO_LEADER_LOCK_KEY` | `rebuno_scheduler_leader` | Advisory-lock key for leader election. |
 | `REBUNO_JUDGE_CONFIG` | none | Path to the decision model config for policy rules that decide `judge`. Without it, those rules deny. See [Judge](/policy#judge). |
+| `REBUNO_OIDC_ISSUER` | none | OIDC issuer URL. Enables OIDC bearer tokens. See [OIDC](#oidc). |
+| `REBUNO_OIDC_AUDIENCE` | none | Required `aud` claim. **Required** with `REBUNO_OIDC_ISSUER`. |
+| `REBUNO_OIDC_USER_CLAIM` | `email` | Claim naming the user, e.g. `preferred_username` or `sub`. |
+| `REBUNO_OIDC_GROUPS_CLAIM` | `groups` | Claim listing the user's groups. |
+| `REBUNO_OIDC_GROUP_SCOPES` | none | JSON object mapping group names to scopes. |
 
 ## Load balancer
 

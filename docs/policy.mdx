@@ -245,10 +245,11 @@ approvals API and the execution resumes. See [Events](/events) and
 | `timeout` | A Go duration (`30s`, `5m`, `1h30m`). The approval expires after it. Defaults to the kernel's configured timeout. |
 | `message` | Shown to whoever resolves the approval. |
 
-`decided_by` is the authenticated caller: `admin` for the deployment token, or
-`service:<key id>` for an API key. A caller holding the `approvals:delegate`
+`decided_by` is the authenticated caller: `admin` for the deployment token,
+`service:<key id>` for an API key, or `user:<claim>` for an
+[OIDC](/deployment#oidc) user. A caller holding the `approvals:delegate`
 scope may name the approver instead, and the approval records that caller in
-`asserted_by`. `approvers` entries match either form.
+`asserted_by`. `approvers` entries match `decided_by` exactly.
 
 ### Rate limits
 

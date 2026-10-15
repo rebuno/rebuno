@@ -14,6 +14,7 @@ type principal struct {
 	scopes  []domain.Scope
 	client  bool
 	keyID   string
+	user    string
 }
 
 func WithAgent(ctx context.Context, agentID string) context.Context {
@@ -40,6 +41,10 @@ func WithClient(ctx context.Context, keyID string, scopes []domain.Scope) contex
 	return context.WithValue(ctx, principalKey{}, principal{client: true, keyID: keyID, scopes: slices.Clone(scopes)})
 }
 
+func WithUser(ctx context.Context, user string, scopes []domain.Scope) context.Context {
+	return context.WithValue(ctx, principalKey{}, principal{client: true, user: user, scopes: slices.Clone(scopes)})
+}
+
 func Identity(ctx context.Context) string {
 	p, ok := ctx.Value(principalKey{}).(principal)
 	switch {
@@ -47,6 +52,8 @@ func Identity(ctx context.Context) string {
 		return ""
 	case p.admin:
 		return "admin"
+	case p.user != "":
+		return "user:" + p.user
 	case p.client:
 		return "service:" + p.keyID
 	case p.agentID != "":

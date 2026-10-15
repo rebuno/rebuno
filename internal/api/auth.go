@@ -17,7 +17,7 @@ type agentLookup interface {
 	GetAgent(ctx context.Context, id string) (domain.Agent, error)
 }
 
-func bearerAuthMiddleware(token string, keys APIKeyKernel, scopes ...domain.Scope) func(http.Handler) http.Handler {
+func bearerAuthMiddleware(token string, keys APIKeyKernel, oidc *auth.OIDC, scopes ...domain.Scope) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
@@ -30,9 +30,17 @@ func bearerAuthMiddleware(token string, keys APIKeyKernel, scopes ...domain.Scop
 					return
 				}
 				supplied := strings.TrimPrefix(header, "Bearer ")
-				if token != "" && subtle.ConstantTimeCompare([]byte(supplied), []byte(token)) == 1 {
+				switch {
+				case token != "" && subtle.ConstantTimeCompare([]byte(supplied), []byte(token)) == 1:
 					ctx = auth.WithAdmin(ctx)
-				} else {
+				case oidc != nil && !strings.HasPrefix(supplied, "rbk_"):
+					userCtx, err := oidc.Authenticate(ctx, supplied)
+					if err != nil {
+						WriteError(w, err)
+						return
+					}
+					ctx = userCtx
+				default:
 					key, err := keys.AuthenticateAPIKey(ctx, supplied)
 					if err != nil {
 						WriteError(w, err)
@@ -53,8 +61,8 @@ func bearerAuthMiddleware(token string, keys APIKeyKernel, scopes ...domain.Scop
 }
 
 // For routes an agent must reach without a bearer token, e.g. fetching input.
-func bearerOrHMAC(token string, lookup AdminKernel) func(http.Handler) http.Handler {
-	bearer := bearerAuthMiddleware(token, lookup, domain.ScopeExecutionsRead)
+func bearerOrHMAC(token string, lookup AdminKernel, oidc *auth.OIDC) func(http.Handler) http.Handler {
+	bearer := bearerAuthMiddleware(token, lookup, oidc, domain.ScopeExecutionsRead)
 	hmacMW := hmacAuthMiddleware(lookup)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

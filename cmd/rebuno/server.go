@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/rebuno/rebuno/internal/api"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/config"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/lifecycle"
@@ -151,6 +152,28 @@ func buildPool(ctx context.Context, cfg config.Config, logger *slog.Logger) (*pg
 	return pool, nil
 }
 
+func buildOIDC(ctx context.Context, cfg config.Config) (*auth.OIDC, error) {
+	if cfg.OIDCIssuer == "" {
+		return nil, nil
+	}
+	if cfg.OIDCAudience == "" {
+		return nil, fmt.Errorf("REBUNO_OIDC_AUDIENCE is required with REBUNO_OIDC_ISSUER")
+	}
+	groupScopes, err := auth.ParseGroupScopes(cfg.OIDCGroupScopes)
+	if err != nil {
+		return nil, fmt.Errorf("REBUNO_OIDC_GROUP_SCOPES: %w", err)
+	}
+	discoverCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return auth.NewOIDC(discoverCtx, auth.OIDCConfig{
+		Issuer:      cfg.OIDCIssuer,
+		Audience:    cfg.OIDCAudience,
+		UserClaim:   cfg.OIDCUserClaim,
+		GroupsClaim: cfg.OIDCGroupsClaim,
+		GroupScopes: groupScopes,
+	})
+}
+
 func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slog.Logger, replicaID string, ready func(context.Context) error, hub *stream.Hub) error {
 	k := kernel.New(kernel.Config{
 		ReplicaID:                replicaID,
@@ -167,6 +190,11 @@ func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slo
 		LeaderLockKey:            cfg.LeaderLockKey,
 	}, deps)
 
+	verifier, err := buildOIDC(ctx, cfg)
+	if err != nil {
+		return err
+	}
+
 	var streamer api.Streamer
 	if hub != nil {
 		go func() { _ = hub.Start(ctx) }()
@@ -174,7 +202,7 @@ func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slo
 	}
 	observer := observe.Default()
 	adapt := &api.KernelAPI{Inner: k}
-	handler := api.NewRouter(adapt, adapt, adapt, cfg.AgentBearerToken, streamer, ready, observer)
+	handler := api.NewRouter(adapt, adapt, adapt, cfg.AgentBearerToken, verifier, streamer, ready, observer)
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: handler}
 
 	// Bind before dispatching: a delivered agent calls straight back into the API.

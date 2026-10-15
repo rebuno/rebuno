@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 type Scope string
 
@@ -16,13 +19,15 @@ const (
 	ScopeAPIKeysManage     Scope = "api_keys:manage"
 )
 
+var AllScopes = []Scope{
+	ScopeExecutionsRead, ScopeExecutionsWrite,
+	ScopeApprovalsRead, ScopeApprovalsWrite, ScopeApprovalsDelegate,
+	ScopeAgentsRead, ScopeAgentsWrite,
+	ScopePoliciesWrite, ScopeAPIKeysManage,
+}
+
 func (s Scope) Valid() bool {
-	switch s {
-	case ScopeExecutionsRead, ScopeExecutionsWrite, ScopeApprovalsRead, ScopeApprovalsWrite, ScopeApprovalsDelegate, ScopeAgentsRead, ScopeAgentsWrite, ScopePoliciesWrite, ScopeAPIKeysManage:
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(AllScopes, s)
 }
 
 type APIKey struct {

@@ -31,6 +31,11 @@ type Config struct {
 	DBMaxConns             int
 	DBMinConns             int
 	JudgeConfigPath        string
+	OIDCIssuer             string
+	OIDCAudience           string
+	OIDCUserClaim          string
+	OIDCGroupsClaim        string
+	OIDCGroupScopes        string
 }
 
 func Default() Config {
@@ -49,6 +54,8 @@ func Default() Config {
 		LogLevel:               "info",
 		LogFormat:              "text",
 		OTELSampleRate:         1.0,
+		OIDCUserClaim:          "email",
+		OIDCGroupsClaim:        "groups",
 	}
 }
 
@@ -140,6 +147,21 @@ func FromEnv() Config {
 	}
 	if v := os.Getenv("REBUNO_JUDGE_CONFIG"); v != "" {
 		cfg.JudgeConfigPath = v
+	}
+	if v := os.Getenv("REBUNO_OIDC_ISSUER"); v != "" {
+		cfg.OIDCIssuer = v
+	}
+	if v := os.Getenv("REBUNO_OIDC_AUDIENCE"); v != "" {
+		cfg.OIDCAudience = v
+	}
+	if v := os.Getenv("REBUNO_OIDC_USER_CLAIM"); v != "" {
+		cfg.OIDCUserClaim = v
+	}
+	if v := os.Getenv("REBUNO_OIDC_GROUPS_CLAIM"); v != "" {
+		cfg.OIDCGroupsClaim = v
+	}
+	if v := os.Getenv("REBUNO_OIDC_GROUP_SCOPES"); v != "" {
+		cfg.OIDCGroupScopes = v
 	}
 	return cfg
 }

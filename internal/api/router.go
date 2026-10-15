@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/observe"
 )
@@ -32,7 +33,7 @@ type Router struct {
 	auth   string
 }
 
-func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTok string, stream Streamer, ready func(context.Context) error, observer ...*observe.Observer) http.Handler {
+func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTok string, oidc *auth.OIDC, stream Streamer, ready func(context.Context) error, observer ...*observe.Observer) http.Handler {
 	r := &Router{client: client, agent: agent, admin: admin, stream: stream, auth: authTok}
 	obs := observe.Default()
 	if len(observer) > 0 && observer[0] != nil {
@@ -46,10 +47,10 @@ func NewRouter(client ClientKernel, agent AgentKernel, admin AdminKernel, authTo
 	mux.Use(bodyLimit(maxRequestBodyBytes))
 
 	bearer := func(scopes ...domain.Scope) func(http.Handler) http.Handler {
-		return bearerAuthMiddleware(authTok, admin, scopes...)
+		return bearerAuthMiddleware(authTok, admin, oidc, scopes...)
 	}
 	hmac := hmacAuthMiddleware(admin)
-	dual := bearerOrHMAC(authTok, admin)
+	dual := bearerOrHMAC(authTok, admin, oidc)
 
 	mux.Get("/metrics", promhttp.HandlerFor(obs.Registry(), promhttp.HandlerOpts{}).ServeHTTP)
 

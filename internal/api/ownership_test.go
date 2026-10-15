@@ -128,7 +128,7 @@ func TestStreamSubscriptionRequiresExistingExecutionAndBearer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mux := api.NewRouter(adapt, adapt, adapt, "admin-token", nil, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "admin-token", nil, nil, nil)
 	req := httptest.NewRequest("GET", "/v0/executions/"+exec.ID.String()+"/stream", nil)
 	signAgentRequest(req, nil)
 	rr := httptest.NewRecorder()
@@ -147,7 +147,7 @@ func TestStreamSubscriptionRequiresExistingExecutionAndBearer(t *testing.T) {
 
 func TestAdministrativeRoutesRequireBearer(t *testing.T) {
 	adapt, _ := setupKernel(t)
-	mux := api.NewRouter(adapt, adapt, adapt, "admin-token", nil, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "admin-token", nil, nil, nil)
 	for _, route := range []struct{ method, path string }{
 		{"POST", "/v0/executions"},
 		{"GET", "/v0/executions"},

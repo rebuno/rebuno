@@ -26,7 +26,7 @@ func keyRequest(mux http.Handler, method, path, token, body string) *httptest.Re
 
 func TestAPIKeyLifecycle(t *testing.T) {
 	adapt, k := setupKernel(t)
-	mux := api.NewRouter(adapt, adapt, adapt, "bootstrap", nil, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "bootstrap", nil, nil, nil)
 	rr := keyRequest(mux, "POST", "/v0/api-keys", "bootstrap", `{"name":"reader","scopes":["executions:read"]}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
@@ -92,7 +92,7 @@ func TestAPIKeyLifecycle(t *testing.T) {
 
 func TestAPIKeyScopes(t *testing.T) {
 	adapt, k := setupKernel(t)
-	mux := api.NewRouter(adapt, adapt, adapt, "bootstrap", nil, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "bootstrap", nil, nil, nil)
 	scopes := []domain.Scope{domain.ScopeExecutionsRead, domain.ScopeExecutionsWrite, domain.ScopeAgentsRead, domain.ScopeAgentsWrite, domain.ScopeApprovalsRead, domain.ScopeApprovalsWrite, domain.ScopePoliciesWrite, domain.ScopeAPIKeysManage}
 	routes := []struct {
 		method, path string
@@ -156,7 +156,7 @@ func TestAPIKeyScopes(t *testing.T) {
 
 func TestAPIKeyValidationAndDevAuthentication(t *testing.T) {
 	adapt, _ := setupKernel(t)
-	mux := api.NewRouter(adapt, adapt, adapt, "", nil, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "", nil, nil, nil)
 	for _, body := range []string{`{}`, `{"name":"test","scopes":[]}`, `{"name":"test","scopes":["*"]}`, `{"name":"test","scopes":["executions:read","unknown"]}`} {
 		if rr := keyRequest(mux, "POST", "/v0/api-keys", "", body); rr.Code != 400 {
 			t.Fatalf("invalid key request: %d", rr.Code)

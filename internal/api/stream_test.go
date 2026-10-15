@@ -32,7 +32,7 @@ func TestStreamEndToEnd(t *testing.T) {
 	go func() { _ = hub.Start(ctx) }()
 	time.Sleep(10 * time.Millisecond)
 
-	mux := api.NewRouter(adapt, adapt, adapt, "", hub, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "", nil, hub, nil)
 	submitStepHTTP(t, mux, k, exec.ID, "streaming", json.RawMessage(`{}`))
 	stepID := computeStepID(t, exec.ID, domain.StepKindTool, "streaming", []byte(`{}`), 0)
 	srv := httptest.NewServer(mux)
@@ -93,7 +93,7 @@ func TestStreamDeltaRejectedFromStaleProducer(t *testing.T) {
 	adapt, k := setupKernel(t)
 	ctx := context.Background()
 	hub := stream.NewHub(stream.NewMemoryBus())
-	mux := api.NewRouter(adapt, adapt, adapt, "", hub, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "", nil, hub, nil)
 	body := []byte(`{"seq":0,"data":"late"}`)
 	publish := func(execID uuid.UUID, stepID string, lease func(*http.Request)) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/v0/executions/"+execID.String()+"/steps/"+stepID+"/stream", bytes.NewReader(body))

@@ -43,7 +43,7 @@ func setupKernel(t *testing.T) (*api.KernelAPI, *kernel.Kernel) {
 func setupRouter(t *testing.T) (http.Handler, *kernel.Kernel, context.Context) {
 	t.Helper()
 	adapt, k := setupKernel(t)
-	return api.NewRouter(adapt, adapt, adapt, "", nil, nil), k, auth.WithAdmin(context.Background())
+	return api.NewRouter(adapt, adapt, adapt, "", nil, nil, nil), k, auth.WithAdmin(context.Background())
 }
 
 func signAgentRequest(req *http.Request, body []byte) {
@@ -145,7 +145,7 @@ func TestListStepsTerminalFilter(t *testing.T) {
 
 func TestStepsReachableViaBearerAuth(t *testing.T) {
 	adapt, k := setupKernel(t)
-	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil, nil)
 
 	exec, _ := k.CreateExecution(context.Background(), testAgentID, json.RawMessage(`{}`))
 	args := json.RawMessage(`{"path":"/tmp"}`)
@@ -255,7 +255,7 @@ func TestAgentHMACRejectsBadSignature(t *testing.T) {
 
 func TestBearerAuth(t *testing.T) {
 	adapt, _ := setupKernel(t)
-	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil)
+	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/v0/approvals", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
