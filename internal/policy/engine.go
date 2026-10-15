@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
@@ -37,6 +38,7 @@ type Condition struct {
 	Targets   []string                `yaml:"targets,omitempty"`
 	AgentID   string                  `yaml:"agent_id,omitempty"`
 	AgentIDs  []string                `yaml:"agent_ids,omitempty"`
+	Subjects  []string                `yaml:"subjects,omitempty"`
 	StepKind  string                  `yaml:"step_kind,omitempty"`
 	Arguments map[string]ArgPredicate `yaml:"arguments,omitempty"`
 	History   []HistoryClause         `yaml:"history,omitempty"`
@@ -98,7 +100,7 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 		}
 		for _, err := range []error{
 			oneOf("decision", r.Then.Decision, domain.DecisionAllow, domain.DecisionDeny, domain.DecisionRequireApproval, domain.DecisionJudge),
-			oneOf("per_what", r.Then.RateLimit.PerWhat, domain.PerWhatExecution, domain.PerWhatSession, domain.PerWhatAgent, domain.PerWhatGlobal),
+			oneOf("per_what", r.Then.RateLimit.PerWhat, domain.PerWhatExecution, domain.PerWhatSession, domain.PerWhatAgent, domain.PerWhatSubject, domain.PerWhatGlobal),
 			oneOf("on_limiter_error", r.Then.RateLimit.OnLimiterError, domain.LimiterErrorAllow, domain.LimiterErrorDeny),
 			oneOf("scope", r.Then.Budget.Scope, domain.BudgetScopeExecution, domain.BudgetScopeSession),
 			oneOf("on_exceed", r.Then.Budget.OnExceed, domain.DecisionDeny, domain.DecisionRequireApproval),
@@ -148,6 +150,11 @@ func NewRuleEngine(cfg Config) (*RuleEngine, error) {
 }
 
 func compileCondition(when *Condition, inHistory bool) error {
+	for _, s := range when.Subjects {
+		if !auth.ValidPrincipal(s) {
+			return fmt.Errorf("subject %q needs a user, service, or group prefix", s)
+		}
+	}
 	if when.Target != "" {
 		rx, err := compileGlob(when.Target)
 		if err != nil {
@@ -192,6 +199,9 @@ func compileHistoryClause(h *HistoryClause) error {
 	}
 	if h.AgentID != "" || len(h.AgentIDs) > 0 {
 		return fmt.Errorf("agent_id is not supported in history clauses")
+	}
+	if len(h.Subjects) > 0 {
+		return fmt.Errorf("subjects is not supported in history clauses")
 	}
 	if h.Scope == "" {
 		h.Scope = domain.HistoryScopeExecution
@@ -297,6 +307,9 @@ func matches(cond Condition, input domain.PolicyInput, current json.RawMessage) 
 		return false
 	}
 	if len(cond.AgentIDs) > 0 && !slices.Contains(cond.AgentIDs, input.AgentID) {
+		return false
+	}
+	if len(cond.Subjects) > 0 && !auth.MatchPrincipal(cond.Subjects, input.Subject, input.SubjectGroups) {
 		return false
 	}
 	if cond.StepKind != "" && cond.StepKind != string(input.StepKind) {

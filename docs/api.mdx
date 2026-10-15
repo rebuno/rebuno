@@ -37,6 +37,7 @@ specific agents.
 |-------|--------|
 | `executions:read` | Read executions, steps, events, and streams. |
 | `executions:write` | Create and cancel executions. |
+| `executions:impersonate` | Create executions `on_behalf_of` another principal. |
 | `approvals:read` | List and inspect approvals. |
 | `approvals:write` | Grant and deny approvals. |
 | `approvals:delegate` | Name the approver when granting or denying. |
@@ -147,6 +148,23 @@ until its agent [suspends](#suspend) it. `idempotency_key` defaults to the
 terminal, and `400` when the step belongs to another execution or the session
 matches the parent's. See [Subagents](/architecture#subagents).
 
+The execution records the authenticated caller in `created_by` and acts for it.
+A caller holding `executions:impersonate` may add `on_behalf_of`, a `user:` or
+`service:` principal, to act for someone else:
+
+```json
+{
+  "agent_id": "researcher",
+  "input": { "query": "hello" },
+  "on_behalf_of": "user:alice@corp.com"
+}
+```
+
+A subagent acts for its parent's subject and a fork for its source's, recorded
+in `on_behalf_of`; a subagent request that sets `on_behalf_of` returns `400`.
+`subject_groups` holds the OIDC groups of a subject that authenticated directly.
+[Policy rules](/policy#match-conditions) match on the subject.
+
 ### Get an execution
 
 `GET /v0/executions/{id}` · bearer or HMAC
@@ -160,8 +178,8 @@ matches the parent's. See [Subagents](/architecture#subagents).
 }
 ```
 
-`session`, `parent_execution_id`, `idempotency_key`, and `spawned_by` are
-present when set. Unless named at creation, the parent is set when an execution
+`session`, `parent_execution_id`, `idempotency_key`, `spawned_by`,
+`created_by`, `on_behalf_of`, and `subject_groups` are present when set. Unless named at creation, the parent is set when an execution
 in a session starts. A fork also carries `forked_from` and `fork_seq`.
 
 ### Get the previous state

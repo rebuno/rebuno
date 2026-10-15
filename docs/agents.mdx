@@ -69,7 +69,8 @@ agent runs the same sequence on the first dispatch and on every resume:
    once, so the same dispatch can arrive twice. Key the handler on
    `(execution_id, dispatch_id, dispatch_attempt)`.
 2. **Fetch input.** The agent reads the execution's original input with
-   `GET /v0/executions/{id}`.
+   `GET /v0/executions/{id}`. The same response carries `created_by`,
+   `on_behalf_of`, and `subject_groups`, naming whom the run acts for.
 3. **Run.** The agent runs its own logic from the top, with that input.
 4. **Submit each effect.** Before every tool or LLM call, the agent submits a step
    (`POST /v0/executions/{id}/steps`, carrying the dispatch id and attempt). The

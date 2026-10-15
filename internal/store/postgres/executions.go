@@ -14,7 +14,7 @@ import (
 const executionColumns = `id, agent_id, input, status, output, failure_reason,
 	created_at, updated_at, deadline_at, COALESCE(session, ''), parent_execution_id,
 	forked_from, COALESCE(fork_seq, 0), COALESCE(policy_bundle, ''), COALESCE(idempotency_key, ''),
-	spawned_by_execution_id, COALESCE(spawned_by_step_id, '')`
+	spawned_by_execution_id, COALESCE(spawned_by_step_id, ''), created_by, on_behalf_of, subject_groups`
 
 func (s *Store) CreateExecution(ctx context.Context, exec domain.Execution) error {
 	return createExecution(ctx, s.q(ctx), exec)
@@ -41,13 +41,16 @@ func createExecution(ctx context.Context, q Querier, exec domain.Execution) erro
 
 	_, err := q.Exec(ctx, `
 		INSERT INTO executions (id, agent_id, input, status, output, failure_reason, created_at, updated_at, deadline_at, session,
-			parent_execution_id, forked_from, fork_seq, policy_bundle, idempotency_key, spawned_by_execution_id, spawned_by_step_id)
+			parent_execution_id, forked_from, fork_seq, policy_bundle, idempotency_key, spawned_by_execution_id, spawned_by_step_id,
+			created_by, on_behalf_of, subject_groups)
 		VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8, $9, NULLIF($10, ''),
-			$11::uuid, $12::uuid, NULLIF($13, 0), NULLIF($14, ''), NULLIF($15, ''), $16::uuid, NULLIF($17, ''))
+			$11::uuid, $12::uuid, NULLIF($13, 0), NULLIF($14, ''), NULLIF($15, ''), $16::uuid, NULLIF($17, ''),
+			$18, $19, $20)
 	`, exec.ID.String(), exec.AgentID, rawArg(exec.Input), string(exec.Status),
 		rawArg(exec.Output), exec.FailureReason, createdAt, updatedAt, timeArg(exec.DeadlineAt), exec.Session,
 		uuidArg(exec.ParentExecutionID), uuidArg(exec.ForkedFrom), exec.ForkSeq, exec.PolicyBundle, exec.IdempotencyKey,
 		uuidArg(spawnedByID), spawnedByStep,
+		exec.CreatedBy, exec.OnBehalfOf, exec.SubjectGroups,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -283,7 +286,7 @@ func scanExecution(row pgx.Row) (domain.Execution, error) {
 		&idStr, &exec.AgentID, &input, &status,
 		&output, &exec.FailureReason, &exec.CreatedAt, &exec.UpdatedAt, &exec.DeadlineAt,
 		&exec.Session, &parentID, &forkedFrom, &exec.ForkSeq, &exec.PolicyBundle, &exec.IdempotencyKey,
-		&spawnedByID, &spawnedByStep,
+		&spawnedByID, &spawnedByStep, &exec.CreatedBy, &exec.OnBehalfOf, &exec.SubjectGroups,
 	); err != nil {
 		return domain.Execution{}, err
 	}

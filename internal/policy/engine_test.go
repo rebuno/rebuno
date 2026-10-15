@@ -259,6 +259,53 @@ rules:
 	}
 }
 
+func TestSubjectsMatchIdentityOrGroup(t *testing.T) {
+	engine, err := NewRuleEngineFromBundle(`
+default_action: deny
+rules:
+  - id: platform-deploys
+    when:
+      target: deploy
+      subjects: ["group:platform", "user:alice@corp.com"]
+    then:
+      decision: allow
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		subject string
+		groups  []string
+		want    string
+	}{
+		{"listed user", "user:alice@corp.com", nil, domain.DecisionAllow},
+		{"member of a listed group", "user:bob@corp.com", []string{"platform"}, domain.DecisionAllow},
+		{"unlisted user", "user:bob@corp.com", []string{"support"}, domain.DecisionDeny},
+		{"no subject", "", nil, domain.DecisionDeny},
+	}
+	for _, tc := range cases {
+		res, err := engine.Evaluate(context.Background(), domain.PolicyInput{StepKind: domain.StepKindTool, Target: "deploy", Subject: tc.subject, SubjectGroups: tc.groups})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Decision != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.name, res.Decision, tc.want)
+		}
+	}
+
+	if _, err := NewRuleEngineFromBundle(`
+rules:
+  - id: bad
+    when:
+      subjects: ["alice"]
+    then:
+      decision: allow
+`); err == nil {
+		t.Error("a subject without a prefix loaded")
+	}
+}
+
 func TestMalformedTargetGlobIsRejectedAtLoad(t *testing.T) {
 	for _, bundle := range []string{
 		"rules:\n  - id: a\n    when: { target: \"fs_[\" }\n    then: { decision: deny }\n",

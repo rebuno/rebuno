@@ -15,14 +15,16 @@ import (
 )
 
 type Case struct {
-	Name       string          `yaml:"name,omitempty" json:"name,omitempty"`
-	AgentID    string          `yaml:"agent_id,omitempty" json:"agent_id,omitempty"`
-	Kind       domain.StepKind `yaml:"kind,omitempty" json:"kind,omitempty"`
-	Target     string          `yaml:"target" json:"target"`
-	Args       map[string]any  `yaml:"args,omitempty" json:"args,omitempty"`
-	Expect     string          `yaml:"expect,omitempty" json:"expect,omitempty"`
-	ExpectRule string          `yaml:"expect_rule,omitempty" json:"expect_rule,omitempty"`
-	History    []PriorStep     `yaml:"history,omitempty" json:"history,omitempty"`
+	Name          string          `yaml:"name,omitempty" json:"name,omitempty"`
+	AgentID       string          `yaml:"agent_id,omitempty" json:"agent_id,omitempty"`
+	Subject       string          `yaml:"subject,omitempty" json:"subject,omitempty"`
+	SubjectGroups []string        `yaml:"subject_groups,omitempty" json:"subject_groups,omitempty"`
+	Kind          domain.StepKind `yaml:"kind,omitempty" json:"kind,omitempty"`
+	Target        string          `yaml:"target" json:"target"`
+	Args          map[string]any  `yaml:"args,omitempty" json:"args,omitempty"`
+	Expect        string          `yaml:"expect,omitempty" json:"expect,omitempty"`
+	ExpectRule    string          `yaml:"expect_rule,omitempty" json:"expect_rule,omitempty"`
+	History       []PriorStep     `yaml:"history,omitempty" json:"history,omitempty"`
 
 	ExecutionID string `yaml:"-" json:"execution_id,omitempty"`
 	StepID      string `yaml:"-" json:"step_id,omitempty"`
@@ -192,12 +194,14 @@ func Run(ctx context.Context, engine *RuleEngine, cases []Case) (Report, error) 
 			return Report{}, fmt.Errorf("case %q: %w", c.Label(), err)
 		}
 		res, err := engine.Evaluate(ctx, domain.PolicyInput{
-			AgentID:  c.AgentID,
-			Target:   c.Target,
-			Args:     args,
-			StepKind: c.Kind,
-			Now:      now,
-			History:  history,
+			AgentID:       c.AgentID,
+			Subject:       c.Subject,
+			SubjectGroups: c.SubjectGroups,
+			Target:        c.Target,
+			Args:          args,
+			StepKind:      c.Kind,
+			Now:           now,
+			History:       history,
 		})
 		if err != nil {
 			return Report{}, fmt.Errorf("case %q: %w", c.Label(), err)

@@ -135,11 +135,13 @@ func (k *Kernel) decideStep(
 	}
 
 	input := domain.PolicyInput{
-		AgentID:  exec.AgentID,
-		Target:   req.Target,
-		Args:     req.Args,
-		StepKind: req.Kind,
-		Now:      time.Now().UTC(),
+		AgentID:       exec.AgentID,
+		Subject:       exec.Subject(),
+		SubjectGroups: exec.SubjectGroups,
+		Target:        req.Target,
+		Args:          req.Args,
+		StepKind:      req.Kind,
+		Now:           time.Now().UTC(),
 		History: func(ctx context.Context, scope string, since time.Time) ([]domain.Step, error) {
 			session := ""
 			if scope == domain.HistoryScopeSession {
@@ -362,7 +364,7 @@ func (k *Kernel) budgetUsage(ctx context.Context, exec domain.Execution, budget 
 func (k *Kernel) recordStepDecision(ctx context.Context, exec domain.Execution, stepID string, req SubmitStepRequest, argsHash string, occurrence int, pol domain.PolicyResult) (domain.StepDecision, bool, error) {
 	execID := exec.ID
 	if pol.RateLimit.MaxCalls > 0 {
-		key := ratelimit.ScopeKey(pol.RuleID, pol.RateLimit.PerWhat, execID.String(), exec.Session, exec.AgentID)
+		key := ratelimit.ScopeKey(pol.RuleID, pol.RateLimit.PerWhat, execID.String(), exec.Session, exec.AgentID, exec.Subject())
 		allowed, wait, err := k.d.RateLimiter.Allow(ctx, key, pol.RateLimit)
 		if err != nil {
 			if pol.RateLimit.OnLimiterError == domain.LimiterErrorDeny {

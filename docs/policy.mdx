@@ -62,6 +62,7 @@ not checked.
 | `targets` | A list of targets/globs; matches if any matches. |
 | `agent_id` | The submitting agent's id. |
 | `agent_ids` | A list of agent ids; matches if the agent is in it. |
+| `subjects` | `user:`, `service:`, and `group:` principals; matches the execution's subject, its `on_behalf_of` or else `created_by`, or a group in its `subject_groups`. See [Create an execution](/api#create-an-execution). |
 | `step_kind` | `tool_call`, `llm_call`, or `local`. |
 | `arguments` | Predicates against fields inside the call's JSON arguments. See [Argument predicates](#argument-predicates). |
 | `history` | Clauses about steps policy allowed earlier. See [History conditions](#history-conditions). |
@@ -267,13 +268,14 @@ and the scope in `per_what`, so two rules never share one.
       rate_limit:
         max_calls: 5
         window: 1m
-        per_what: execution      # execution (default) | session | agent | global
+        per_what: execution      # execution (default) | session | agent | subject | global
         max_wait: 5m             # unset (default) refuses instead of waiting
         on_limiter_error: allow  # allow (default, fail-open) | deny (fail-closed)
 ```
 
 `per_what: session` shares the bucket across a session's executions, and falls
-back to the execution for one without a session.
+back to the execution for one without a session. `per_what: subject` shares it
+across every execution acting for one subject, and falls back the same way.
 
 A step over the limit comes back as `rate_limited` rather than a policy denial.
 Put a hard ceiling in a `deny` or `require_approval` rule instead.
@@ -433,7 +435,9 @@ cases:
     expect: require_approval
 ```
 
-`target` is required and `kind` defaults to `tool_call`. `expect` is the
+`target` is required and `kind` defaults to `tool_call`. `subject` and
+`subject_groups` set the execution's subject for `subjects` conditions; replayed
+executions supply their own. `expect` is the
 decision the case must produce and `expect_rule` the rule that must make it,
 which catches a case still decided correctly but by the wrong rule. Omit both to
 assert nothing. Unknown keys are rejected. A run also lists the rules no case

@@ -38,8 +38,7 @@ func ParseAccess(raw []byte) (Access, error) {
 				return nil, fmt.Errorf("agent %q: unknown role %q", agent, role)
 			}
 			for _, p := range principals {
-				kind, name, ok := strings.Cut(p, ":")
-				if !ok || name == "" || (kind != "user" && kind != "service" && kind != "group") {
+				if !ValidPrincipal(p) {
 					return nil, fmt.Errorf("agent %q role %s: principal %q needs a user, service, or group prefix", agent, role, p)
 				}
 			}
@@ -52,17 +51,25 @@ func grants(have, need Role) bool {
 	return have == need || have == RoleAdmin || need == RoleRead
 }
 
-func (p principal) matches(entries []string) bool {
-	id := p.identity()
+func ValidPrincipal(entry string) bool {
+	kind, name, ok := strings.Cut(entry, ":")
+	return ok && name != "" && (kind == "user" || kind == "service" || kind == "group")
+}
+
+func MatchPrincipal(entries []string, id string, groups []string) bool {
 	for _, e := range entries {
 		if e == id {
 			return true
 		}
-		if g, ok := strings.CutPrefix(e, "group:"); ok && slices.Contains(p.groups, g) {
+		if g, ok := strings.CutPrefix(e, "group:"); ok && slices.Contains(groups, g) {
 			return true
 		}
 	}
 	return false
+}
+
+func (p principal) matches(entries []string) bool {
+	return MatchPrincipal(entries, p.identity(), p.groups)
 }
 
 func (a Access) allows(p principal, need Role, agentID string) bool {

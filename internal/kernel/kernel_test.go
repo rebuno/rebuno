@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -1212,6 +1213,70 @@ func TestApprovalDeciderComesFromCaller(t *testing.T) {
 		err := k.GrantApproval(delegate, id, kernel.GrantApprovalRequest{DecidedBy: "user:olly@corp.com"})
 		if !errors.Is(err, domain.ErrForbidden) {
 			t.Fatalf("got %v, want ErrForbidden", err)
+		}
+	})
+}
+
+func TestExecutionSubject(t *testing.T) {
+	k, admin := setup(t)
+	alice := auth.WithUser(context.Background(), "alice@corp.com", []string{"support"}, nil)
+	service := auth.WithClient(context.Background(), "slackbot", nil)
+	impersonator := auth.WithClient(context.Background(), "slackbot", []domain.Scope{domain.ScopeExecutionsImpersonate})
+
+	parent, err := k.CreateExecution(alice, "agent-1", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.CreatedBy != "user:alice@corp.com" || parent.OnBehalfOf != "" || !slices.Equal(parent.SubjectGroups, []string{"support"}) {
+		t.Fatalf("direct creation: %+v", parent)
+	}
+
+	t.Run("on_behalf_of requires the impersonate scope", func(t *testing.T) {
+		_, err := k.CreateExecution(service, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{OnBehalfOf: "user:bob@corp.com"})
+		if !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("got %v, want ErrForbidden", err)
+		}
+		exec, err := k.CreateExecution(impersonator, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{OnBehalfOf: "user:bob@corp.com"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exec.CreatedBy != "service:slackbot" || exec.Subject() != "user:bob@corp.com" || exec.SubjectGroups != nil {
+			t.Fatalf("impersonated creation: %+v", exec)
+		}
+	})
+
+	t.Run("a group cannot be impersonated", func(t *testing.T) {
+		_, err := k.CreateExecution(impersonator, "agent-1", json.RawMessage(`{}`), kernel.CreateExecutionOptions{OnBehalfOf: "group:support"})
+		if !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("got %v, want ErrValidation", err)
+		}
+	})
+
+	t.Run("a subagent acts for its parent's subject", func(t *testing.T) {
+		stepID := submitSubagentStep(t, k, admin, parent.ID, `{}`)
+		spawn := kernel.CreateExecutionOptions{SpawnedBy: &domain.SpawnedBy{ExecutionID: parent.ID, StepID: stepID}}
+		withOverride := spawn
+		withOverride.OnBehalfOf = "user:bob@corp.com"
+		if _, err := k.CreateExecution(impersonator, "agent-1", json.RawMessage(`{}`), withOverride); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("subagent with on_behalf_of: got %v, want ErrValidation", err)
+		}
+		child, err := k.CreateExecution(service, "agent-1", json.RawMessage(`{}`), spawn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if child.CreatedBy != "service:slackbot" || child.Subject() != "user:alice@corp.com" || !slices.Equal(child.SubjectGroups, []string{"support"}) {
+			t.Fatalf("subagent: %+v", child)
+		}
+	})
+
+	t.Run("a fork acts for its source's subject", func(t *testing.T) {
+		bob := auth.WithUser(context.Background(), "bob@corp.com", nil, nil)
+		fork, err := k.ForkExecution(bob, parent.ID, kernel.ForkRequest{AtSeq: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fork.CreatedBy != "user:bob@corp.com" || fork.Subject() != "user:alice@corp.com" || !slices.Equal(fork.SubjectGroups, []string{"support"}) {
+			t.Fatalf("fork: %+v", fork)
 		}
 	})
 }

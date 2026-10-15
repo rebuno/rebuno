@@ -27,24 +27,33 @@ func (s ExecutionStatus) IsTerminal() bool {
 }
 
 type Execution struct {
-	ID                uuid.UUID       `json:"id"`
-	AgentID           string          `json:"agent_id"`
-	Session           string          `json:"session,omitempty"`
-	ParentExecutionID *uuid.UUID      `json:"parent_execution_id,omitempty"`
-	ForkedFrom        *uuid.UUID      `json:"forked_from,omitempty"`
-	ForkSeq           int64           `json:"fork_seq,omitempty"`
-	IdempotencyKey    string          `json:"idempotency_key,omitempty"`
-	SpawnedBy         *SpawnedBy      `json:"spawned_by,omitempty"`
-	PolicyBundle      string          `json:"-"`
-	Input             json.RawMessage `json:"input"`
-	Status            ExecutionStatus `json:"status"`
-	Output            json.RawMessage `json:"output,omitempty"`
-	FailureReason     string          `json:"failure_reason,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-	DeadlineAt        *time.Time      `json:"deadline_at,omitempty"`
-	// Restoration is set on the execution a fork request returns.
-	Restoration map[string]ResourceSelection `json:"restoration,omitempty"`
+	ID                uuid.UUID                    `json:"id"`
+	AgentID           string                       `json:"agent_id"`
+	Session           string                       `json:"session,omitempty"`
+	ParentExecutionID *uuid.UUID                   `json:"parent_execution_id,omitempty"`
+	ForkedFrom        *uuid.UUID                   `json:"forked_from,omitempty"`
+	ForkSeq           int64                        `json:"fork_seq,omitempty"`
+	IdempotencyKey    string                       `json:"idempotency_key,omitempty"`
+	SpawnedBy         *SpawnedBy                   `json:"spawned_by,omitempty"`
+	CreatedBy         string                       `json:"created_by,omitempty"`
+	OnBehalfOf        string                       `json:"on_behalf_of,omitempty"`
+	SubjectGroups     []string                     `json:"subject_groups,omitempty"`
+	PolicyBundle      string                       `json:"-"`
+	Input             json.RawMessage              `json:"input"`
+	Status            ExecutionStatus              `json:"status"`
+	Output            json.RawMessage              `json:"output,omitempty"`
+	FailureReason     string                       `json:"failure_reason,omitempty"`
+	CreatedAt         time.Time                    `json:"created_at"`
+	UpdatedAt         time.Time                    `json:"updated_at"`
+	DeadlineAt        *time.Time                   `json:"deadline_at,omitempty"`
+	Restoration       map[string]ResourceSelection `json:"restoration,omitempty"`
+}
+
+func (e Execution) Subject() string {
+	if e.OnBehalfOf != "" {
+		return e.OnBehalfOf
+	}
+	return e.CreatedBy
 }
 
 type SpawnedBy struct {

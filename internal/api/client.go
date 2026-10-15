@@ -32,6 +32,7 @@ type CreateExecutionRequest struct {
 	ParentExecutionID *uuid.UUID        `json:"parent_execution_id,omitempty"`
 	IdempotencyKey    string            `json:"idempotency_key,omitempty"`
 	SpawnedBy         *domain.SpawnedBy `json:"spawned_by,omitempty"`
+	OnBehalfOf        string            `json:"on_behalf_of,omitempty"`
 }
 
 type PreviousStateResponse struct {
@@ -44,7 +45,7 @@ func (rt *Router) createExecution(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{Session: req.Session, ParentExecutionID: req.ParentExecutionID, IdempotencyKey: req.IdempotencyKey, SpawnedBy: req.SpawnedBy})
+	exec, err := rt.client.CreateExecution(r.Context(), req.AgentID, req.Input, kernel.CreateExecutionOptions{Session: req.Session, ParentExecutionID: req.ParentExecutionID, IdempotencyKey: req.IdempotencyKey, SpawnedBy: req.SpawnedBy, OnBehalfOf: req.OnBehalfOf})
 	if err != nil {
 		WriteError(w, err)
 		return

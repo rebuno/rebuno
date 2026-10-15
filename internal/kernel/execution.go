@@ -135,6 +135,7 @@ type CreateExecutionOptions struct {
 	ParentExecutionID *uuid.UUID
 	IdempotencyKey    string
 	SpawnedBy         *domain.SpawnedBy
+	OnBehalfOf        string
 }
 
 func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json.RawMessage, options ...CreateExecutionOptions) (domain.Execution, error) {
@@ -165,6 +166,10 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 	if err := validateInput(agent, input); err != nil {
 		return domain.Execution{}, err
 	}
+	onBehalfOf, subjectGroups, err := k.executionSubject(ctx, opts)
+	if err != nil {
+		return domain.Execution{}, err
+	}
 	if opts.ParentExecutionID != nil {
 		parent, err := k.authorizedExecution(ctx, k.d.Executions, *opts.ParentExecutionID, auth.RoleRead)
 		if err != nil {
@@ -185,6 +190,9 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 		ParentExecutionID: opts.ParentExecutionID,
 		IdempotencyKey:    opts.IdempotencyKey,
 		SpawnedBy:         opts.SpawnedBy,
+		CreatedBy:         auth.Identity(ctx),
+		OnBehalfOf:        onBehalfOf,
+		SubjectGroups:     subjectGroups,
 		Input:             input,
 		Status:            domain.ExecutionPending,
 		CreatedAt:         now,
@@ -204,6 +212,7 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 	if exec.SpawnedBy != nil {
 		createdPayload["spawned_by"] = exec.SpawnedBy
 	}
+	addSubject(createdPayload, exec)
 	create := func(ctx context.Context) error {
 		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 			if err := tx.CreateExecution(ctx, exec); err != nil {
@@ -370,6 +379,38 @@ func (k *Kernel) AdmitQueued(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func addSubject(m map[string]any, exec domain.Execution) {
+	if exec.CreatedBy != "" {
+		m["created_by"] = exec.CreatedBy
+	}
+	if exec.OnBehalfOf != "" {
+		m["on_behalf_of"] = exec.OnBehalfOf
+	}
+}
+
+func (k *Kernel) executionSubject(ctx context.Context, opts CreateExecutionOptions) (string, []string, error) {
+	switch {
+	case opts.SpawnedBy != nil:
+		if opts.OnBehalfOf != "" {
+			return "", nil, fmt.Errorf("%w: a subagent acts for its parent's subject; on_behalf_of cannot be set", domain.ErrValidation)
+		}
+		parent, err := k.d.Executions.GetExecution(ctx, opts.SpawnedBy.ExecutionID)
+		if err != nil {
+			return "", nil, err
+		}
+		return parent.Subject(), parent.SubjectGroups, nil
+	case opts.OnBehalfOf != "":
+		if kind, _, _ := strings.Cut(opts.OnBehalfOf, ":"); kind == "group" || !auth.ValidPrincipal(opts.OnBehalfOf) {
+			return "", nil, fmt.Errorf("%w: on_behalf_of needs a user or service prefix", domain.ErrValidation)
+		}
+		if !auth.HasScope(ctx, domain.ScopeExecutionsImpersonate) {
+			return "", nil, fmt.Errorf("%w: on_behalf_of requires %s", domain.ErrForbidden, domain.ScopeExecutionsImpersonate)
+		}
+		return opts.OnBehalfOf, nil, nil
+	}
+	return "", auth.Groups(ctx), nil
 }
 
 func (k *Kernel) Deps() Deps {

@@ -43,6 +43,11 @@ func Identity(ctx context.Context) string {
 	return p.identity()
 }
 
+func Groups(ctx context.Context) []string {
+	p, _ := ctx.Value(principalKey{}).(principal)
+	return slices.Clone(p.groups)
+}
+
 func (p principal) identity() string {
 	switch {
 	case p.admin:

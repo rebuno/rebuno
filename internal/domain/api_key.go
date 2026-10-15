@@ -8,19 +8,20 @@ import (
 type Scope string
 
 const (
-	ScopeExecutionsRead    Scope = "executions:read"
-	ScopeExecutionsWrite   Scope = "executions:write"
-	ScopeApprovalsRead     Scope = "approvals:read"
-	ScopeApprovalsWrite    Scope = "approvals:write"
-	ScopeApprovalsDelegate Scope = "approvals:delegate"
-	ScopeAgentsRead        Scope = "agents:read"
-	ScopeAgentsWrite       Scope = "agents:write"
-	ScopePoliciesWrite     Scope = "policies:write"
-	ScopeAPIKeysManage     Scope = "api_keys:manage"
+	ScopeExecutionsRead        Scope = "executions:read"
+	ScopeExecutionsWrite       Scope = "executions:write"
+	ScopeExecutionsImpersonate Scope = "executions:impersonate"
+	ScopeApprovalsRead         Scope = "approvals:read"
+	ScopeApprovalsWrite        Scope = "approvals:write"
+	ScopeApprovalsDelegate     Scope = "approvals:delegate"
+	ScopeAgentsRead            Scope = "agents:read"
+	ScopeAgentsWrite           Scope = "agents:write"
+	ScopePoliciesWrite         Scope = "policies:write"
+	ScopeAPIKeysManage         Scope = "api_keys:manage"
 )
 
 var AllScopes = []Scope{
-	ScopeExecutionsRead, ScopeExecutionsWrite,
+	ScopeExecutionsRead, ScopeExecutionsWrite, ScopeExecutionsImpersonate,
 	ScopeApprovalsRead, ScopeApprovalsWrite, ScopeApprovalsDelegate,
 	ScopeAgentsRead, ScopeAgentsWrite,
 	ScopePoliciesWrite, ScopeAPIKeysManage,

@@ -57,6 +57,9 @@ func (k *Kernel) ForkExecution(ctx context.Context, sourceID uuid.UUID, req Fork
 		ID:                uuid.Must(uuid.NewV7()),
 		AgentID:           source.AgentID,
 		Session:           req.Session,
+		CreatedBy:         auth.Identity(ctx),
+		OnBehalfOf:        source.Subject(),
+		SubjectGroups:     source.SubjectGroups,
 		ParentExecutionID: source.ParentExecutionID,
 		ForkedFrom:        &source.ID,
 		ForkSeq:           req.AtSeq,
@@ -78,6 +81,7 @@ func (k *Kernel) ForkExecution(ctx context.Context, sourceID uuid.UUID, req Fork
 	if exec.DeadlineAt != nil {
 		created["deadline_at"] = *exec.DeadlineAt
 	}
+	addSubject(created, exec)
 	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(source.ID), func(ctx context.Context) error {
 		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
 			prefix, err := readForkPrefix(ctx, tx, source.ID, exec.ForkSeq)

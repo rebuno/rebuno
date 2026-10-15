@@ -68,6 +68,7 @@ const (
 	PerWhatExecution = "execution"
 	PerWhatSession   = "session"
 	PerWhatAgent     = "agent"
+	PerWhatSubject   = "subject"
 	PerWhatGlobal    = "global"
 )
 
@@ -78,10 +79,12 @@ type PolicyApprovalConfig struct {
 }
 
 type PolicyInput struct {
-	AgentID  string
-	Target   string
-	Args     json.RawMessage
-	StepKind StepKind
-	Now      time.Time
-	History  func(ctx context.Context, scope string, since time.Time) ([]Step, error)
+	AgentID       string
+	Subject       string
+	SubjectGroups []string
+	Target        string
+	Args          json.RawMessage
+	StepKind      StepKind
+	Now           time.Time
+	History       func(ctx context.Context, scope string, since time.Time) ([]Step, error)
 }
