@@ -5,19 +5,20 @@ import "time"
 type Scope string
 
 const (
-	ScopeExecutionsRead  Scope = "executions:read"
-	ScopeExecutionsWrite Scope = "executions:write"
-	ScopeApprovalsRead   Scope = "approvals:read"
-	ScopeApprovalsWrite  Scope = "approvals:write"
-	ScopeAgentsRead      Scope = "agents:read"
-	ScopeAgentsWrite     Scope = "agents:write"
-	ScopePoliciesWrite   Scope = "policies:write"
-	ScopeAPIKeysManage   Scope = "api_keys:manage"
+	ScopeExecutionsRead    Scope = "executions:read"
+	ScopeExecutionsWrite   Scope = "executions:write"
+	ScopeApprovalsRead     Scope = "approvals:read"
+	ScopeApprovalsWrite    Scope = "approvals:write"
+	ScopeApprovalsDelegate Scope = "approvals:delegate"
+	ScopeAgentsRead        Scope = "agents:read"
+	ScopeAgentsWrite       Scope = "agents:write"
+	ScopePoliciesWrite     Scope = "policies:write"
+	ScopeAPIKeysManage     Scope = "api_keys:manage"
 )
 
 func (s Scope) Valid() bool {
 	switch s {
-	case ScopeExecutionsRead, ScopeExecutionsWrite, ScopeApprovalsRead, ScopeApprovalsWrite, ScopeAgentsRead, ScopeAgentsWrite, ScopePoliciesWrite, ScopeAPIKeysManage:
+	case ScopeExecutionsRead, ScopeExecutionsWrite, ScopeApprovalsRead, ScopeApprovalsWrite, ScopeApprovalsDelegate, ScopeAgentsRead, ScopeAgentsWrite, ScopePoliciesWrite, ScopeAPIKeysManage:
 		return true
 	default:
 		return false

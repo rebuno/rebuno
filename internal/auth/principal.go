@@ -13,6 +13,7 @@ type principal struct {
 	admin   bool
 	scopes  []domain.Scope
 	client  bool
+	keyID   string
 }
 
 func WithAgent(ctx context.Context, agentID string) context.Context {
@@ -35,8 +36,23 @@ func AuthorizeAgent(ctx context.Context, agentID string) error {
 	return domain.ErrForbidden
 }
 
-func WithClient(ctx context.Context, scopes []domain.Scope) context.Context {
-	return context.WithValue(ctx, principalKey{}, principal{client: true, scopes: slices.Clone(scopes)})
+func WithClient(ctx context.Context, keyID string, scopes []domain.Scope) context.Context {
+	return context.WithValue(ctx, principalKey{}, principal{client: true, keyID: keyID, scopes: slices.Clone(scopes)})
+}
+
+func Identity(ctx context.Context) string {
+	p, ok := ctx.Value(principalKey{}).(principal)
+	switch {
+	case !ok:
+		return ""
+	case p.admin:
+		return "admin"
+	case p.client:
+		return "service:" + p.keyID
+	case p.agentID != "":
+		return "agent:" + p.agentID
+	}
+	return ""
 }
 
 func HasScope(ctx context.Context, scope domain.Scope) bool {

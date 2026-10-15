@@ -25,8 +25,8 @@ func createApproval(ctx context.Context, q Querier, approval domain.Approval) er
 	}
 
 	_, err := q.Exec(ctx, `
-		INSERT INTO approvals (id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, decided_at, rationale, created_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
+		INSERT INTO approvals (id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, asserted_by, decided_at, rationale, created_at)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
 	`,
 		approval.ID.String(),
 		approval.StepID,
@@ -36,6 +36,7 @@ func createApproval(ctx context.Context, q Querier, approval domain.Approval) er
 		approval.Message,
 		approval.TimeoutAt,
 		approval.DecidedBy,
+		approval.AssertedBy,
 		timeArg(approval.DecidedAt),
 		approval.Rationale,
 		createdAt,
@@ -62,7 +63,7 @@ func (q querier) GetApproval(ctx context.Context, id uuid.UUID) (domain.Approval
 
 func getApproval(ctx context.Context, q Querier, id uuid.UUID) (domain.Approval, error) {
 	row := q.QueryRow(ctx, `
-		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, decided_at, rationale, created_at
+		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, asserted_by, decided_at, rationale, created_at
 		FROM approvals
 		WHERE id = $1
 	`, id.String())
@@ -90,8 +91,9 @@ func updateApproval(ctx context.Context, q Querier, approval domain.Approval) er
 		    message = $5,
 		    timeout_at = $6,
 		    decided_by = $7,
-		    decided_at = $8,
-		    rationale = $9
+		    asserted_by = $8,
+		    decided_at = $9,
+		    rationale = $10
 		WHERE id = $1
 	`,
 		approval.ID.String(),
@@ -101,6 +103,7 @@ func updateApproval(ctx context.Context, q Querier, approval domain.Approval) er
 		approval.Message,
 		approval.TimeoutAt,
 		approval.DecidedBy,
+		approval.AssertedBy,
 		timeArg(approval.DecidedAt),
 		approval.Rationale,
 	)
@@ -123,7 +126,7 @@ func (q querier) ListPendingApprovals(ctx context.Context) ([]domain.Approval, e
 
 func listPendingApprovals(ctx context.Context, q Querier) ([]domain.Approval, error) {
 	rows, err := q.Query(ctx, `
-		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, decided_at, rationale, created_at
+		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, asserted_by, decided_at, rationale, created_at
 		FROM approvals
 		WHERE status = 'pending'
 		ORDER BY created_at
@@ -145,7 +148,7 @@ func (q querier) ListPendingApprovalsByExecution(ctx context.Context, execID uui
 
 func listPendingApprovalsByExecution(ctx context.Context, q Querier, execID uuid.UUID) ([]domain.Approval, error) {
 	rows, err := q.Query(ctx, `
-		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, decided_at, rationale, created_at
+		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, asserted_by, decided_at, rationale, created_at
 		FROM approvals
 		WHERE status = 'pending' AND execution_id = $1
 		ORDER BY created_at
@@ -167,7 +170,7 @@ func (q querier) ListExpiredApprovals(ctx context.Context, now time.Time) ([]dom
 
 func listExpiredApprovals(ctx context.Context, q Querier, now time.Time) ([]domain.Approval, error) {
 	rows, err := q.Query(ctx, `
-		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, decided_at, rationale, created_at
+		SELECT id, step_id, execution_id, status, approvers, message, timeout_at, decided_by, asserted_by, decided_at, rationale, created_at
 		FROM approvals
 		WHERE status = 'pending' AND timeout_at <= $1
 		ORDER BY timeout_at
@@ -186,7 +189,7 @@ func scanApproval(row pgx.Row) (domain.Approval, error) {
 
 	if err := row.Scan(
 		&idStr, &a.StepID, &execIDStr, &status,
-		&approvers, &a.Message, &a.TimeoutAt, &a.DecidedBy, &a.DecidedAt, &a.Rationale, &a.CreatedAt,
+		&approvers, &a.Message, &a.TimeoutAt, &a.DecidedBy, &a.AssertedBy, &a.DecidedAt, &a.Rationale, &a.CreatedAt,
 	); err != nil {
 		return domain.Approval{}, err
 	}

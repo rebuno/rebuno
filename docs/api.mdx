@@ -35,6 +35,7 @@ returns `403 forbidden`; invalid or revoked keys return `401 unauthorized`.
 | `executions:write` | Create and cancel executions. |
 | `approvals:read` | List and inspect approvals. |
 | `approvals:write` | Grant and deny approvals. |
+| `approvals:delegate` | Name the approver when granting or denying. |
 | `agents:read` | Read agents and their policies. |
 | `agents:write` | Register, update, or delete agents. |
 | `policies:write` | Set policies; testing also requires `executions:read`. |
@@ -494,15 +495,15 @@ did not match. See [Testing a bundle](/policy#testing-a-bundle).
 
 `GET /v0/approvals/{id}` · bearer fetches one.
 
-`POST /v0/approvals/{id}/grant` · bearer takes `{ "decided_by", "rationale?" }`
+`POST /v0/approvals/{id}/grant` · bearer takes `{ "decided_by?", "rationale?" }`
 → `204`. Resumes the execution, and the gated step proceeds.
 
-`POST /v0/approvals/{id}/deny` · bearer takes `{ "decided_by", "rationale?" }`
+`POST /v0/approvals/{id}/deny` · bearer takes `{ "decided_by?", "rationale?" }`
 → `204`. The resumed loop sees a policy error at that step.
 
-Both return `403 forbidden` if `decided_by` is absent from a configured
-`approvers` list. The caller supplies this name; bearer credentials do not verify
-human identity. See [Approvals](/policy#approvals).
+Setting `decided_by` requires `approvals:delegate`. Both return
+`403 forbidden` if `decided_by` is set without that scope or the decider is
+absent from a configured `approvers` list. See [Approvals](/policy#approvals).
 
 ---
 

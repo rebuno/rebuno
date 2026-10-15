@@ -90,8 +90,9 @@ if the execution failed or was cancelled, so it can gate a script.
 | `rebuno approval grant <id>` | Let the gated step proceed. |
 | `rebuno approval deny <id>` | Refuse the gated step. |
 
-Both decisions record who made them: `--by` names the approver and defaults to
-`$USER`, and `--reason` records a rationale alongside it.
+Both decisions are recorded as the authenticated caller, with `--reason` as the
+rationale. `--by` names a different approver and requires the
+`approvals:delegate` scope.
 
 ```bash
 rebuno approval deny 01a05eb8-1c74-7f1e --reason "change freeze"

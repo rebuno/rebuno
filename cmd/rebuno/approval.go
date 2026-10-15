@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -78,6 +77,9 @@ func approvalGetCmd() *cobra.Command {
 			if a.DecidedBy != "" {
 				fmt.Printf("  decided    %s by %s\n", a.Status, a.DecidedBy)
 			}
+			if a.AssertedBy != "" {
+				fmt.Printf("  asserted   by %s\n", a.AssertedBy)
+			}
 			if a.Rationale != "" {
 				fmt.Printf("  rationale  %s\n", a.Rationale)
 			}
@@ -98,12 +100,6 @@ func approvalDecideCmd(decision string) *cobra.Command {
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if by == "" {
-				by = os.Getenv("USER")
-			}
-			if by == "" {
-				return fmt.Errorf("--by is required when $USER is unset")
-			}
 			c := kernelClient()
 			id, err := resolveApprovalID(cmd, c, args[0])
 			if err != nil {
@@ -116,12 +112,12 @@ func approvalDecideCmd(decision string) *cobra.Command {
 			if err := c.do(cmd.Context(), http.MethodPost, "/v0/approvals/"+id.String()+"/"+decision, req, nil); err != nil {
 				return err
 			}
-			fmt.Printf("  %s %s by %s\n", past, shortID(id), by)
+			fmt.Printf("  %s %s\n", past, shortID(id))
 			return nil
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&by, "by", "", "Who is deciding (default $USER)")
+	f.StringVar(&by, "by", "", "Record the decision for this approver (requires approvals:delegate)")
 	f.StringVar(&reason, "reason", "", "Rationale recorded with the decision")
 	return cmd
 }

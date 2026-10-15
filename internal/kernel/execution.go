@@ -447,7 +447,7 @@ func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason strin
 					return err
 				}
 				if _, err := tx.AppendBatch(ctx, id, []store.EventRecord{
-					{Type: domain.EventApprovalExpired, Payload: payload.Approval(a.ID, a.StepID, id, domain.ApprovalExpired, "", "execution_cancelled")},
+					{Type: domain.EventApprovalExpired, Payload: payload.Approval(a.ID, a.StepID, id, domain.ApprovalExpired, "", "", "execution_cancelled")},
 					{Type: domain.EventStepDenied, Payload: payload.StepDenied(a.StepID, step.Kind, step.Target, "", errPayload)},
 				}); err != nil {
 					return err

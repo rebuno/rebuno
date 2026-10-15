@@ -191,7 +191,7 @@ func TestForkPolicyOverride(t *testing.T) {
 		at := latestSeq(t, k, ctx, source.ID)
 		deny := "rules:\n  - id: no-search\n    when:\n      target: search\n    then:\n      decision: deny\n"
 
-		writer := auth.WithClient(ctx, []domain.Scope{domain.ScopeExecutionsWrite})
+		writer := auth.WithClient(ctx, "writer", []domain.Scope{domain.ScopeExecutionsWrite})
 		if _, err := k.ForkExecution(writer, source.ID, kernel.ForkRequest{Session: "strict", AtSeq: at, PolicyBundle: deny}); !errors.Is(err, domain.ErrForbidden) {
 			t.Fatalf("override without policies:write: %v", err)
 		}

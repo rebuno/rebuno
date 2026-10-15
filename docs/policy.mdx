@@ -241,16 +241,14 @@ approvals API and the execution resumes. See [Events](/events) and
 
 | Field | Meaning |
 |-------|---------|
-| `approvers` | Who may grant or deny. A decision whose `decided_by` is not in the list is rejected with `403 forbidden`. Omit the field, or leave it empty, to let anyone decide. That is the default. It is a guardrail, not access control. |
+| `approvers` | Who may grant or deny. A decision whose `decided_by` is not in the list is rejected with `403 forbidden`. Omit the field, or leave it empty, to let anyone decide. That is the default. |
 | `timeout` | A Go duration (`30s`, `5m`, `1h30m`). The approval expires after it. Defaults to the kernel's configured timeout. |
 | `message` | Shown to whoever resolves the approval. |
 
-`approvers` is a guardrail rather than access control. `decided_by` is a string
-in the request body, and the bearer token is shared and carries no identity, so
-the check stops the wrong person deciding by accident but not someone willing to
-type another person's name. Enforcing it properly needs `decided_by` to come
-from an authenticated principal. Do not rely on `approvers` to keep a decision
-away from a caller who already holds the API token.
+`decided_by` is the authenticated caller: `admin` for the deployment token, or
+`service:<key id>` for an API key. A caller holding the `approvals:delegate`
+scope may name the approver instead, and the approval records that caller in
+`asserted_by`. `approvers` entries match either form.
 
 ### Rate limits
 

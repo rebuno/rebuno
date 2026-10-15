@@ -38,7 +38,7 @@ func bearerAuthMiddleware(token string, keys APIKeyKernel, scopes ...domain.Scop
 						WriteError(w, err)
 						return
 					}
-					ctx = auth.WithClient(ctx, key.Scopes)
+					ctx = auth.WithClient(ctx, key.ID, key.Scopes)
 				}
 			}
 			for _, scope := range scopes {

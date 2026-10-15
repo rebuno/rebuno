@@ -1155,6 +1155,44 @@ func TestApproversGateWhoMayDecide(t *testing.T) {
 	})
 }
 
+func TestApprovalDeciderComesFromCaller(t *testing.T) {
+	writer := auth.WithClient(context.Background(), "key-1", []domain.Scope{domain.ScopeApprovalsWrite})
+	delegate := auth.WithClient(context.Background(), "slackbot", []domain.Scope{domain.ScopeApprovalsWrite, domain.ScopeApprovalsDelegate})
+
+	t.Run("an api key decides as itself", func(t *testing.T) {
+		k, id := blockedApproval(t, "")
+		if err := k.GrantApproval(writer, id, kernel.GrantApprovalRequest{}); err != nil {
+			t.Fatal(err)
+		}
+		a, _ := k.GetApproval(auth.WithAdmin(context.Background()), id)
+		if a.DecidedBy != "service:key-1" || a.AssertedBy != "" {
+			t.Fatalf("got decided_by %q asserted_by %q, want service:key-1 and none", a.DecidedBy, a.AssertedBy)
+		}
+	})
+
+	t.Run("naming an approver requires the delegate scope", func(t *testing.T) {
+		k, id := blockedApproval(t, "")
+		err := k.DenyApproval(writer, id, kernel.DenyApprovalRequest{DecidedBy: "alice"})
+		if !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("deny naming alice without delegate: got %v, want ErrForbidden", err)
+		}
+	})
+
+	t.Run("a delegate records the named approver and itself", func(t *testing.T) {
+		k, id := blockedApproval(t, `
+      approval_config:
+        approvers: ["alice"]
+`)
+		if err := k.GrantApproval(delegate, id, kernel.GrantApprovalRequest{DecidedBy: "alice"}); err != nil {
+			t.Fatal(err)
+		}
+		a, _ := k.GetApproval(auth.WithAdmin(context.Background()), id)
+		if a.DecidedBy != "alice" || a.AssertedBy != "service:slackbot" {
+			t.Fatalf("got decided_by %q asserted_by %q, want alice and service:slackbot", a.DecidedBy, a.AssertedBy)
+		}
+	})
+}
+
 // An at_most_once effect that resolved indeterminate must not run again in the
 // same execution, while a different effect on the same target still proceeds.
 func TestIndeterminateRetryIsDenied(t *testing.T) {

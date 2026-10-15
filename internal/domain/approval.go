@@ -26,6 +26,7 @@ type Approval struct {
 	Message     string          `json:"message,omitempty"`
 	TimeoutAt   time.Time       `json:"timeout_at"`
 	DecidedBy   string          `json:"decided_by,omitempty"`
+	AssertedBy  string          `json:"asserted_by,omitempty"`
 	DecidedAt   *time.Time      `json:"decided_at,omitempty"`
 	Rationale   string          `json:"rationale,omitempty"`
 	CreatedAt   time.Time       `json:"created_at"`

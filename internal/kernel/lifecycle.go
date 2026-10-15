@@ -80,7 +80,7 @@ func (k *Kernel) expireApproval(ctx context.Context, approval domain.Approval, n
 				return err
 			}
 			evts := []store.EventRecord{
-				{Type: domain.EventApprovalExpired, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "timeout")},
+				{Type: domain.EventApprovalExpired, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalExpired, "", "", "timeout")},
 				{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
 			}
 			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {

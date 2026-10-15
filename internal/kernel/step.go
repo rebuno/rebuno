@@ -467,7 +467,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, exec domain.Execution, 
 		step.Status = domain.StepAwaitingApproval
 		evts = append(evts,
 			store.EventRecord{Type: domain.EventStepAwaitingApproval, Payload: decided(payload.StepDecided(stepID, req.Kind, req.Target, pol.RuleID, pol.Reason), pol)},
-			store.EventRecord{Type: domain.EventApprovalRequested, Payload: payload.Approval(approvalID, stepID, execID, domain.ApprovalPending, "", "")},
+			store.EventRecord{Type: domain.EventApprovalRequested, Payload: payload.Approval(approvalID, stepID, execID, domain.ApprovalPending, "", "", "")},
 		)
 		blockPayload := payload.Execution(execID, domain.ExecutionBlocked, nil, "")
 		evts = append(evts, store.EventRecord{Type: domain.EventExecutionBlocked, Payload: blockPayload})

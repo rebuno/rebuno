@@ -7,19 +7,34 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/payload"
 	"github.com/rebuno/rebuno/internal/store"
 )
 
 type GrantApprovalRequest struct {
-	DecidedBy string `json:"decided_by"`
+	DecidedBy string `json:"decided_by,omitempty"`
 	Rationale string `json:"rationale,omitempty"`
 }
 
 type DenyApprovalRequest struct {
-	DecidedBy string `json:"decided_by"`
+	DecidedBy string `json:"decided_by,omitempty"`
 	Rationale string `json:"rationale,omitempty"`
+}
+
+func approvalDecider(ctx context.Context, named string) (decidedBy, assertedBy string, err error) {
+	caller := auth.Identity(ctx)
+	if caller == "" {
+		return "", "", domain.ErrUnauthorized
+	}
+	if named == "" {
+		return caller, "", nil
+	}
+	if !auth.HasScope(ctx, domain.ScopeApprovalsDelegate) {
+		return "", "", fmt.Errorf("%w: decided_by requires the %s scope", domain.ErrForbidden, domain.ScopeApprovalsDelegate)
+	}
+	return named, caller, nil
 }
 
 func requireAwaitingApproval(step domain.Step) error {
@@ -30,6 +45,10 @@ func requireAwaitingApproval(step domain.Step) error {
 }
 
 func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantApprovalRequest) error {
+	decidedBy, assertedBy, err := approvalDecider(ctx, req.DecidedBy)
+	if err != nil {
+		return err
+	}
 	approval, err := k.d.Approvals.GetApproval(ctx, id)
 	if err != nil {
 		return err
@@ -39,12 +58,13 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 		if approval.Status != domain.ApprovalPending {
 			return domain.ErrConflict
 		}
-		if !approval.AllowsApprover(req.DecidedBy) {
-			return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, req.DecidedBy)
+		if !approval.AllowsApprover(decidedBy) {
+			return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, decidedBy)
 		}
 		now := time.Now().UTC()
 		approval.Status = domain.ApprovalGranted
-		approval.DecidedBy = req.DecidedBy
+		approval.DecidedBy = decidedBy
+		approval.AssertedBy = assertedBy
 		approval.DecidedAt = &now
 		approval.Rationale = req.Rationale
 
@@ -57,7 +77,7 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 				return err
 			}
 			evts := []store.EventRecord{
-				{Type: domain.EventApprovalGranted, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalGranted, req.DecidedBy, req.Rationale)},
+				{Type: domain.EventApprovalGranted, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalGranted, decidedBy, assertedBy, req.Rationale)},
 				{Type: domain.EventStepAllowed, Payload: payload.Step(approval.StepID, step.Kind, step.Target, "")},
 			}
 			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {
@@ -81,6 +101,10 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 }
 
 func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprovalRequest) error {
+	decidedBy, assertedBy, err := approvalDecider(ctx, req.DecidedBy)
+	if err != nil {
+		return err
+	}
 	approval, err := k.d.Approvals.GetApproval(ctx, id)
 	if err != nil {
 		return err
@@ -90,12 +114,13 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		if approval.Status != domain.ApprovalPending {
 			return domain.ErrConflict
 		}
-		if !approval.AllowsApprover(req.DecidedBy) {
-			return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, req.DecidedBy)
+		if !approval.AllowsApprover(decidedBy) {
+			return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, decidedBy)
 		}
 		now := time.Now().UTC()
 		approval.Status = domain.ApprovalDenied
-		approval.DecidedBy = req.DecidedBy
+		approval.DecidedBy = decidedBy
+		approval.AssertedBy = assertedBy
 		approval.DecidedAt = &now
 		approval.Rationale = req.Rationale
 
@@ -113,7 +138,7 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 				return err
 			}
 			evts := []store.EventRecord{
-				{Type: domain.EventApprovalDenied, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, req.DecidedBy, req.Rationale)},
+				{Type: domain.EventApprovalDenied, Payload: payload.Approval(approval.ID, approval.StepID, approval.ExecutionID, domain.ApprovalDenied, decidedBy, assertedBy, req.Rationale)},
 				{Type: domain.EventStepDenied, Payload: payload.StepDenied(approval.StepID, step.Kind, step.Target, "", errPayload)},
 			}
 			if _, err := tx.AppendBatch(ctx, approval.ExecutionID, evts); err != nil {

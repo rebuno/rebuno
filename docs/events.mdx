@@ -91,7 +91,7 @@ Payloads carry `approval_id`, `step_id`, `execution_id`, and `status`.
 | Type | When |
 |------|------|
 | `approval.requested` | An approval was created. |
-| `approval.granted` | A human granted it, with `decided_by` and `rationale`. |
+| `approval.granted` | A human granted it, with `decided_by`, `rationale`, and `asserted_by` when a delegate named the approver. |
 | `approval.denied` | A human denied it. |
 | `approval.expired` | The approval's timeout elapsed. The gated step is denied and the execution resumes. |
 

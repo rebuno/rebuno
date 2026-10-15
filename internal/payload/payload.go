@@ -86,7 +86,7 @@ func Execution(execID uuid.UUID, status domain.ExecutionStatus, output []byte, r
 	return m
 }
 
-func Approval(approvalID uuid.UUID, stepID string, execID uuid.UUID, status domain.ApprovalStatus, decidedBy, rationale string) map[string]any {
+func Approval(approvalID uuid.UUID, stepID string, execID uuid.UUID, status domain.ApprovalStatus, decidedBy, assertedBy, rationale string) map[string]any {
 	m := map[string]any{
 		"approval_id":  approvalID.String(),
 		"step_id":      stepID,
@@ -95,6 +95,9 @@ func Approval(approvalID uuid.UUID, stepID string, execID uuid.UUID, status doma
 	}
 	if decidedBy != "" {
 		m["decided_by"] = decidedBy
+	}
+	if assertedBy != "" {
+		m["asserted_by"] = assertedBy
 	}
 	if rationale != "" {
 		m["rationale"] = rationale
