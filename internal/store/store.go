@@ -56,6 +56,7 @@ type ResourceStore interface {
 type AgentStore interface {
 	RegisterAgent(ctx context.Context, agent domain.Agent) error
 	SetAgentMetadata(ctx context.Context, id string, metadata domain.AgentMetadata) error
+	SetPolicyBundle(ctx context.Context, id string, bundle string) error
 	GetAgent(ctx context.Context, id string) (domain.Agent, error)
 	ListAgents(ctx context.Context) ([]domain.Agent, error)
 	DeleteAgent(ctx context.Context, id string) error

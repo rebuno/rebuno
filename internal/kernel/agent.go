@@ -105,12 +105,7 @@ func (k *Kernel) LoadPolicyBundle(ctx context.Context, agentID string, bundle st
 	if err := validatePolicyBundle(bundle); err != nil {
 		return fmt.Errorf("load policy bundle: %w", err)
 	}
-	agent, err := k.d.Agents.GetAgent(ctx, agentID)
-	if err != nil {
-		return fmt.Errorf("load policy bundle: %w", err)
-	}
-	agent.PolicyBundle = bundle
-	if err := k.d.Agents.RegisterAgent(ctx, agent); err != nil {
+	if err := k.d.Agents.SetPolicyBundle(ctx, agentID, bundle); err != nil {
 		return fmt.Errorf("load policy bundle: %w", err)
 	}
 	return nil

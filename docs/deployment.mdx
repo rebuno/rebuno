@@ -78,7 +78,8 @@ agents:
 ```
 
 `policy_file` paths resolve relative to the manifest. A malformed bundle fails the
-boot, so a broken policy never falls back to permissive. You can also register
+boot, so a broken policy never falls back to permissive. An entry without a
+policy keeps the agent's current one. You can also register
 agents and load policy at runtime over the [admin API](/api#admin-api).
 
 ## Configuration

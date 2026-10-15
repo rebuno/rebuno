@@ -465,13 +465,16 @@ revoked key returns `409 conflict`. Existing requests and streams may finish.
 
 `POST /v0/agents` · bearer registers or upserts an agent. Body
 `{ "id", "webhook_url", "secret", "lease_timeout_seconds?" }`. Returns `201` and
-the stored agent. Registering again keeps the metadata the agent published.
+the stored agent. Registering again keeps the metadata the agent published and
+its policy bundle.
 
 `GET /v0/agents` · bearer lists agents.
 
 `GET /v0/agents/{id}` · bearer fetches one.
 
-`DELETE /v0/agents/{id}` · bearer → `204`.
+`DELETE /v0/agents/{id}` · bearer → `204`, or `409 conflict` while the agent has
+executions. Retention removes terminal executions; see
+[Configuration](/deployment#configuration).
 
 An agent reads `{ "id", "webhook_url", "policy_bundle?", "registered_at",
 "lease_timeout_seconds?", "description?", "input_schema?", "output_schema?" }`.

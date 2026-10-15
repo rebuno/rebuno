@@ -30,11 +30,22 @@ func registerAgent(ctx context.Context, q Querier, agent domain.Agent) error {
 			webhook_url = EXCLUDED.webhook_url,
 			secret = EXCLUDED.secret,
 			registered_at = EXCLUDED.registered_at,
-			policy_bundle = EXCLUDED.policy_bundle,
+			policy_bundle = CASE WHEN EXCLUDED.policy_bundle = '' THEN agents.policy_bundle ELSE EXCLUDED.policy_bundle END,
 			lease_timeout_seconds = EXCLUDED.lease_timeout_seconds
 	`, agent.ID, agent.WebhookURL, agent.Secret, registeredAt, agent.PolicyBundle, agent.LeaseTimeoutSeconds)
 	if err != nil {
 		return fmt.Errorf("register agent: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SetPolicyBundle(ctx context.Context, id string, bundle string) error {
+	res, err := s.q(ctx).Exec(ctx, `UPDATE agents SET policy_bundle = $2 WHERE id = $1`, id, bundle)
+	if err != nil {
+		return fmt.Errorf("set policy bundle: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return domain.ErrNotFound
 	}
 	return nil
 }
@@ -113,6 +124,9 @@ func (q querier) DeleteAgent(ctx context.Context, id string) error {
 
 func deleteAgent(ctx context.Context, q Querier, id string) error {
 	res, err := q.Exec(ctx, `DELETE FROM agents WHERE id = $1`, id)
+	if isForeignKeyViolation(err) {
+		return fmt.Errorf("%w: agent %q has executions", domain.ErrConflict, id)
+	}
 	if err != nil {
 		return fmt.Errorf("delete agent: %w", err)
 	}

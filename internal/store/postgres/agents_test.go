@@ -14,8 +14,8 @@ import (
 	"github.com/rebuno/rebuno/internal/store/memstore"
 )
 
-func TestAgentMetadataBackends(t *testing.T) {
-	t.Run("memory", func(t *testing.T) { testAgentMetadata(t, memstore.NewStore()) })
+func TestAgentRegistrationBackends(t *testing.T) {
+	t.Run("memory", func(t *testing.T) { testAgentRegistration(t, memstore.NewStore()) })
 	t.Run("postgres", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("database integration test")
@@ -33,11 +33,11 @@ func TestAgentMetadataBackends(t *testing.T) {
 		if err := Migrate(ctx, pool); err != nil {
 			t.Fatal(err)
 		}
-		testAgentMetadata(t, NewStore(pool))
+		testAgentRegistration(t, NewStore(pool))
 	})
 }
 
-func testAgentMetadata(t *testing.T, s store.AgentStore) {
+func testAgentRegistration(t *testing.T, s store.AgentStore) {
 	t.Helper()
 	ctx := context.Background()
 	id := "agent-" + uuid.NewString()
@@ -46,7 +46,7 @@ func testAgentMetadata(t *testing.T, s store.AgentStore) {
 	if err := s.SetAgentMetadata(ctx, id, domain.AgentMetadata{Description: "x"}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unregistered agent: %v", err)
 	}
-	if err := s.RegisterAgent(ctx, domain.Agent{ID: id, WebhookURL: "http://a", Secret: "s"}); err != nil {
+	if err := s.RegisterAgent(ctx, domain.Agent{ID: id, WebhookURL: "http://a", Secret: "s", PolicyBundle: "rules: []"}); err != nil {
 		t.Fatal(err)
 	}
 	metadata := domain.AgentMetadata{
@@ -64,9 +64,16 @@ func testAgentMetadata(t *testing.T, s store.AgentStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.WebhookURL != "http://b" || got.Description != metadata.Description ||
+	if got.WebhookURL != "http://b" || got.PolicyBundle != "rules: []" || got.Description != metadata.Description ||
 		string(got.InputSchema) != string(metadata.InputSchema) || string(got.OutputSchema) != string(metadata.OutputSchema) {
 		t.Fatalf("re-registration: %+v", got)
+	}
+
+	if err := s.SetPolicyBundle(ctx, id, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetAgent(ctx, id); got.PolicyBundle != "" {
+		t.Fatalf("cleared policy bundle: %q", got.PolicyBundle)
 	}
 
 	if err := s.SetAgentMetadata(ctx, id, domain.AgentMetadata{}); err != nil {
