@@ -29,14 +29,45 @@ started beneath it, and any session that branched from it.
 ## Reaching the kernel
 
 The browser never calls the kernel. Every request goes to the dashboard's own
-`/api/v0/*` route. That route forwards it to `REBUNO_URL` and attaches
-`Authorization: Bearer $REBUNO_API_KEY`. The token never reaches the browser.
+`/api/v0/*` route, which forwards it to `REBUNO_URL`. Without
+[sign-in](#sign-in), it attaches `Authorization: Bearer $REBUNO_API_KEY`. No
+token ever reaches the browser.
 
 <Warning>
-  Give it a token with the access you want the dashboard to have. Anyone who can
-  reach the dashboard gets that access. Put it behind your own authentication
-  before exposing it.
+  Without sign-in, anyone who can reach the dashboard gets the access of
+  `REBUNO_API_KEY`. Turn on sign-in or put the dashboard behind your own
+  authentication before exposing it.
 </Warning>
+
+## Sign-in
+
+Set `OIDC_ISSUER` and the dashboard signs users in with your identity provider
+and calls the kernel as each of them. Register the dashboard as a web
+application with the redirect URI `<DASHBOARD_URL>/auth/callback` and the
+post-logout redirect URI `<DASHBOARD_URL>/`:
+
+```bash
+OIDC_ISSUER=https://corp.okta.com/oauth2/default
+OIDC_CLIENT_ID=0oa1rebunodashboard
+OIDC_CLIENT_SECRET=…
+DASHBOARD_URL=https://rebuno.corp.com
+SESSION_SECRET=$(openssl rand -base64 32)
+```
+
+The dashboard forwards the user's ID token, so set the kernel's
+`REBUNO_OIDC_AUDIENCE` to the dashboard's client ID. See
+[OIDC](/deployment#oidc). Executions the user creates record them in
+`created_by`, their approvals record them in `decided_by`, and
+[access roles](/deployment#access) limit what they see. `REBUNO_API_KEY` is
+not sent with their requests. With `OIDC_FORWARD_TOKEN=access`, the dashboard
+forwards the access token instead, for providers that issue JWT access tokens
+with an audience the kernel accepts.
+
+Tokens are kept in an encrypted, httpOnly cookie and refreshed before they
+expire when the provider issues a refresh token. Without one, the user signs in
+again when the token expires. Every replica needs the same `SESSION_SECRET`.
+The kernel reads the user's groups from the token, so add the scope your
+provider needs to include them, such as `groups` for Okta.
 
 ## Metrics
 
@@ -46,7 +77,8 @@ you pick on the page.
 With it unset the page scrapes the kernel's `/metrics` endpoint instead. Those
 are one process's in-memory counters. They are cumulative since that replica
 started, so no time range applies. Across replicas you see whichever one
-answered. The page labels which source it used. Point a real Prometheus at the
+answered. The page labels which source it used. With sign-in, every signed-in
+user sees metrics for the whole deployment. Point a real Prometheus at the
 kernel for anything beyond local development.
 
 ## Configuration
@@ -54,7 +86,14 @@ kernel for anything beyond local development.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REBUNO_URL` | `http://localhost:8080` | Kernel base URL. |
-| `REBUNO_API_KEY` | none | Bearer token for the kernel's client and admin routes. Required against a kernel started with `rebuno server`. |
+| `REBUNO_API_KEY` | none | Bearer token for the kernel's client and admin routes without sign-in. Required against a kernel started with `rebuno server`. |
+| `OIDC_ISSUER` | none | Identity provider issuer URL. Turns on [sign-in](#sign-in). |
+| `OIDC_CLIENT_ID` | none | The dashboard's client ID. **Required** with `OIDC_ISSUER`. |
+| `OIDC_CLIENT_SECRET` | none | Client secret. Omit for a public client. |
+| `OIDC_SCOPES` | `openid email profile offline_access` | Scopes requested at sign-in. |
+| `OIDC_FORWARD_TOKEN` | `id` | Token forwarded to the kernel: `id` or `access`. |
+| `DASHBOARD_URL` | none | The dashboard's external URL, used for redirects. **Required** with `OIDC_ISSUER`. |
+| `SESSION_SECRET` | none | At least 32 characters; encrypts the session cookie. **Required** with `OIDC_ISSUER`. |
 | `PROMETHEUS_URL` | none | Prometheus base URL for the metrics page. |
 | `PORT` | `3000` | Listen port. |
 | `HOSTNAME` | `0.0.0.0` | Listen address. |
