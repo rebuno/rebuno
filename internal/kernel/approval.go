@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -108,6 +109,8 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 		return err
 	}
 	k.d.Observer.RecordApprovalOutcome("granted")
+	k.securityLog(ctx, "approval.grant", slog.String("approval_id", id.String()), slog.String("execution_id", approval.ExecutionID.String()),
+		slog.String("decided_by", decidedBy), slog.String("asserted_by", assertedBy))
 	return nil
 }
 
@@ -175,6 +178,8 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 		return err
 	}
 	k.d.Observer.RecordApprovalOutcome("denied")
+	k.securityLog(ctx, "approval.deny", slog.String("approval_id", id.String()), slog.String("execution_id", approval.ExecutionID.String()),
+		slog.String("decided_by", decidedBy), slog.String("asserted_by", assertedBy))
 	return nil
 }
 

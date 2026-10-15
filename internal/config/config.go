@@ -37,6 +37,7 @@ type Config struct {
 	OIDCGroupsClaim        string
 	OIDCGroupScopes        string
 	AccessConfigPath       string
+	SecurityLog            string
 }
 
 func Default() Config {
@@ -166,6 +167,9 @@ func FromEnv() Config {
 	}
 	if v := os.Getenv("REBUNO_ACCESS_CONFIG"); v != "" {
 		cfg.AccessConfigPath = v
+	}
+	if v := os.Getenv("REBUNO_SECURITY_LOG"); v != "" {
+		cfg.SecurityLog = v
 	}
 	return cfg
 }

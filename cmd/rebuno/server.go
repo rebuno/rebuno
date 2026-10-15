@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -44,6 +47,7 @@ func bindServerFlags(f *pflag.FlagSet, cfg *config.Config) {
 	f.Float64Var(&cfg.OTELSampleRate, "otel-sample-rate", cfg.OTELSampleRate, "Trace sample rate 0..1")
 	f.BoolVar(&cfg.OTELInsecure, "otel-insecure", cfg.OTELInsecure, "Use insecure (plaintext) OTLP connection")
 	f.StringVar(&cfg.AccessConfigPath, "access", cfg.AccessConfigPath, "Path to the per-agent access config")
+	f.StringVar(&cfg.SecurityLog, "security-log", cfg.SecurityLog, "Security log destination: stdout, stderr, or a file path (empty = off)")
 }
 
 func serverCmd() *cobra.Command {
@@ -178,34 +182,65 @@ func buildOIDC(ctx context.Context, cfg config.Config) (*auth.OIDC, error) {
 	})
 }
 
-func loadAccess(ctx context.Context, path string, agents store.AgentStore, logger *slog.Logger) (auth.Access, error) {
+func loadAccess(ctx context.Context, path string, agents store.AgentStore, logger *slog.Logger) (auth.Access, string, error) {
 	if path == "" {
-		return nil, nil
+		return nil, "", nil
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read access config: %w", err)
+		return nil, "", fmt.Errorf("read access config: %w", err)
 	}
 	access, err := auth.ParseAccess(raw)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	registered, err := agents.ListAgents(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	for id := range access {
 		if id != auth.AllAgents && !slices.ContainsFunc(registered, func(a domain.Agent) bool { return a.ID == id }) {
 			logger.Warn("access config names an unregistered agent", "agent", id)
 		}
 	}
-	return access, nil
+	sum := sha256.Sum256(raw)
+	return access, hex.EncodeToString(sum[:]), nil
+}
+
+func openSecurityLog(dest string) (*slog.Logger, func(), error) {
+	var w io.Writer
+	closer := func() {}
+	switch dest {
+	case "":
+		return nil, closer, nil
+	case "stdout":
+		w = os.Stdout
+	case "stderr":
+		w = os.Stderr
+	default:
+		f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open security log: %w", err)
+		}
+		w, closer = f, func() { _ = f.Close() }
+	}
+	return slog.New(slog.NewJSONHandler(w, nil)), closer, nil
 }
 
 func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slog.Logger, replicaID string, ready func(context.Context) error, hub *stream.Hub) error {
-	access, err := loadAccess(ctx, cfg.AccessConfigPath, deps.Agents, logger)
+	access, accessSum, err := loadAccess(ctx, cfg.AccessConfigPath, deps.Agents, logger)
 	if err != nil {
 		return err
+	}
+	securityLog, closeSecurityLog, err := openSecurityLog(cfg.SecurityLog)
+	if err != nil {
+		return err
+	}
+	defer closeSecurityLog()
+	deps.SecurityLog = securityLog
+	if securityLog != nil {
+		securityLog.Info("kernel.start", "principal", "kernel", "replica", replicaID,
+			"oidc_issuer", cfg.OIDCIssuer, "oidc_audience", cfg.OIDCAudience, "access_config_sha256", accessSum)
 	}
 	k := kernel.New(kernel.Config{
 		ReplicaID:                replicaID,

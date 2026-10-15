@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -53,6 +54,7 @@ func (k *Kernel) CreateAPIKey(ctx context.Context, req CreateAPIKeyRequest) (Iss
 	if err := k.d.APIKeys.CreateAPIKey(ctx, key); err != nil {
 		return IssuedAPIKey{}, err
 	}
+	k.securityLog(ctx, "api_key.create", slog.String("key_id", key.ID), slog.String("name", key.Name), slog.Any("scopes", key.Scopes))
 	return IssuedAPIKey{APIKey: key, Token: token}, nil
 }
 
@@ -73,11 +75,16 @@ func (k *Kernel) RotateAPIKey(ctx context.Context, id string) (IssuedAPIKey, err
 		return IssuedAPIKey{}, err
 	}
 	key.SecretHash = hash
+	k.securityLog(ctx, "api_key.rotate", slog.String("key_id", id))
 	return IssuedAPIKey{APIKey: key, Token: token}, nil
 }
 
 func (k *Kernel) RevokeAPIKey(ctx context.Context, id string) error {
-	return k.d.APIKeys.RevokeAPIKey(ctx, id, time.Now().UTC())
+	if err := k.d.APIKeys.RevokeAPIKey(ctx, id, time.Now().UTC()); err != nil {
+		return err
+	}
+	k.securityLog(ctx, "api_key.revoke", slog.String("key_id", id))
+	return nil
 }
 
 func (k *Kernel) AuthenticateAPIKey(ctx context.Context, token string) (domain.APIKey, error) {

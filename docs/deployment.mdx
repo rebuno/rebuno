@@ -92,6 +92,34 @@ refused with `403 forbidden`; without one, scopes alone decide. The bootstrap
 token holds every role, and agents keep access to their own executions. The
 kernel logs a warning on boot for agent IDs that are not registered.
 
+### Security log
+
+The security log records who administered Rebuno and who was refused access to
+it. `--security-log` / `REBUNO_SECURITY_LOG` writes one JSON line per entry to
+`stdout`, `stderr`, or a file, which it appends to. Unset, the security log is
+off. Each entry carries `time`, the action as `msg`, and the acting `principal`
+(`admin`, `service:<api key id>`, `user:<claim>`, `agent:<id>`, or `anonymous`):
+
+```json
+{"time":"2026-10-15T19:30:02Z","level":"INFO","msg":"policy.load","principal":"user:alice@corp.com","agent":"code","bundle_sha256":"9f2c…"}
+```
+
+| Action | Fields |
+|--------|--------|
+| `kernel.start` | `replica`, `oidc_issuer`, `oidc_audience`, `access_config_sha256` |
+| `api_key.create`, `api_key.rotate`, `api_key.revoke` | `key_id`; `name` and `scopes` on create |
+| `agent.register`, `agent.delete` | `agent`; `webhook_url` on register |
+| `policy.load` | `agent`, `bundle_sha256` (empty when the policy is cleared) |
+| `approval.grant`, `approval.deny` | `approval_id`, `execution_id`, `decided_by`, `asserted_by` |
+| `execution.cancel` | `execution_id` |
+| `execution.impersonate` | `execution_id`, `agent`, `on_behalf_of` |
+| `request.denied` | `method`, `path`, `status` (`401` or `403`) |
+
+Entries are written after the action succeeds. Each replica writes its own.
+Write to a file on a persistent volume, or collect `stdout` with a log shipper:
+entries written to a container's `stdout` are lost when the container is
+replaced.
+
 ## Provisioning agents
 
 Register agents and their policies declaratively with `--config`, a manifest both
@@ -130,6 +158,7 @@ Server flags and their environment-variable equivalents:
 | `--otel-sample-rate` | `REBUNO_OTEL_SAMPLE_RATE` | `1.0` | Trace sampling rate. |
 | `--otel-insecure` | `REBUNO_OTEL_INSECURE` | `false` | Plaintext OTLP connection. |
 | `--access` | `REBUNO_ACCESS_CONFIG` | none | Per-agent access file. See [Access](#access). |
+| `--security-log` | `REBUNO_SECURITY_LOG` | none | `stdout`, `stderr`, or a file path. See [Security log](#security-log). |
 
 Additional environment-only settings:
 

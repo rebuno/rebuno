@@ -68,6 +68,7 @@ type Deps struct {
 	Dispatcher  *dispatcher.Dispatcher
 	RateLimiter ratelimit.Limiter
 	Logger      *slog.Logger
+	SecurityLog *slog.Logger
 	Observer    *observe.Observer
 }
 
@@ -246,6 +247,9 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 		return domain.Execution{}, err
 	}
 	k.d.Observer.RecordExecutionCreated()
+	if opts.OnBehalfOf != "" {
+		k.securityLog(ctx, "execution.impersonate", slog.String("execution_id", exec.ID.String()), slog.String("agent", agentID), slog.String("on_behalf_of", opts.OnBehalfOf))
+	}
 	if session == "" {
 		exec.Status = domain.ExecutionRunning
 		return exec, nil
@@ -462,6 +466,9 @@ func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
 	err := k.cancelExecution(ctx, id, domain.ReasonClientCancelled)
 	if errors.Is(err, domain.ErrExecutionTerminal) {
 		return fmt.Errorf("%w: execution is already terminal", domain.ErrConflict)
+	}
+	if err == nil {
+		k.securityLog(ctx, "execution.cancel", slog.String("execution_id", id.String()))
 	}
 	return err
 }

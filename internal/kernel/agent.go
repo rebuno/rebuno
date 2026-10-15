@@ -3,8 +3,11 @@ package kernel
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -27,7 +30,11 @@ func (k *Kernel) RegisterAgent(ctx context.Context, agent domain.Agent) error {
 	if agent.LeaseTimeoutSeconds < minLeaseTimeout.Seconds() {
 		agent.LeaseTimeoutSeconds = 0
 	}
-	return k.d.Agents.RegisterAgent(ctx, agent)
+	if err := k.d.Agents.RegisterAgent(ctx, agent); err != nil {
+		return err
+	}
+	k.securityLog(ctx, "agent.register", slog.String("agent", agent.ID), slog.String("webhook_url", agent.WebhookURL))
+	return nil
 }
 
 func validatePolicyBundle(bundle string) error {
@@ -121,7 +128,11 @@ func (k *Kernel) DeleteAgent(ctx context.Context, id string) error {
 	if err := k.cfg.Access.Authorize(ctx, auth.RoleAdmin, id); err != nil {
 		return err
 	}
-	return k.d.Agents.DeleteAgent(ctx, id)
+	if err := k.d.Agents.DeleteAgent(ctx, id); err != nil {
+		return err
+	}
+	k.securityLog(ctx, "agent.delete", slog.String("agent", id))
+	return nil
 }
 
 func (k *Kernel) LoadPolicyBundle(ctx context.Context, agentID string, bundle string) error {
@@ -134,5 +145,11 @@ func (k *Kernel) LoadPolicyBundle(ctx context.Context, agentID string, bundle st
 	if err := k.d.Agents.SetPolicyBundle(ctx, agentID, bundle); err != nil {
 		return fmt.Errorf("load policy bundle: %w", err)
 	}
+	sum := ""
+	if bundle != "" {
+		h := sha256.Sum256([]byte(bundle))
+		sum = hex.EncodeToString(h[:])
+	}
+	k.securityLog(ctx, "policy.load", slog.String("agent", agentID), slog.String("bundle_sha256", sum))
 	return nil
 }

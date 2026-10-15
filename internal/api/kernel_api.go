@@ -110,6 +110,10 @@ func (k *KernelAPI) Register(ctx context.Context, agent domain.Agent) error {
 	return k.Inner.RegisterAgent(ctx, agent)
 }
 
+func (k *KernelAPI) LogDenied(ctx context.Context, method, path string, status int) {
+	k.Inner.LogDenied(ctx, method, path, status)
+}
+
 func (k *KernelAPI) LookupAgent(ctx context.Context, id string) (domain.Agent, error) {
 	return k.Inner.LookupAgent(ctx, id)
 }
