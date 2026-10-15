@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/identity"
 	"github.com/rebuno/rebuno/internal/payload"
@@ -50,7 +51,7 @@ func (k *Kernel) SubmitStep(ctx context.Context, execID uuid.UUID, req SubmitSte
 
 	var dec domain.StepDecision
 	err := k.d.UnitOfWork.RunLocked(ctx, lockKey(execID), func(ctx context.Context) error {
-		exec, err := authorizedExecution(ctx, k.d.Executions, execID)
+		exec, err := k.authorizedExecution(ctx, k.d.Executions, execID, auth.RoleWrite)
 		if err != nil {
 			return err
 		}
@@ -276,7 +277,7 @@ func (k *Kernel) refuseRateLimited(
 ) (domain.StepDecision, bool, error) {
 	errPayload, _ := json.Marshal(map[string]string{"reason": reason, "rule_id": ruleID})
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
+		if err := k.renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		_, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
@@ -325,7 +326,7 @@ func (k *Kernel) parkRateLimited(
 	errPayload, _ := json.Marshal(map[string]string{"reason": domain.ReasonRateLimited, "rule_id": ruleID})
 	at := time.Now().UTC().Add(wait)
 	if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
+		if err := k.renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		if _, err := tx.Append(ctx, execID, domain.EventStepRateLimited,
@@ -473,7 +474,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, exec domain.Execution, 
 		evts = append(evts, store.EventRecord{Type: domain.EventExecutionBlocked, Payload: blockPayload})
 
 		if err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-			if err := renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
+			if err := k.renewAuthorizedLease(ctx, tx, execID, req.Lease, time.Now().UTC()); err != nil {
 				return err
 			}
 			if _, err := tx.AppendBatch(ctx, execID, evts); err != nil {
@@ -501,7 +502,7 @@ func (k *Kernel) recordStepDecision(ctx context.Context, exec domain.Execution, 
 
 func (k *Kernel) writeStepLive(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord) error {
 	return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC()); err != nil {
+		if err := k.renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		if _, err := tx.AppendBatch(ctx, step.ExecutionID, evts); err != nil {
@@ -515,7 +516,7 @@ func (k *Kernel) writeStepLive(ctx context.Context, lease domain.Lease, step dom
 func (k *Kernel) startStep(ctx context.Context, lease domain.Lease, step domain.Step, evts []store.EventRecord, restart bool) ([]domain.StepResource, error) {
 	var touched []domain.StepResource
 	err := k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-		if err := renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC()); err != nil {
+		if err := k.renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC()); err != nil {
 			return err
 		}
 		resources, err := tx.ListResources(ctx, step.ExecutionID)
@@ -582,7 +583,7 @@ func (k *Kernel) settleStepRecorded(
 	captures []ResourceCapture, failures []ResourceCaptureFailure,
 ) error {
 	return k.settleStep(ctx, step, outcome, func(tx store.TxStore) error {
-		if _, err := authorizedExecution(ctx, tx, step.ExecutionID); err != nil {
+		if _, err := k.authorizedExecution(ctx, tx, step.ExecutionID, auth.RoleWrite); err != nil {
 			return err
 		}
 		return tx.CheckLease(ctx, step.ExecutionID, lease)
@@ -611,7 +612,7 @@ func (k *Kernel) CompleteStep(ctx context.Context, stepID string, req CompleteSt
 		if err != nil {
 			return err
 		}
-		exec, err := authorizedExecution(ctx, k.d.Executions, step.ExecutionID)
+		exec, err := k.authorizedExecution(ctx, k.d.Executions, step.ExecutionID, auth.RoleWrite)
 		if err != nil {
 			return err
 		}
@@ -667,7 +668,7 @@ func (k *Kernel) FailStep(ctx context.Context, stepID string, req FailStepReques
 		if err != nil {
 			return err
 		}
-		exec, err := authorizedExecution(ctx, k.d.Executions, step.ExecutionID)
+		exec, err := k.authorizedExecution(ctx, k.d.Executions, step.ExecutionID, auth.RoleWrite)
 		if err != nil {
 			return err
 		}
@@ -704,7 +705,7 @@ func (k *Kernel) failStepInternal(ctx context.Context, lease domain.Lease, step 
 	step.CompletedAt = &now
 	outcome := store.EventRecord{Type: domain.EventStepFailed, Payload: payload.StepError(step.StepID, step.Kind, step.Target, errPayload)}
 	return k.settleStep(ctx, step, outcome, func(tx store.TxStore) error {
-		return renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC())
+		return k.renewAuthorizedLease(ctx, tx, step.ExecutionID, lease, time.Now().UTC())
 	}, nil, nil)
 }
 

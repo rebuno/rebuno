@@ -2,7 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,10 +31,10 @@ type Approval struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
-func (a Approval) AllowsApprover(who string) bool {
+func (a Approval) AllowsApprover(match func(approvers []string) bool) bool {
 	var approvers []string
 	if err := json.Unmarshal(a.Approvers, &approvers); err != nil || len(approvers) == 0 {
 		return true
 	}
-	return slices.Contains(approvers, who)
+	return match(approvers)
 }

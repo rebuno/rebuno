@@ -14,13 +14,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rebuno/rebuno/internal/api"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/stream"
 )
 
 func TestStreamEndToEnd(t *testing.T) {
 	adapt, k := setupKernel(t)
-	exec, err := k.CreateExecution(context.Background(), testAgentID, json.RawMessage(`{}`))
+	exec, err := k.CreateExecution(auth.WithAdmin(context.Background()), testAgentID, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ func TestStreamDeltaRejectedFromStaleProducer(t *testing.T) {
 	}
 
 	t.Run("finished step", func(t *testing.T) {
-		exec, err := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
+		exec, err := k.CreateExecution(auth.WithAdmin(ctx), testAgentID, json.RawMessage(`{}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +120,7 @@ func TestStreamDeltaRejectedFromStaleProducer(t *testing.T) {
 	})
 
 	t.Run("superseded lease", func(t *testing.T) {
-		exec, err := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
+		exec, err := k.CreateExecution(auth.WithAdmin(ctx), testAgentID, json.RawMessage(`{}`))
 		if err != nil {
 			t.Fatal(err)
 		}

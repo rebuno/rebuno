@@ -62,6 +62,36 @@ REBUNO_OIDC_GROUP_SCOPES='{
 `"*"` grants every scope. A user in no mapped group authenticates but is
 refused every route with `403 forbidden`.
 
+### Access
+
+`--access` / `REBUNO_ACCESS_CONFIG` names a file granting roles on each agent.
+Keys are agent IDs, with `"*"` applying to every agent; each role lists
+principals as `user:<claim>`, `service:<api key id>`, or `group:<oidc group>`:
+
+```yaml
+"*":
+  read: ["group:auditors"]
+
+code:
+  write: ["group:support", "user:alice@corp.com"]
+  approve: ["group:platform"]
+  admin: ["group:platform-admins"]
+```
+
+| Role | Grants |
+|------|--------|
+| `read` | Read the agent, its executions, steps, events, streams, and approvals. |
+| `write` | `read`, plus create, cancel, and fork executions. |
+| `approve` | `read`, plus grant and deny approvals. |
+| `admin` | Everything, including registering or deleting the agent and loading or testing its policy. |
+
+A request needs both the route's scope and a role on the agent. Listings
+return only agents the caller can read and their executions and approvals.
+With a file configured, API keys and OIDC users without a role on an agent are
+refused with `403 forbidden`; without one, scopes alone decide. The bootstrap
+token holds every role, and agents keep access to their own executions. The
+kernel logs a warning on boot for agent IDs that are not registered.
+
 ## Provisioning agents
 
 Register agents and their policies declaratively with `--config`, a manifest both
@@ -99,6 +129,7 @@ Server flags and their environment-variable equivalents:
 | `--otel-endpoint` | `REBUNO_OTEL_ENDPOINT` | none | OTLP gRPC endpoint (empty turns tracing off). |
 | `--otel-sample-rate` | `REBUNO_OTEL_SAMPLE_RATE` | `1.0` | Trace sampling rate. |
 | `--otel-insecure` | `REBUNO_OTEL_INSECURE` | `false` | Plaintext OTLP connection. |
+| `--access` | `REBUNO_ACCESS_CONFIG` | none | Per-agent access file. See [Access](#access). |
 
 Additional environment-only settings:
 

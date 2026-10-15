@@ -55,6 +55,7 @@ type SpawnedBy struct {
 // Cursor holds an execution ID. IDs are UUIDv7, so ordering by ID orders by creation.
 type ExecutionFilter struct {
 	AgentID           string
+	AgentIDs          []string
 	Session           string
 	IdempotencyKey    string
 	SpawnedBy         *uuid.UUID

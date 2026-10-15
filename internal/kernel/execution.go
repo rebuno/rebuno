@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/dispatcher"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/observe"
@@ -33,6 +34,7 @@ type Config struct {
 	ExecutionRetention       time.Duration
 	LeaderLockKey            string
 	ReplicaID                string
+	Access                   auth.Access
 }
 
 func DefaultConfig() Config {
@@ -147,6 +149,9 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 	if err := validateLabel("idempotency_key", opts.IdempotencyKey); err != nil {
 		return domain.Execution{}, err
 	}
+	if err := k.cfg.Access.Authorize(ctx, auth.RoleWrite, agentID); err != nil {
+		return domain.Execution{}, err
+	}
 	if opts.SpawnedBy != nil && opts.IdempotencyKey == "" {
 		opts.IdempotencyKey = opts.SpawnedBy.StepID
 	}
@@ -161,7 +166,7 @@ func (k *Kernel) CreateExecution(ctx context.Context, agentID string, input json
 		return domain.Execution{}, err
 	}
 	if opts.ParentExecutionID != nil {
-		parent, err := authorizedExecution(ctx, k.d.Executions, *opts.ParentExecutionID)
+		parent, err := k.authorizedExecution(ctx, k.d.Executions, *opts.ParentExecutionID, auth.RoleRead)
 		if err != nil {
 			return domain.Execution{}, err
 		}
@@ -372,11 +377,11 @@ func (k *Kernel) Deps() Deps {
 }
 
 func (k *Kernel) GetExecution(ctx context.Context, id uuid.UUID) (domain.Execution, error) {
-	return authorizedExecution(ctx, k.d.Executions, id)
+	return k.authorizedExecution(ctx, k.d.Executions, id, auth.RoleRead)
 }
 
 func (k *Kernel) PreviousState(ctx context.Context, id uuid.UUID) (json.RawMessage, error) {
-	exec, err := authorizedExecution(ctx, k.d.Executions, id)
+	exec, err := k.authorizedExecution(ctx, k.d.Executions, id, auth.RoleRead)
 	if err != nil {
 		return nil, err
 	}
@@ -403,10 +408,16 @@ func (k *Kernel) ListExecutions(ctx context.Context, filter domain.ExecutionFilt
 	if filter.Limit > MaxListExecutionsLimit {
 		filter.Limit = MaxListExecutionsLimit
 	}
+	if readable, all := k.cfg.Access.ReadableAgents(ctx); !all {
+		filter.AgentIDs = readable
+	}
 	return k.d.Executions.ListExecutions(ctx, filter)
 }
 
 func (k *Kernel) CancelExecution(ctx context.Context, id uuid.UUID) error {
+	if _, err := k.authorizedExecution(ctx, k.d.Executions, id, auth.RoleWrite); err != nil {
+		return err
+	}
 	err := k.cancelExecution(ctx, id, domain.ReasonClientCancelled)
 	if errors.Is(err, domain.ErrExecutionTerminal) {
 		return fmt.Errorf("%w: execution is already terminal", domain.ErrConflict)
@@ -497,7 +508,7 @@ func (k *Kernel) cancelExecution(ctx context.Context, id uuid.UUID, reason strin
 }
 
 func (k *Kernel) GetEvents(ctx context.Context, id uuid.UUID, afterSeq int64, limit int) ([]domain.Event, error) {
-	if _, err := authorizedExecution(ctx, k.d.Executions, id); err != nil {
+	if _, err := k.authorizedExecution(ctx, k.d.Executions, id, auth.RoleRead); err != nil {
 		return nil, err
 	}
 	return k.d.Events.GetEvents(ctx, id, afterSeq, limit)

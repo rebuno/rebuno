@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,13 @@ func approvalDecider(ctx context.Context, named string) (decidedBy, assertedBy s
 	return named, caller, nil
 }
 
+func approverMatcher(ctx context.Context, decidedBy, assertedBy string) func([]string) bool {
+	if assertedBy != "" {
+		return func(approvers []string) bool { return slices.Contains(approvers, decidedBy) }
+	}
+	return func(approvers []string) bool { return auth.Matches(ctx, approvers) }
+}
+
 func requireAwaitingApproval(step domain.Step) error {
 	if step.Status != domain.StepAwaitingApproval {
 		return fmt.Errorf("%w: approval step is in status %s", domain.ErrConflict, step.Status)
@@ -53,12 +61,15 @@ func (k *Kernel) GrantApproval(ctx context.Context, id uuid.UUID, req GrantAppro
 	if err != nil {
 		return err
 	}
+	if _, err := k.authorizedExecution(ctx, k.d.Executions, approval.ExecutionID, auth.RoleApprove); err != nil {
+		return err
+	}
 	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(approval.ExecutionID), func(ctx context.Context) error {
 		approval, _ = k.d.Approvals.GetApproval(ctx, id)
 		if approval.Status != domain.ApprovalPending {
 			return domain.ErrConflict
 		}
-		if !approval.AllowsApprover(decidedBy) {
+		if !approval.AllowsApprover(approverMatcher(ctx, decidedBy, assertedBy)) {
 			return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, decidedBy)
 		}
 		now := time.Now().UTC()
@@ -109,12 +120,15 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 	if err != nil {
 		return err
 	}
+	if _, err := k.authorizedExecution(ctx, k.d.Executions, approval.ExecutionID, auth.RoleApprove); err != nil {
+		return err
+	}
 	if err := k.d.UnitOfWork.RunLocked(ctx, lockKey(approval.ExecutionID), func(ctx context.Context) error {
 		approval, _ = k.d.Approvals.GetApproval(ctx, id)
 		if approval.Status != domain.ApprovalPending {
 			return domain.ErrConflict
 		}
-		if !approval.AllowsApprover(decidedBy) {
+		if !approval.AllowsApprover(approverMatcher(ctx, decidedBy, assertedBy)) {
 			return fmt.Errorf("%w: %q is not an approver for this approval", domain.ErrForbidden, decidedBy)
 		}
 		now := time.Now().UTC()
@@ -165,9 +179,34 @@ func (k *Kernel) DenyApproval(ctx context.Context, id uuid.UUID, req DenyApprova
 }
 
 func (k *Kernel) ListPendingApprovals(ctx context.Context) ([]domain.Approval, error) {
-	return k.d.Approvals.ListPendingApprovals(ctx)
+	approvals, err := k.d.Approvals.ListPendingApprovals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	readable, all := k.cfg.Access.ReadableAgents(ctx)
+	if all {
+		return approvals, nil
+	}
+	visible := approvals[:0]
+	for _, a := range approvals {
+		exec, err := k.d.Executions.GetExecution(ctx, a.ExecutionID)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(readable, exec.AgentID) {
+			visible = append(visible, a)
+		}
+	}
+	return visible, nil
 }
 
 func (k *Kernel) GetApproval(ctx context.Context, id uuid.UUID) (domain.Approval, error) {
-	return k.d.Approvals.GetApproval(ctx, id)
+	approval, err := k.d.Approvals.GetApproval(ctx, id)
+	if err != nil {
+		return domain.Approval{}, err
+	}
+	if _, err := k.authorizedExecution(ctx, k.d.Executions, approval.ExecutionID, auth.RoleRead); err != nil {
+		return domain.Approval{}, err
+	}
+	return approval, nil
 }

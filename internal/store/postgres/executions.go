@@ -110,10 +110,11 @@ func listExecutions(ctx context.Context, q Querier, filter domain.ExecutionFilte
 		  AND ($7::uuid IS NULL OR spawned_by_execution_id = $7::uuid)
 		  AND ($8::uuid IS NULL OR parent_execution_id = $8::uuid)
 		  AND ($9::uuid IS NULL OR forked_from = $9::uuid)
+		  AND ($10::text[] IS NULL OR agent_id = ANY($10::text[]))
 		ORDER BY id DESC
 		LIMIT $4
 	`, filter.AgentID, string(filter.Status), cursor, limit+1, filter.Session, filter.IdempotencyKey,
-		uuidArg(filter.SpawnedBy), uuidArg(filter.ParentExecutionID), uuidArg(filter.ForkedFrom))
+		uuidArg(filter.SpawnedBy), uuidArg(filter.ParentExecutionID), uuidArg(filter.ForkedFrom), filter.AgentIDs)
 	if err != nil {
 		return domain.ExecutionPage{}, fmt.Errorf("list executions: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rebuno/rebuno/internal/api"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 )
 
@@ -95,11 +96,11 @@ func TestEventsRequireExistingExecution(t *testing.T) {
 
 func TestStepRoutesRequireMatchingExecution(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
-	first, err := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
+	first, err := k.CreateExecution(auth.WithAdmin(ctx), testAgentID, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
+	second, err := k.CreateExecution(auth.WithAdmin(ctx), testAgentID, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestStepRoutesRequireMatchingExecution(t *testing.T) {
 
 func TestStreamSubscriptionRequiresExistingExecutionAndBearer(t *testing.T) {
 	adapt, k := setupKernel(t)
-	exec, err := k.CreateExecution(context.Background(), testAgentID, json.RawMessage(`{}`))
+	exec, err := k.CreateExecution(auth.WithAdmin(context.Background()), testAgentID, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

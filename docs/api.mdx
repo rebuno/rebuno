@@ -29,7 +29,9 @@ details}` envelope.
 ### Scopes
 
 Scopes apply deployment-wide; write does not include read. Insufficient scope
-returns `403 forbidden`; invalid or revoked keys return `401 unauthorized`.
+returns `403 forbidden`; invalid or revoked keys return `401 unauthorized`. An
+[access file](/deployment#access) further limits each caller to roles on
+specific agents.
 
 | Scope | Access |
 |-------|--------|
@@ -507,8 +509,9 @@ did not match. See [Testing a bundle](/policy#testing-a-bundle).
 → `204`. The resumed loop sees a policy error at that step.
 
 Setting `decided_by` requires `approvals:delegate`. Both return
-`403 forbidden` if `decided_by` is set without that scope or the decider is
-absent from a configured `approvers` list. See [Approvals](/policy#approvals).
+`403 forbidden` if `decided_by` is set without that scope, the caller lacks the
+`approve` role on the agent, or the decider is absent from a configured
+`approvers` list. See [Approvals](/policy#approvals).
 
 ---
 

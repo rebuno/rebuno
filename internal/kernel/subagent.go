@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/payload"
 	"github.com/rebuno/rebuno/internal/store"
@@ -15,7 +16,7 @@ import (
 )
 
 func (k *Kernel) checkParentStep(ctx context.Context, child domain.Execution) error {
-	parent, err := authorizedExecution(ctx, k.d.Executions, child.SpawnedBy.ExecutionID)
+	parent, err := k.authorizedExecution(ctx, k.d.Executions, child.SpawnedBy.ExecutionID, auth.RoleWrite)
 	if err != nil {
 		return err
 	}

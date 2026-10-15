@@ -13,6 +13,7 @@ import (
 
 type AdminKernel interface {
 	APIKeyKernel
+	agentLookup
 	Register(ctx context.Context, agent domain.Agent) error
 	GetAgent(ctx context.Context, id string) (domain.Agent, error)
 	ListAgents(ctx context.Context) ([]domain.Agent, error)

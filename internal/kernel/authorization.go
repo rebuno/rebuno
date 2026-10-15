@@ -15,12 +15,12 @@ type executionReader interface {
 	GetExecution(context.Context, uuid.UUID) (domain.Execution, error)
 }
 
-func authorizedExecution(ctx context.Context, reader executionReader, id uuid.UUID) (domain.Execution, error) {
+func (k *Kernel) authorizedExecution(ctx context.Context, reader executionReader, id uuid.UUID, need auth.Role) (domain.Execution, error) {
 	exec, err := reader.GetExecution(ctx, id)
 	if err != nil {
 		return domain.Execution{}, err
 	}
-	if err := auth.AuthorizeAgent(ctx, exec.AgentID); err != nil {
+	if err := k.cfg.Access.Authorize(ctx, need, exec.AgentID); err != nil {
 		return domain.Execution{}, err
 	}
 	return exec, nil
@@ -68,8 +68,8 @@ func (k *Kernel) FailExecutionStep(ctx context.Context, execID uuid.UUID, stepID
 	return k.FailStep(ctx, stepID, req)
 }
 
-func renewAuthorizedLease(ctx context.Context, tx store.TxStore, execID uuid.UUID, lease domain.Lease, now time.Time) error {
-	if _, err := authorizedExecution(ctx, tx, execID); err != nil {
+func (k *Kernel) renewAuthorizedLease(ctx context.Context, tx store.TxStore, execID uuid.UUID, lease domain.Lease, now time.Time) error {
+	if _, err := k.authorizedExecution(ctx, tx, execID, auth.RoleWrite); err != nil {
 		return err
 	}
 	return tx.RenewLease(ctx, execID, lease, now)

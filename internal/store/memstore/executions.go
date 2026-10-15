@@ -31,6 +31,9 @@ func (s *Store) listExecutionsLocked(filter domain.ExecutionFilter) domain.Execu
 		if filter.AgentID != "" && e.AgentID != filter.AgentID {
 			continue
 		}
+		if filter.AgentIDs != nil && !slices.Contains(filter.AgentIDs, e.AgentID) {
+			continue
+		}
 		if filter.Session != "" && e.Session != filter.Session {
 			continue
 		}

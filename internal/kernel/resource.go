@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/identity"
 	"github.com/rebuno/rebuno/internal/store"
@@ -61,7 +62,7 @@ func (k *Kernel) liveResourceTx(ctx context.Context, execID uuid.UUID, lease dom
 		return fmt.Errorf("%w: missing dispatch lease", domain.ErrValidation)
 	}
 	return k.d.UnitOfWork.RunLocked(ctx, lockKey(execID), func(ctx context.Context) error {
-		exec, err := authorizedExecution(ctx, k.d.Executions, execID)
+		exec, err := k.authorizedExecution(ctx, k.d.Executions, execID, auth.RoleWrite)
 		if err != nil {
 			return err
 		}
@@ -69,7 +70,7 @@ func (k *Kernel) liveResourceTx(ctx context.Context, execID uuid.UUID, lease dom
 			return domain.ErrExecutionTerminal
 		}
 		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-			if err := renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
+			if err := k.renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
 				return err
 			}
 			return fn(tx)
@@ -395,7 +396,7 @@ type ForkPoints struct {
 }
 
 func (k *Kernel) ForkPoints(ctx context.Context, execID uuid.UUID) (ForkPoints, error) {
-	if _, err := authorizedExecution(ctx, k.d.Executions, execID); err != nil {
+	if _, err := k.authorizedExecution(ctx, k.d.Executions, execID, auth.RoleRead); err != nil {
 		return ForkPoints{}, err
 	}
 	points := ForkPoints{Resources: make(map[string]int64), Checkpoints: []domain.ResourceCheckpoint{}}

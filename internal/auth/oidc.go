@@ -45,14 +45,16 @@ func (o *OIDC) Authenticate(ctx context.Context, raw string) (context.Context, e
 	if user == "" {
 		return nil, domain.ErrUnauthorized
 	}
-	groups, _ := claims[o.cfg.GroupsClaim].([]any)
+	rawGroups, _ := claims[o.cfg.GroupsClaim].([]any)
+	var groups []string
 	var scopes []domain.Scope
-	for _, g := range groups {
+	for _, g := range rawGroups {
 		if name, ok := g.(string); ok {
+			groups = append(groups, name)
 			scopes = append(scopes, o.cfg.GroupScopes[name]...)
 		}
 	}
-	return WithUser(ctx, user, scopes), nil
+	return WithUser(ctx, user, groups, scopes), nil
 }
 
 func ParseGroupScopes(raw string) (map[string][]domain.Scope, error) {

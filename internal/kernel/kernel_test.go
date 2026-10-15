@@ -1191,6 +1191,96 @@ func TestApprovalDeciderComesFromCaller(t *testing.T) {
 			t.Fatalf("got decided_by %q asserted_by %q, want alice and service:slackbot", a.DecidedBy, a.AssertedBy)
 		}
 	})
+
+	const oncall = `
+      approval_config:
+        approvers: ["group:oncall"]
+`
+	t.Run("a member of an approver group decides as themselves", func(t *testing.T) {
+		k, id := blockedApproval(t, oncall)
+		member := auth.WithUser(context.Background(), "olly@corp.com", []string{"oncall"}, nil)
+		if err := k.GrantApproval(member, id, kernel.GrantApprovalRequest{}); err != nil {
+			t.Fatal(err)
+		}
+		if a, _ := k.GetApproval(auth.WithAdmin(context.Background()), id); a.DecidedBy != "user:olly@corp.com" {
+			t.Fatalf("decided_by: got %q", a.DecidedBy)
+		}
+	})
+
+	t.Run("a delegated name cannot satisfy a group entry", func(t *testing.T) {
+		k, id := blockedApproval(t, oncall)
+		err := k.GrantApproval(delegate, id, kernel.GrantApprovalRequest{DecidedBy: "user:olly@corp.com"})
+		if !errors.Is(err, domain.ErrForbidden) {
+			t.Fatalf("got %v, want ErrForbidden", err)
+		}
+	})
+}
+
+func TestAccessLimitsCallersToTheirAgents(t *testing.T) {
+	access, err := auth.ParseAccess([]byte(`
+"*":
+  read: ["group:auditors"]
+code:
+  write: ["group:support"]
+  approve: ["group:oncall"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := memstore.NewStore()
+	k := kernel.New(kernel.Config{ReplicaID: "test", Access: access}, memDeps(ms, kernel.Deps{Policy: policy.PermissiveEngine{}}))
+	admin := auth.WithAdmin(context.Background())
+	for _, id := range []string{"code", "review"} {
+		if err := k.RegisterAgent(admin, domain.Agent{ID: id, WebhookURL: "http://localhost", Secret: "secret"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reviewExec, err := k.CreateExecution(admin, "review", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	support := auth.WithUser(context.Background(), "sam@corp.com", []string{"support"}, nil)
+	auditor := auth.WithUser(context.Background(), "ann@corp.com", []string{"auditors"}, nil)
+	approver := auth.WithUser(context.Background(), "olly@corp.com", []string{"oncall"}, nil)
+	outsider := auth.WithUser(context.Background(), "eve@corp.com", nil, nil)
+
+	codeExec, err := k.CreateExecution(support, "code", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("support creating on code: %v", err)
+	}
+	forbidden := map[string]error{}
+	_, forbidden["support creating on review"] = k.CreateExecution(support, "review", json.RawMessage(`{}`))
+	_, forbidden["approver creating on code"] = k.CreateExecution(approver, "code", json.RawMessage(`{}`))
+	_, forbidden["auditor creating on code"] = k.CreateExecution(auditor, "code", json.RawMessage(`{}`))
+	_, forbidden["support reading review"] = k.GetExecution(support, reviewExec.ID)
+	_, forbidden["outsider reading code"] = k.GetExecution(outsider, codeExec.ID)
+	forbidden["support cancelling review"] = k.CancelExecution(support, reviewExec.ID)
+	for name, err := range forbidden {
+		if !errors.Is(err, domain.ErrForbidden) {
+			t.Errorf("%s: got %v, want ErrForbidden", name, err)
+		}
+	}
+	if _, err := k.GetExecution(auditor, reviewExec.ID); err != nil {
+		t.Errorf("auditor reading review through *: %v", err)
+	}
+
+	page, err := k.ListExecutions(support, domain.ExecutionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Executions) != 1 || page.Executions[0].ID != codeExec.ID {
+		t.Errorf("support listed %+v, want only the code execution", page.Executions)
+	}
+	agents, err := k.ListAgents(support)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].ID != "code" {
+		t.Errorf("support listed agents %+v, want only code", agents)
+	}
+	if page, _ := k.ListExecutions(outsider, domain.ExecutionFilter{}); len(page.Executions) != 0 {
+		t.Errorf("outsider listed %d executions", len(page.Executions))
+	}
 }
 
 // An at_most_once effect that resolved indeterminate must not run again in the

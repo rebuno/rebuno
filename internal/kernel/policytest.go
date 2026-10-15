@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/policy"
 )
@@ -32,6 +33,9 @@ const (
 )
 
 func (k *Kernel) TestPolicy(ctx context.Context, agentID string, req PolicyTestRequest) (policy.Report, error) {
+	if err := k.cfg.Access.Authorize(ctx, auth.RoleAdmin, agentID); err != nil {
+		return policy.Report{}, err
+	}
 	agent, err := k.d.Agents.GetAgent(ctx, agentID)
 	if err != nil {
 		return policy.Report{}, fmt.Errorf("test policy: %w", err)

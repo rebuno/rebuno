@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -26,7 +27,7 @@ func TestAllowsApprover(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := Approval{Approvers: json.RawMessage(tc.approvers)}
-			if got := a.AllowsApprover(tc.who); got != tc.want {
+			if got := a.AllowsApprover(func(approvers []string) bool { return slices.Contains(approvers, tc.who) }); got != tc.want {
 				t.Fatalf("AllowsApprover(%q) with %s: got %v, want %v", tc.who, tc.approvers, got, tc.want)
 			}
 		})

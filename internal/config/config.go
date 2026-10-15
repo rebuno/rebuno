@@ -36,6 +36,7 @@ type Config struct {
 	OIDCUserClaim          string
 	OIDCGroupsClaim        string
 	OIDCGroupScopes        string
+	AccessConfigPath       string
 }
 
 func Default() Config {
@@ -162,6 +163,9 @@ func FromEnv() Config {
 	}
 	if v := os.Getenv("REBUNO_OIDC_GROUP_SCOPES"); v != "" {
 		cfg.OIDCGroupScopes = v
+	}
+	if v := os.Getenv("REBUNO_ACCESS_CONFIG"); v != "" {
+		cfg.AccessConfigPath = v
 	}
 	return cfg
 }

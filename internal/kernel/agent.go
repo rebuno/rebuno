@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -17,6 +18,9 @@ import (
 const minLeaseTimeout = 10 * time.Second
 
 func (k *Kernel) RegisterAgent(ctx context.Context, agent domain.Agent) error {
+	if err := k.cfg.Access.Authorize(ctx, auth.RoleAdmin, agent.ID); err != nil {
+		return err
+	}
 	if err := validatePolicyBundle(agent.PolicyBundle); err != nil {
 		return err
 	}
@@ -37,7 +41,7 @@ func validatePolicyBundle(bundle string) error {
 }
 
 func (k *Kernel) SetAgentMetadata(ctx context.Context, agentID string, metadata domain.AgentMetadata) error {
-	if err := auth.AuthorizeAgent(ctx, agentID); err != nil {
+	if err := k.cfg.Access.Authorize(ctx, auth.RoleAdmin, agentID); err != nil {
 		return err
 	}
 	for _, schema := range []*json.RawMessage{&metadata.InputSchema, &metadata.OutputSchema} {
@@ -89,19 +93,41 @@ func validateInput(agent domain.Agent, input json.RawMessage) error {
 	return nil
 }
 
+// LookupAgent reads an agent without authorization, for verifying its request signatures.
+func (k *Kernel) LookupAgent(ctx context.Context, id string) (domain.Agent, error) {
+	return k.d.Agents.GetAgent(ctx, id)
+}
+
 func (k *Kernel) GetAgent(ctx context.Context, id string) (domain.Agent, error) {
+	if err := k.cfg.Access.Authorize(ctx, auth.RoleRead, id); err != nil {
+		return domain.Agent{}, err
+	}
 	return k.d.Agents.GetAgent(ctx, id)
 }
 
 func (k *Kernel) ListAgents(ctx context.Context) ([]domain.Agent, error) {
-	return k.d.Agents.ListAgents(ctx)
+	agents, err := k.d.Agents.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	readable, all := k.cfg.Access.ReadableAgents(ctx)
+	if all {
+		return agents, nil
+	}
+	return slices.DeleteFunc(agents, func(a domain.Agent) bool { return !slices.Contains(readable, a.ID) }), nil
 }
 
 func (k *Kernel) DeleteAgent(ctx context.Context, id string) error {
+	if err := k.cfg.Access.Authorize(ctx, auth.RoleAdmin, id); err != nil {
+		return err
+	}
 	return k.d.Agents.DeleteAgent(ctx, id)
 }
 
 func (k *Kernel) LoadPolicyBundle(ctx context.Context, agentID string, bundle string) error {
+	if err := k.cfg.Access.Authorize(ctx, auth.RoleAdmin, agentID); err != nil {
+		return err
+	}
 	if err := validatePolicyBundle(bundle); err != nil {
 		return fmt.Errorf("load policy bundle: %w", err)
 	}

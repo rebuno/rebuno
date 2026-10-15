@@ -15,6 +15,7 @@ type principal struct {
 	client  bool
 	keyID   string
 	user    string
+	groups  []string
 }
 
 func WithAgent(ctx context.Context, agentID string) context.Context {
@@ -26,30 +27,24 @@ func WithAdmin(ctx context.Context) context.Context {
 	return context.WithValue(ctx, principalKey{}, principal{admin: true})
 }
 
-func AuthorizeAgent(ctx context.Context, agentID string) error {
-	p, ok := ctx.Value(principalKey{}).(principal)
-	if !ok {
-		return domain.ErrUnauthorized
-	}
-	if p.admin || p.client || (p.agentID != "" && p.agentID == agentID) {
-		return nil
-	}
-	return domain.ErrForbidden
-}
-
 func WithClient(ctx context.Context, keyID string, scopes []domain.Scope) context.Context {
 	return context.WithValue(ctx, principalKey{}, principal{client: true, keyID: keyID, scopes: slices.Clone(scopes)})
 }
 
-func WithUser(ctx context.Context, user string, scopes []domain.Scope) context.Context {
-	return context.WithValue(ctx, principalKey{}, principal{client: true, user: user, scopes: slices.Clone(scopes)})
+func WithUser(ctx context.Context, user string, groups []string, scopes []domain.Scope) context.Context {
+	return context.WithValue(ctx, principalKey{}, principal{client: true, user: user, groups: slices.Clone(groups), scopes: slices.Clone(scopes)})
 }
 
 func Identity(ctx context.Context) string {
 	p, ok := ctx.Value(principalKey{}).(principal)
-	switch {
-	case !ok:
+	if !ok {
 		return ""
+	}
+	return p.identity()
+}
+
+func (p principal) identity() string {
+	switch {
 	case p.admin:
 		return "admin"
 	case p.user != "":

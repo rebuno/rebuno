@@ -110,6 +110,10 @@ func (k *KernelAPI) Register(ctx context.Context, agent domain.Agent) error {
 	return k.Inner.RegisterAgent(ctx, agent)
 }
 
+func (k *KernelAPI) LookupAgent(ctx context.Context, id string) (domain.Agent, error) {
+	return k.Inner.LookupAgent(ctx, id)
+}
+
 func (k *KernelAPI) GetAgent(ctx context.Context, id string) (domain.Agent, error) {
 	return k.Inner.GetAgent(ctx, id)
 }

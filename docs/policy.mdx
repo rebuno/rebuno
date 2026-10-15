@@ -234,8 +234,8 @@ approvals API and the execution resumes. See [Events](/events) and
       decision: require_approval
       reason: filesystem writes need approval
       approval_config:
-        approvers: ["alice", "bob"]   # omit to let anyone decide
-        timeout: 5m                   # default: the kernel's DefaultApprovalTimeout
+        approvers: ["user:alice@corp.com", "group:platform"]  # omit to let anyone decide
+        timeout: 5m                                           # default: the kernel's DefaultApprovalTimeout
         message: check the target path before granting
 ```
 
@@ -249,7 +249,9 @@ approvals API and the execution resumes. See [Events](/events) and
 `service:<key id>` for an API key, or `user:<claim>` for an
 [OIDC](/deployment#oidc) user. A caller holding the `approvals:delegate`
 scope may name the approver instead, and the approval records that caller in
-`asserted_by`. `approvers` entries match `decided_by` exactly.
+`asserted_by`. `approvers` entries match `decided_by` exactly, and a
+`group:<name>` entry matches an OIDC user in that group. A name supplied through
+`approvals:delegate` matches only exact entries.
 
 ### Rate limits
 
@@ -340,7 +342,7 @@ model, so put `deny` rules for commands known to be dangerous above it.
         threshold: 0.6              # default 0.6
         fallback: require_approval  # allow | deny | require_approval (default)
       approval_config:
-        approvers: ["ops"]
+        approvers: ["group:ops"]
 ```
 
 | Field | Meaning |

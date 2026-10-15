@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/payload"
 	"github.com/rebuno/rebuno/internal/store"
@@ -17,7 +18,7 @@ func (k *Kernel) Suspend(ctx context.Context, execID uuid.UUID, lease domain.Lea
 	}
 	var suspended bool
 	err := k.d.UnitOfWork.RunLocked(ctx, lockKey(execID), func(ctx context.Context) error {
-		exec, err := authorizedExecution(ctx, k.d.Executions, execID)
+		exec, err := k.authorizedExecution(ctx, k.d.Executions, execID, auth.RoleWrite)
 		if err != nil {
 			return err
 		}
@@ -25,7 +26,7 @@ func (k *Kernel) Suspend(ctx context.Context, execID uuid.UUID, lease domain.Lea
 			return domain.ErrExecutionTerminal
 		}
 		return k.d.UnitOfWork.RunInTx(ctx, func(tx store.TxStore) error {
-			if err := renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
+			if err := k.renewAuthorizedLease(ctx, tx, execID, lease, time.Now().UTC()); err != nil {
 				return err
 			}
 			waiting, err := awaitingSteps(ctx, tx, execID)

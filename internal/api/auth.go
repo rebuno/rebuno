@@ -14,7 +14,7 @@ import (
 )
 
 type agentLookup interface {
-	GetAgent(ctx context.Context, id string) (domain.Agent, error)
+	LookupAgent(ctx context.Context, id string) (domain.Agent, error)
 }
 
 func bearerAuthMiddleware(token string, keys APIKeyKernel, oidc *auth.OIDC, scopes ...domain.Scope) func(http.Handler) http.Handler {
@@ -84,7 +84,7 @@ func hmacAuthMiddleware(lookup agentLookup) func(http.Handler) http.Handler {
 				WriteError(w, domain.ErrUnauthorized)
 				return
 			}
-			agent, err := lookup.GetAgent(r.Context(), agentID)
+			agent, err := lookup.LookupAgent(r.Context(), agentID)
 			if err != nil {
 				WriteError(w, domain.ErrUnauthorized)
 				return

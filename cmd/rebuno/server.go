@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -19,10 +20,12 @@ import (
 	"github.com/rebuno/rebuno/internal/api"
 	"github.com/rebuno/rebuno/internal/auth"
 	"github.com/rebuno/rebuno/internal/config"
+	"github.com/rebuno/rebuno/internal/domain"
 	"github.com/rebuno/rebuno/internal/kernel"
 	"github.com/rebuno/rebuno/internal/lifecycle"
 	"github.com/rebuno/rebuno/internal/observe"
 	"github.com/rebuno/rebuno/internal/policy"
+	"github.com/rebuno/rebuno/internal/store"
 	"github.com/rebuno/rebuno/internal/store/postgres"
 	"github.com/rebuno/rebuno/internal/stream"
 )
@@ -40,6 +43,7 @@ func bindServerFlags(f *pflag.FlagSet, cfg *config.Config) {
 	f.StringVar(&cfg.OTELEndpoint, "otel-endpoint", cfg.OTELEndpoint, "OTLP gRPC endpoint (empty = tracing off)")
 	f.Float64Var(&cfg.OTELSampleRate, "otel-sample-rate", cfg.OTELSampleRate, "Trace sample rate 0..1")
 	f.BoolVar(&cfg.OTELInsecure, "otel-insecure", cfg.OTELInsecure, "Use insecure (plaintext) OTLP connection")
+	f.StringVar(&cfg.AccessConfigPath, "access", cfg.AccessConfigPath, "Path to the per-agent access config")
 }
 
 func serverCmd() *cobra.Command {
@@ -174,7 +178,35 @@ func buildOIDC(ctx context.Context, cfg config.Config) (*auth.OIDC, error) {
 	})
 }
 
+func loadAccess(ctx context.Context, path string, agents store.AgentStore, logger *slog.Logger) (auth.Access, error) {
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read access config: %w", err)
+	}
+	access, err := auth.ParseAccess(raw)
+	if err != nil {
+		return nil, err
+	}
+	registered, err := agents.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for id := range access {
+		if id != auth.AllAgents && !slices.ContainsFunc(registered, func(a domain.Agent) bool { return a.ID == id }) {
+			logger.Warn("access config names an unregistered agent", "agent", id)
+		}
+	}
+	return access, nil
+}
+
 func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slog.Logger, replicaID string, ready func(context.Context) error, hub *stream.Hub) error {
+	access, err := loadAccess(ctx, cfg.AccessConfigPath, deps.Agents, logger)
+	if err != nil {
+		return err
+	}
 	k := kernel.New(kernel.Config{
 		ReplicaID:                replicaID,
 		DispatchMaxAttempts:      cfg.DispatchMaxAttempts,
@@ -188,6 +220,7 @@ func serve(ctx context.Context, cfg config.Config, deps kernel.Deps, logger *slo
 		ExecutionRetention:       cfg.Retention,
 		DispatchLeaseTimeout:     cfg.DispatchLeaseTimeout,
 		LeaderLockKey:            cfg.LeaderLockKey,
+		Access:                   access,
 	}, deps)
 
 	verifier, err := buildOIDC(ctx, cfg)

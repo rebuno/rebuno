@@ -34,7 +34,7 @@ func setupKernel(t *testing.T) (*api.KernelAPI, *kernel.Kernel) {
 		Policy: policy.NewBundleResolver(ms, policy.PermissiveEngine{}, nil),
 	})
 	agent := domain.Agent{ID: testAgentID, WebhookURL: "http://localhost", Secret: testAgentSecret}
-	if err := k.RegisterAgent(context.Background(), agent); err != nil {
+	if err := k.RegisterAgent(auth.WithAdmin(context.Background()), agent); err != nil {
 		t.Fatal(err)
 	}
 	return &api.KernelAPI{Inner: k}, k
@@ -147,7 +147,7 @@ func TestStepsReachableViaBearerAuth(t *testing.T) {
 	adapt, k := setupKernel(t)
 	mux := api.NewRouter(adapt, adapt, adapt, "tok", nil, nil, nil)
 
-	exec, _ := k.CreateExecution(context.Background(), testAgentID, json.RawMessage(`{}`))
+	exec, _ := k.CreateExecution(auth.WithAdmin(context.Background()), testAgentID, json.RawMessage(`{}`))
 	args := json.RawMessage(`{"path":"/tmp"}`)
 	stepID := computeStepID(t, exec.ID, domain.StepKindTool, "read", args, 0)
 	submitStepHTTP(t, mux, k, exec.ID, "read", args)
@@ -272,7 +272,7 @@ func TestBearerAuth(t *testing.T) {
 
 func TestAdminLoadPolicyBundle(t *testing.T) {
 	mux, k, ctx := setupRouter(t)
-	exec, _ := k.CreateExecution(ctx, testAgentID, json.RawMessage(`{}`))
+	exec, _ := k.CreateExecution(auth.WithAdmin(ctx), testAgentID, json.RawMessage(`{}`))
 
 	bundle := `
 rules:

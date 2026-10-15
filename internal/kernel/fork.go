@@ -25,7 +25,7 @@ type ForkRequest struct {
 }
 
 func (k *Kernel) ForkExecution(ctx context.Context, sourceID uuid.UUID, req ForkRequest) (domain.Execution, error) {
-	source, err := authorizedExecution(ctx, k.d.Executions, sourceID)
+	source, err := k.authorizedExecution(ctx, k.d.Executions, sourceID, auth.RoleWrite)
 	if err != nil {
 		return domain.Execution{}, err
 	}
