@@ -231,7 +231,9 @@ selected checkpoint fails resource initialization and the forked execution.
 The kernel enqueues a dispatch (a row in the `dispatches` table) in the same
 transaction as the event that triggers it. A background loop on every replica
 claims due work with `SELECT … FOR UPDATE SKIP LOCKED` and POSTs to the agent's
-webhook:
+webhook. The enqueue sends a Postgres `NOTIFY` that wakes idle loops when the
+transaction commits; loops also poll every 250 ms, which picks up delayed
+retries and covers a dropped listener:
 
 ```http
 POST <webhook_url>

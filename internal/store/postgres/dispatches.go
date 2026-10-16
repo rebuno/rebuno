@@ -47,7 +47,33 @@ func enqueueDispatch(ctx context.Context, q Querier, d domain.Dispatch) error {
 		}
 		return fmt.Errorf("enqueue dispatch: %w", err)
 	}
+
+	if _, err := q.Exec(ctx, "SELECT pg_notify($1, $2)", dispatchChannel, d.ID.String()); err != nil {
+		return fmt.Errorf("notify dispatch: %w", err)
+	}
 	return nil
+}
+
+const dispatchChannel = "rebuno_dispatch"
+
+func (s *Store) ListenDispatches(ctx context.Context, ready chan<- struct{}) error {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "LISTEN "+dispatchChannel); err != nil {
+		return err
+	}
+	for {
+		select {
+		case ready <- struct{}{}:
+		default:
+		}
+		if _, err := conn.Conn().WaitForNotification(ctx); err != nil {
+			return err
+		}
+	}
 }
 
 func (s *Store) Claim(ctx context.Context, replica string, batch int, now time.Time) ([]domain.Dispatch, error) {

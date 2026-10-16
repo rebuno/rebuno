@@ -1089,7 +1089,9 @@ func TestDispatchLoopClaimsWhileBusy(t *testing.T) {
 	got := delivered.Load()
 	close(release)
 	cancel()
-	<-done
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("dispatcher stopped with %v", err)
+	}
 	if got != later {
 		t.Fatalf("delivered %d of %d dispatches enqueued while a worker was busy", got, later)
 	}

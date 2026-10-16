@@ -161,8 +161,12 @@ func (k *Kernel) runDispatches(ctx context.Context, poll time.Duration) error {
 		}
 		k.workerError("reclaim stalled dispatches", err)
 	}
+	ready := make(chan struct{}, 1)
 	if poll > 0 {
 		go k.reap(ctx)
+		if n, ok := k.d.Queue.(store.DispatchNotifier); ok {
+			go k.listenDispatches(ctx, n, ready)
+		}
 	}
 
 	for {
@@ -215,8 +219,27 @@ func (k *Kernel) runDispatches(ctx context.Context, poll time.Duration) error {
 		if poll <= 0 {
 			return nil
 		}
-		if err := wait(ctx, poll); err != nil {
-			return err
+		t := time.NewTimer(poll)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-ready:
+		case <-t.C:
+		}
+		t.Stop()
+	}
+}
+
+func (k *Kernel) listenDispatches(ctx context.Context, n store.DispatchNotifier, ready chan<- struct{}) {
+	for {
+		err := n.ListenDispatches(ctx, ready)
+		if ctx.Err() != nil {
+			return
+		}
+		k.workerError("listen dispatches", err)
+		if err := wait(ctx, time.Second); err != nil {
+			return
 		}
 	}
 }

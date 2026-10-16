@@ -26,6 +26,24 @@ func (s *Store) enqueueLocked(ctx context.Context, d domain.Dispatch) {
 		d.UpdatedAt = d.CreatedAt
 	}
 	s.dispatches[d.ID] = d
+	select {
+	case s.enqueued <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Store) ListenDispatches(ctx context.Context, ready chan<- struct{}) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.enqueued:
+			select {
+			case ready <- struct{}{}:
+			default:
+			}
+		}
+	}
 }
 
 func (s *Store) Claim(ctx context.Context, replica string, batch int, now time.Time) ([]domain.Dispatch, error) {

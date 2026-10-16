@@ -20,6 +20,7 @@ func NewStore() *Store {
 		dispatches: make(map[uuid.UUID]domain.Dispatch),
 		counters:   make(map[counterKey]int),
 		lockers:    make(map[string]chan struct{}),
+		enqueued:   make(chan struct{}, 1),
 	}
 }
 
@@ -38,6 +39,7 @@ type Store struct {
 	checkpoints []domain.ResourceCheckpoint
 	lockers     map[string]chan struct{}
 	lockMtx     sync.Mutex
+	enqueued    chan struct{}
 }
 
 var _ store.EventStore = (*Store)(nil)

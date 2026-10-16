@@ -329,3 +329,59 @@ func TestReclaimHonorsThePerAgentLease(t *testing.T) {
 		})
 	}
 }
+
+func TestDispatchNotifyFiresOnlyOnCommit(t *testing.T) {
+	pg, ok := fenceBackends(t)["postgres"].(*Store)
+	if !ok {
+		t.Skip("requires DATABASE_URL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	execID, _ := deliveredDispatch(t, pg)
+
+	conn, err := pg.pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "LISTEN "+dispatchChannel); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	enqueue := func(fail bool) uuid.UUID {
+		d := domain.Dispatch{
+			ID: uuid.Must(uuid.NewV7()), ExecutionID: execID, Status: domain.DispatchPending,
+			MaxAttempts: 5, NextAttemptAt: now, CreatedAt: now, UpdatedAt: now,
+		}
+		errRollback := errors.New("rollback")
+		err := pg.RunInTx(ctx, func(tx store.TxStore) error {
+			if err := tx.Enqueue(ctx, d); err != nil {
+				return err
+			}
+			if fail {
+				return errRollback
+			}
+			return nil
+		})
+		if err != nil && !errors.Is(err, errRollback) {
+			t.Fatalf("enqueue: %v", err)
+		}
+		return d.ID
+	}
+	rolledBack := enqueue(true)
+	committed := enqueue(false)
+
+	for {
+		n, err := conn.Conn().WaitForNotification(ctx)
+		if err != nil {
+			t.Fatalf("no notify for committed dispatch: %v", err)
+		}
+		switch n.Payload {
+		case rolledBack.String():
+			t.Fatal("notified for a rolled-back dispatch")
+		case committed.String():
+			return
+		}
+	}
+}

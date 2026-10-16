@@ -83,6 +83,10 @@ type JobQueue interface {
 	ReclaimStalled(ctx context.Context, now time.Time, leaseTimeout time.Duration, batch int) ([]domain.Dispatch, error)
 }
 
+type DispatchNotifier interface {
+	ListenDispatches(ctx context.Context, ready chan<- struct{}) error
+}
+
 type Locker interface {
 	TryAcquire(ctx context.Context, key string) (release func(), err error)
 }
