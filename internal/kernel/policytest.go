@@ -55,7 +55,7 @@ func (k *Kernel) TestPolicy(ctx context.Context, agentID string, req PolicyTestR
 	cases := req.Cases
 	switch {
 	case req.ExecutionID != nil:
-		cases, err = k.replayCases(ctx, *req.ExecutionID)
+		cases, err = k.replayCases(ctx, *req.ExecutionID, nil)
 	case req.Executions != nil:
 		cases, err = k.backtestCases(ctx, agentID, *req.Executions)
 	}
@@ -77,6 +77,7 @@ func (k *Kernel) backtestCases(ctx context.Context, agentID string, sel Executio
 	limit = min(limit, maxBacktestLimit)
 	filter := domain.ExecutionFilter{AgentID: agentID, Session: sel.Session, Limit: MaxListExecutionsLimit}
 	var cases []policy.Case
+	sessions := map[string][]domain.Step{}
 	for replayed := 0; ; {
 		page, err := k.d.Executions.ListExecutions(ctx, filter)
 		if err != nil {
@@ -86,7 +87,7 @@ func (k *Kernel) backtestCases(ctx context.Context, agentID string, sel Executio
 			if sel.Since != nil && exec.CreatedAt.Before(*sel.Since) {
 				return cases, nil
 			}
-			replay, err := k.replayCases(ctx, exec.ID)
+			replay, err := k.replayCases(ctx, exec.ID, sessions)
 			if err != nil {
 				return nil, err
 			}
@@ -102,7 +103,7 @@ func (k *Kernel) backtestCases(ctx context.Context, agentID string, sel Executio
 	}
 }
 
-func (k *Kernel) replayCases(ctx context.Context, execID uuid.UUID) ([]policy.Case, error) {
+func (k *Kernel) replayCases(ctx context.Context, execID uuid.UUID, sessions map[string][]domain.Step) ([]policy.Case, error) {
 	exec, err := k.authorizedExecution(ctx, k.d.Executions, execID, auth.RoleRead)
 	if err != nil {
 		return nil, fmt.Errorf("test policy: %w", err)
@@ -115,9 +116,15 @@ func (k *Kernel) replayCases(ctx context.Context, execID uuid.UUID) ([]policy.Ca
 	if err != nil {
 		return nil, fmt.Errorf("test policy: %w", err)
 	}
-	allowed, err := k.d.Steps.ListAllowedSteps(ctx, execID, exec.Session, time.Time{})
-	if err != nil {
-		return nil, fmt.Errorf("test policy: %w", err)
+	allowed, cached := sessions[exec.Session]
+	if !cached || exec.Session == "" {
+		allowed, err = k.d.Steps.ListAllowedSteps(ctx, execID, exec.Session, time.Time{})
+		if err != nil {
+			return nil, fmt.Errorf("test policy: %w", err)
+		}
+		if sessions != nil && exec.Session != "" {
+			sessions[exec.Session] = allowed
+		}
 	}
 	cases := policy.ReplayCases(steps, decisions, allowed)
 	for i := range cases {
