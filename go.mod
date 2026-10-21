@@ -2,6 +2,8 @@ module github.com/rebuno/rebuno
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-chi/chi/v5 v5.5.0
