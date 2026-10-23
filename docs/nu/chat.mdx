@@ -1,0 +1,77 @@
+---
+title: "Chat"
+description: "Talk to Nu and decide its approvals"
+---
+
+`nu` opens the main conversation in the terminal. It is the same conversation
+as your direct messages in a [chat app](/nu/channels), and Nu replies wherever
+the message came from. The client shows the last 20 turns when it starts.
+
+Ctrl+C or Ctrl+D closes the client without stopping the turn. Run `nu` again to
+see where it got to.
+
+| Key | Action |
+|-----|--------|
+| Escape | Stop the running turn |
+| Ctrl+O | Expand tool output |
+| `/` | Show commands |
+
+## Approvals
+
+When a tool call isn't covered by your [policy](/nu/policy), its card asks what
+to do:
+
+| Choice | Effect |
+|--------|--------|
+| Allow once | Run this call |
+| Always allow | Add a rule that allows the tool from now on |
+| Write a rule | Describe a rule in your own words, such as "allow git commands" |
+| Deny | Refuse the call and tell Nu |
+
+Write a rule starts a separate conversation where Nu drafts the policy change
+and asks you to approve it. Once the new rule is in place, it decides the
+waiting call.
+
+Changes to the policy, new specialists, and browser handoffs only offer Allow
+once and Deny. If you send a message while a call is waiting, Nu treats it as a
+denial and reads your message instead.
+
+## Commands
+
+| Command | Action |
+|---------|--------|
+| `/new` | Start a new conversation |
+| `/stop` | Stop the running turn |
+| `/status` | Show running turns and pending approvals |
+| `/model [provider/model]` | Show or change the model |
+| `/policy [request]` | Show the rules, or ask Nu to change them |
+| `/specialist [name]` | List specialists, or switch this conversation to one |
+| `/tools` | List package tools |
+| `/mcp` | Show each MCP server's tools |
+| `/secret NAME value` | Save a secret |
+| `/config namespace key value` | Configure a package |
+| `/reload` | Restart Nu's services |
+
+Packages can add commands of their own, which work in every channel.
+
+## Browser handoff
+
+Some pages need a person, for a login, a CAPTCHA, or a verification code. Nu
+asks for a handoff, and the approval card links to a live view of the page.
+Click and type there, then approve the card to hand control back.
+
+The link uses `http://127.0.0.1:4122`. To open it from your phone, set an
+address the phone can reach:
+
+```bash
+nu set liveUrl http://nu.example.com:4122
+```
+
+## Schedules
+
+Ask Nu for a schedule in plain words, such as "every weekday at 8, summarize my
+inbox". Schedules use the time zone from `nu set timeZone`.
+
+Every 30 minutes a heartbeat turn checks for anything that needs you, like a
+reminder that is due or a schedule that failed. `nu set heartbeat` takes a
+different cron expression, or `off`.

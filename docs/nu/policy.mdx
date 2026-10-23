@@ -1,0 +1,63 @@
+---
+title: "Policy"
+description: "Decide what Nu may do without asking"
+---
+
+Before any tool call runs, Nu's kernel checks it against your
+[policy](/policy). The first rule that matches decides, and a call that no rule
+matches waits for your approval. Model calls are always allowed.
+
+Your rules live in `~/.nu/policy.yaml`. Nu starts with these:
+
+| Rule | Allows |
+|------|--------|
+| `reads` | Searching memory and packages, listing schedules, reading the policy, and looking at the browser page |
+| `nu-state` | Nu's own memory, skills, schedules, background tasks, delegation, and asking you for secrets |
+| `workspace` | Shell commands and file edits in the [sandbox](/nu/sandbox) |
+| `message-user` | Messaging you outside a reply, such as when a schedule finishes |
+
+Anything else asks first. That includes MCP and package tools, installing or
+writing packages, browser tasks, messages to anyone but you, and changes to the
+policy or specialists.
+
+## Changing the rules
+
+The quickest way is from an approval card. Always allow adds a rule for that
+tool, and Write a rule lets you describe the rule you want. See
+[Approvals](/nu/chat#approvals).
+
+You can also ask from chat with `/policy`, for example
+`/policy ask before any git push`. Nu drafts the change and shows it to you
+before it takes effect. `/policy` on its own lists the current rules, and
+`nu policy --yaml` prints them as YAML.
+
+Rules edited in the [dashboard](/nu/deployment#dashboard) take effect within a
+few seconds. If an edit fails Nu's checks, Nu undoes it and tells you why.
+
+A rule can match the tool name and its arguments:
+
+```yaml
+rules:
+  - id: git-status
+    when:
+      target: shell
+      arguments:
+        command:
+          regex: "^git (status|diff|log)( |$)"
+    then:
+      decision: allow
+
+  - id: no-linear-deletes
+    when:
+      target: mcp__linear__delete_*
+    then:
+      decision: deny
+```
+
+See [Policy](/policy) for the full rule format, including history conditions
+and rate limits.
+
+## Specialists
+
+Each [specialist](/nu/tools#specialists) has its own rules, written when it is
+created. Tools without a matching rule ask first, as they do for Nu.

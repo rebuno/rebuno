@@ -1,0 +1,161 @@
+---
+title: "Extensions"
+description: "Write packages that add tools, channels, and hooks"
+---
+
+A Nu package is an npm package or Git repository with a `nu` key in its
+`package.json`:
+
+```json
+{
+  "name": "nu-example",
+  "version": "0.1.0",
+  "type": "module",
+  "keywords": ["nu-package"],
+  "nu": {
+    "namespace": "example",
+    "tools": ["tools/*/tool.yaml"],
+    "skills": ["skills"],
+    "extensions": ["src/index.ts"],
+    "policy": "policy.yaml",
+    "secrets": ["EXAMPLE_TOKEN"],
+    "config": ["userId"]
+  }
+}
+```
+
+| Key | Contents |
+|-----|----------|
+| `namespace` | The package's name in Nu. Its tool names start with `<namespace>__` |
+| `tools` | Globs of tool manifests |
+| `skills` | Directories of skills |
+| `extensions` | Extension modules |
+| `policy` | Rules suggested at install |
+| `secrets` | Secrets its extensions read |
+| `config` | Settings its tools and extensions read, set with `nu config set` |
+| `client` | Commands it adds, and how the terminal shows its tools |
+
+`client.commands` adds slash commands. Each has a `description` and a
+`message`, which Nu receives as if you sent it, with `{args}` replaced by the
+text after the command. `client.tools` sets how the terminal shows a tool's
+calls: an `icon`, a `title` with `{argument}` placeholders, and a `body` that
+names an argument to show as code in its `language`.
+
+```json
+"client": {
+  "commands": {
+    "standup": {
+      "description": "Draft today's standup",
+      "message": "Draft my standup from yesterday's commits. {args}"
+    }
+  },
+  "tools": {
+    "example__search": { "icon": "🔎", "title": "Search {query}" }
+  }
+}
+```
+
+The `nu-package` keyword lists an npm package in `nu search`. Types for tools
+and extensions come from `@rebuno/nu-types`:
+
+```bash
+npm install --save-dev @rebuno/nu-types
+```
+
+Nu's repository has [example packages](https://github.com/rebuno/nu/tree/main/examples)
+for tools, skills, and chat channels.
+
+## Tools
+
+A tool is a manifest and a module:
+
+```yaml
+name: example__search
+version: 1
+description: Search the example API. Returns titles and URLs.
+args_schema:
+  type: object
+  required: [query]
+  properties:
+    query: { type: string }
+idempotency: safe_to_retry
+secrets: [EXAMPLE_TOKEN]
+entry: index.ts
+```
+
+```ts
+export default async function search(args: { query: string }) {
+  const response = await fetch(
+    `https://api.example.com/search?q=${encodeURIComponent(args.query)}`,
+    { headers: { authorization: `Bearer ${process.env.EXAMPLE_TOKEN}` } },
+  );
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+```
+
+The default export takes the call's arguments and returns its result. The
+second argument holds the package's settings as `config`.
+
+Nu bundles each tool with everything it imports when it installs the package.
+Tools can share code in the package and use npm packages from its
+`dependencies`, as long as every import stays inside the package. A tool needs
+a higher `version` whenever its code or anything it imports changes. Every call
+runs the bundle in a fresh process that can't read other files. It sees the
+secrets in `secrets` as environment variables.
+
+Set `idempotency` to `safe_to_retry` if running a call twice does no harm. Use
+`at_most_once` for anything that shouldn't repeat, like sending an email. If Nu
+crashes in the middle of such a call, it waits for you instead of running it
+again.
+
+To return images or audio, return `{ content: [...] }` in the same shape MCP
+tools use. Nu saves the files under `~/.nu/workspace/tools/`.
+
+## Extensions
+
+An extension is a module that runs inside Nu. Its default export gets the
+extension API:
+
+```ts
+import type { Extension } from "@rebuno/nu-types";
+
+const extension: Extension = (nu) => {
+  nu.on("before_agent_start", () => ({
+    prompt: "Answer in British English.",
+  }));
+};
+
+export default extension;
+```
+
+| Method | Registers |
+|--------|-----------|
+| `registerChannel(adapter)` | A [channel](/nu/channels) to a chat app |
+| `registerMemoryStore(store)` | A replacement for Nu's SQLite memory |
+| `registerBrowserProvider(provider)` | A remote browser for browser tools |
+| `registerSandbox(sandbox)` | A [sandbox](/nu/sandbox#other-sandboxes) in place of the `sandbox` container |
+| `registerWatcher(watcher)` | A watcher that starts a turn when something happens, such as new mail |
+| `on(event, handler)` | A hook |
+
+`nu.config` holds the package's settings, and `nu.secret(name)` reads one of
+the secrets listed in its `secrets`.
+
+<Warning>
+  Extensions run with Nu's own access, unlike tools. Only install ones you
+  trust.
+</Warning>
+
+| Hook | Runs | Returns |
+|------|------|---------|
+| `before_agent_start` | Before each turn | `{ prompt }` to add to the system prompt |
+| `input` | On each incoming message | `continue`, `transform` with new text, or `handled` |
+| `turn_end` | After each turn | Nothing |
+| `tool_execution_end` | After each tool call | Nothing |
+
+`turn_end` and `tool_execution_end` are delivered once. If a handler fails, Nu
+logs the error and moves on.
+
+Nu restarts its services when an extension is installed or removed, or when its
+settings or secrets change. Running turns carry on afterwards. `nu reload`
+restarts them by hand.

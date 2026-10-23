@@ -1,0 +1,56 @@
+---
+title: "Configuration"
+description: "Nu's data directory and settings"
+---
+
+Everything Nu keeps is in `~/.nu`, or in `NU_HOME` if you set it. The container
+sees it at `/home/nu/.nu`.
+
+| Path | Contents |
+|------|----------|
+| `compose.yaml`, `.env` | The Compose deployment and its environment |
+| `policy.yaml` | Your [policy](/nu/policy) rules |
+| `mcp.json` | [MCP servers](/nu/tools#mcp-servers) |
+| `models.json` | Custom model providers, in Pi's format |
+| `settings.json` | Settings, including package settings |
+| `packages.json`, `packages/`, `registry/` | Installed [packages](/nu/tools#packages) and their tools |
+| `skills/` | [Skills](/nu/tools#skills) |
+| `specialists/` | [Specialists](/nu/tools#specialists) |
+| `secrets/` | Secrets, model sign-ins (`auth.json`), and generated tokens |
+| `workspace/` | Nu's working files, shared with the [sandbox](/nu/sandbox) |
+| `nu.db` | Memory and schedules |
+| `postgres/` | The kernel's database |
+
+## Settings
+
+```bash
+nu set timeZone America/New_York
+nu set defaultThinkingLevel high
+nu set heartbeat "0 */2 * * *"
+```
+
+| Setting | Default |
+|---------|---------|
+| `timeZone` | The container's time zone, usually UTC. Schedules use it |
+| `defaultThinkingLevel` | `medium`. Also `off`, `minimal`, `low`, `high`, `xhigh`, or `max` |
+| `heartbeat` | `*/30 * * * *`. Any cron expression, or `off` |
+| `compactionModel` | Nu's model. A `provider/model` for summarizing long conversations |
+| `updateCheck` | `on`. Nu checks GitHub for a new release once a day. `off` stops it |
+| `liveUrl` | `http://127.0.0.1:4122`. The address in [browser handoff](/nu/chat#browser-handoff) links |
+
+Packages have their own settings, set with `nu config set <namespace> <key> <value>`.
+
+## Models
+
+`nu login` signs in to a provider, and `/model` in chat picks the model. Both
+save it as `defaultProvider` and `defaultModel`. Sign-ins are kept in
+`~/.nu/secrets/auth.json`, in Pi's format. An API key in
+`~/.nu/.env`, such as `ANTHROPIC_API_KEY`, works without signing in.
+
+## Terminal client
+
+The client connects to `http://127.0.0.1:4122` with the token Nu generated in
+`~/.nu/secrets/terminal_token`. `nu connect` points it at Nu on another machine
+and saves the address and token in `~/.nu/client.json`. See
+[Remote access](/nu/deployment#remote-access). `NU_GATEWAY_URL` overrides the
+address.

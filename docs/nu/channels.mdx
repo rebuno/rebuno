@@ -1,0 +1,32 @@
+---
+title: "Channels"
+description: "Talk to Nu from chat apps"
+---
+
+A channel connects Nu to a chat app. Channels come as
+[packages](/nu/tools#packages), and each one lists the settings and secrets it
+needs:
+
+```bash
+nu install npm:<channel-package>
+nu config set <namespace> <key> <value>
+printf %s '<value>' | nu secret set <NAME>
+```
+
+Nu restarts its services and connects. Direct messages go to the main
+conversation, the same one you see in the terminal. Each channel or thread in
+the app is a conversation of its own. Only you can talk to Nu or answer its
+approvals.
+
+Files you attach are saved under `~/.nu/workspace/attachments/` for Nu to read.
+Nu can send files back on channels that support them.
+
+## Messages from Nu
+
+Nu can message you outside a reply, such as when a schedule finishes. It can
+also post to another conversation by its key, `<channel>:<id>`. Messages to you
+are allowed by default, and messages anywhere else ask first.
+
+## Writing a channel
+
+A channel is an [extension](/nu/extensions) that registers a `ChannelAdapter`.

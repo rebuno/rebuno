@@ -1,0 +1,121 @@
+---
+title: "Tools"
+description: "Give Nu tools from MCP servers, packages, skills, and specialists"
+---
+
+## MCP servers
+
+```bash
+nu mcp add github --url https://api.githubcopilot.com/mcp/ --bearer-token-secret GITHUB_TOKEN
+nu mcp add notion --env NOTION_TOKEN='${NOTION_TOKEN}' -- npx -y @notionhq/notion-mcp-server
+nu mcp list
+```
+
+A server's tools are available from the next turn, named
+`mcp__<server>__<tool>`. In a server's settings, `${NAME}` is replaced with the
+[secret](#secrets) called `NAME`. `nu mcp remove` removes a server.
+
+Hosted servers that use OAuth, such as Linear's and Notion's, need a sign-in:
+
+```bash
+nu mcp login linear
+```
+
+Open the link it prints and sign in. The client catches the redirect and saves
+the sign-in as the secret `MCP_LINEAR`. If a server won't register Nu as a
+client, create an OAuth app with the callback `http://127.0.0.1:4123/callback`
+and pass its `--client-id` and `--client-secret`.
+
+Servers are kept in `~/.nu/mcp.json`, in the same `mcpServers` format other
+clients use:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "url": "https://mcp.linear.app/mcp",
+      "headers": { "Authorization": "Bearer ${MCP_LINEAR}" },
+      "description": "Linear issues and projects"
+    },
+    "notion": {
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": { "NOTION_TOKEN": "${NOTION_TOKEN}" }
+    }
+  }
+}
+```
+
+<Warning>
+  Servers started with a command run inside the Nu container with Nu's own
+  access. Only add ones you trust.
+</Warning>
+
+When a tool returns an image or audio, Nu saves it under
+`~/.nu/workspace/tools/` and opens it when it needs to look.
+
+## Packages
+
+Packages add tools, skills, and chat apps. `nu search` finds packages on npm,
+and Nu can search for one when you ask. Install one from npm or Git, or ask Nu
+to install it:
+
+```bash
+nu search github
+nu install npm:<package>
+nu list
+nu remove npm:<package>
+```
+
+`nu install ./my-package` installs a folder on your machine, such as a package
+you are writing, by sending its files to Nu. Run it again after a change. A
+changed tool needs a higher `version` in its `tool.yaml`. Nu lists the package
+as `local:<namespace>`, and `nu remove ./my-package` removes it.
+
+Installing a package again updates it. A tool whose code changed without a
+higher `version`, or whose `version` went down, stops the install, and the
+installed package stays as it was.
+
+Before installing, Nu shows what each tool does and which secrets it needs.
+When Nu installs a package itself, the approval names the exact npm version or
+Git commit, and that is what gets installed. Package tools run in their own
+process. They can't read files and see only the secrets they list.
+
+## Skills
+
+A skill is a folder in `~/.nu/skills` with a `SKILL.md` that tells Nu how to do
+something. Nu reads a skill when a task calls for it, and can write new ones
+when you ask. Packages can include skills too.
+
+## Specialists
+
+A specialist is an agent with its own instructions, tools, rules, and memory.
+Ask Nu to make one, such as "make a researcher that searches the web, on a
+smaller model". You approve it before it's saved to
+`~/.nu/specialists/<name>.yaml`:
+
+```yaml
+name: researcher
+instructions: Research a topic on the web and report the findings with sources.
+tools: [example__search, memory_write]
+model: anthropic/claude-haiku-5-5
+```
+
+`tools` can name MCP tools too. `mcp__<server>__*` gives a specialist all of a
+server's tools, including ones the server adds later.
+
+Nu hands specialists tasks on its own. To talk to one directly, use
+`/specialist <name>`. A specialist without a `model` uses Nu's, and so does one
+whose model isn't available.
+
+## Secrets
+
+Tools, MCP servers, and packages share one set of secrets, stored in
+`~/.nu/secrets/secrets.json`:
+
+```bash
+printf %s '<value>' | nu secret set EXAMPLE_TOKEN
+```
+
+`/secret NAME value` in chat does the same. The agent itself never sees a
+secret. Each tool gets only the ones it asks for, when it runs.

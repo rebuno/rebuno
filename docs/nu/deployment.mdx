@@ -1,0 +1,105 @@
+---
+title: "Deployment"
+description: "Run Nu's server"
+---
+
+Nu runs as three Compose services, defined in `~/.nu/compose.yaml`:
+
+| Service | Runs |
+|---------|------|
+| `nu` | Postgres, the Rebuno kernel, and Nu's gateway, agent, runner, and scheduler |
+| `sandbox` | Shell commands and file edits. See [Sandbox](/nu/sandbox) |
+| `dashboard` | The optional [dashboard](#dashboard) |
+
+They run as your user, from the `UID` and `GID` in `~/.nu/.env`, so the files
+in `~/.nu` stay yours.
+
+`compose.yaml` is replaced on every update. Put your changes in
+`~/.nu/compose.override.yaml`, which Compose merges in. To stay on a version,
+set `NU_VERSION` in `~/.nu/.env`, such as `NU_VERSION=0.2` for the latest 0.2
+release.
+
+Manage the services with `docker compose` from `~/.nu`:
+
+```bash
+docker compose logs -f nu
+docker compose restart nu
+```
+
+Nu uses under 1 GB of memory when idle. Give it 2 CPUs and 4 GB so browser
+tasks and builds in the sandbox have room. On a smaller machine, lower the
+sandbox's `mem_limit` so a large build can't starve the rest of Nu.
+
+The kernel keeps each turn's record for a year. To change that, set
+`REBUNO_RETENTION` in `~/.nu/.env` to a duration, such as `REBUNO_RETENTION=2160h`
+for 90 days.
+
+## Network
+
+Nu publishes one port, 4122, and only on localhost. The terminal client and the
+browser handoff pages use it. To use the client from another machine, see
+[Remote access](#remote-access).
+
+The kernel's port stays inside the Compose network. Other services there can
+scrape its [Prometheus metrics](/deployment#observability) at
+`nu:4117/metrics`.
+
+## Remote access
+
+The terminal client can talk to Nu on another machine, such as a home server.
+Install only the client there:
+
+```bash
+npm install -g @rebuno/nu
+```
+
+Nu listens only on the server's own loopback, so reach it through an SSH
+tunnel:
+
+```bash
+ssh -N -L 4122:127.0.0.1:4122 <server>
+```
+
+Then give the client the server's terminal token:
+
+```bash
+ssh <server> cat .nu/secrets/terminal_token | nu connect http://127.0.0.1:4122
+```
+
+The client saves the address and token in `~/.nu/client.json`. Everything else
+stays on the server: chats, memory, secrets, packages, and settings. Commands
+such as `nu login`, `nu install ./my-package`, and `nu mcp add` act on the
+server, and sign-in redirects open in the browser on your machine.
+
+<Warning>
+  The token gives full control of Nu. Don't expose port 4122 to the internet.
+  Use an SSH tunnel, a private network such as Tailscale, or an HTTPS proxy.
+</Warning>
+
+## Dashboard
+
+The [Rebuno dashboard](/dashboard) shows every turn step by step, along with
+pending approvals and the policy. It is optional:
+
+```bash
+cd ~/.nu && docker compose --profile dashboard up -d
+```
+
+Open http://localhost:4116, or set `NU_DASHBOARD_PORT` for another port. It
+holds the kernel's admin token, so it only listens on localhost. To start it
+with the rest of Nu, add `COMPOSE_PROFILES=dashboard` to `~/.nu/.env`.
+
+## Without Docker
+
+Nu can also run straight from a checkout, with Postgres and the `rebuno` kernel
+on your `PATH`:
+
+```bash
+git clone https://github.com/rebuno/nu && cd nu
+pnpm install
+pnpm start
+```
+
+`pnpm nu` opens the client. `NU_HOME` sets the data directory, and
+`NU_DB_URL` points Nu at an existing Postgres database. Without Docker there is
+no [sandbox](/nu/sandbox).

@@ -1,0 +1,118 @@
+---
+title: "Sandbox"
+description: "Where Nu's shell commands and file edits run"
+---
+
+Nu runs shell commands and file edits in a separate `sandbox` container. It can
+see Nu's workspace, `~/.nu/workspace`, and read its skills and packages. It
+can't see Nu's secrets, policy, or database.
+
+The container's filesystem is read-only outside the workspace, it runs without
+Linux capabilities, and it has 4 GB of memory.
+
+## Installing tools
+
+The sandbox has `node`, `npm`, `git`, `gh`, `curl`, and `rg`. Nu can install
+other tools into its home folder, `~/.nu/workspace/.home`, where they last
+across restarts. `npm install -g` installs there, and `~/.local/bin` is on the
+`PATH`.
+
+To build tools into the sandbox instead, give it your own image in
+`~/.nu/compose.override.yaml`:
+
+```yaml
+services:
+  sandbox:
+    image: nu-sandbox
+    build:
+      dockerfile_inline: |
+        FROM ghcr.io/rebuno/nu:latest
+        USER root
+        RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+        USER nu
+```
+
+Run `docker compose build sandbox` after each update so the image picks up the
+new version.
+
+## Working on other folders
+
+To let Nu work on a folder outside the workspace, mount it into the sandbox at
+the same path it has on your machine. Add it to the sandbox's `volumes` in
+`~/.nu/compose.override.yaml`:
+
+```yaml
+services:
+  sandbox:
+    volumes:
+      - ${HOME}/projects:${HOME}/projects
+```
+
+Then restart:
+
+```bash
+cd ~/.nu && docker compose up -d
+```
+
+## Sharing secrets
+
+Secrets stay out of the sandbox, and work that needs one runs as a tool
+instead. When a command does need a secret, such as a GitHub token for `git
+push`, share it:
+
+```bash
+nu sandbox add GITHUB_TOKEN
+nu sandbox list
+nu sandbox remove GITHUB_TOKEN
+```
+
+Commands see a shared secret as an environment variable. They use it without
+asking and can send it anywhere the sandbox can reach, so share narrowly scoped
+tokens, such as a fine-grained GitHub token for a few repositories.
+
+With `GITHUB_TOKEN` or `GH_TOKEN` shared, `git` and `gh` work against GitHub.
+Commits are authored as the token's GitHub account, using its private noreply
+email address.
+
+## Other sandboxes
+
+An [extension](/nu/extensions) can run the workspace somewhere else, such as a
+cloud sandbox provider, by registering a sandbox:
+
+```ts
+import type { Extension, Sandbox } from "@rebuno/nu-types";
+
+const extension: Extension = (nu) => {
+  const sandbox: Sandbox = {
+    workdir: "/home/user/workspace",
+    exec: async (command, cwd, { onData, signal, timeout, env }) => {
+      // Run the command, stream its output to onData, and return its exit code.
+      return { exitCode: 0 };
+    },
+    readFile: async (path) => Buffer.from(""),
+    writeFile: async (path, data) => {},
+    access: async (path, write) => {},
+  };
+  nu.registerSandbox(sandbox);
+};
+
+export default extension;
+```
+
+| Member | Does |
+|--------|------|
+| `workdir` | The workspace's path inside the sandbox |
+| `exec(command, cwd, options)` | Runs a shell command and returns `{ exitCode }`. `timeout` is in seconds, and `env` holds the shared secrets |
+| `readFile(path)` | Returns a file's contents |
+| `writeFile(path, data)` | Writes a file, creating its parent folders |
+| `access(path, write)` | Throws if the path is missing, or with `write` if it can't be written |
+
+Each of Nu's services loads the extension, so the sandbox must reach the same
+workspace from all of them. Nu reads skills and long command output from its
+own disk, wherever the sandbox runs. Packages in a sandbox like this are saved
+with `package_write`, since Nu can't install them from a path it can't see.
+
+## Without Docker
+
+Nu has no sandbox when it runs [without Docker](/nu/deployment#without-docker).
+Shell commands run as your user, and file edits are limited to the workspace.

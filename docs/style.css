@@ -5,3 +5,9 @@ pre,
 kbd {
   font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
+
+img[src$="/assets/brand/nu.svg"] {
+  object-position: -9999px 0;
+  background-color: currentColor !important;
+  mask: url("/assets/brand/nu.svg") center / contain no-repeat;
+}

@@ -1,0 +1,40 @@
+---
+title: "Nu"
+sidebarTitle: "Overview"
+description: "A self-hosted personal agent built on Rebuno"
+---
+
+Nu is a personal agent that runs on your own machine and talks to you from a
+terminal or a chat app:
+
+- **Governed:** every tool call is checked against your [policy](/nu/policy).
+  Anything it doesn't allow waits for your approval.
+- **Durable:** every step is recorded. A turn cut off by a crash picks up where
+  it stopped, without repeating what it already did.
+- **Isolated:** shell commands and file edits run in a
+  [sandbox](/nu/sandbox) that holds none of Nu's secrets.
+- **Extensible:** [packages](/nu/tools#packages) can add to or change almost
+  anything Nu does.
+
+Nu is built on [Pi](https://github.com/earendil-works/pi) and runs each turn as
+a Rebuno execution.
+
+The source is at [github.com/rebuno/nu](https://github.com/rebuno/nu).
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/nu/getting-started">
+    Install Nu and start chatting.
+  </Card>
+
+  <Card title="Policy" icon="shield" href="/nu/policy">
+    Decide what Nu may do without asking.
+  </Card>
+
+  <Card title="Tools" icon="wrench" href="/nu/tools">
+    Add MCP servers, packages, skills, and specialists.
+  </Card>
+
+  <Card title="Channels" icon="message" href="/nu/channels">
+    Talk to Nu from a chat app.
+  </Card>
+</Columns>

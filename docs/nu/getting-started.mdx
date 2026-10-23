@@ -1,0 +1,52 @@
+---
+title: "Quickstart"
+description: "Install Nu and start chatting"
+---
+
+Nu needs Docker with Compose and Node.js 24 or later. Run the installer as your
+regular user:
+
+```bash
+curl -fsSL https://nu.rebuno.io/install.sh | sh
+```
+
+The installer writes `~/.nu/compose.yaml`, starts the server, and installs the
+`nu` terminal client from npm. Set `NU_HOME` to keep Nu's data somewhere other
+than `~/.nu`.
+
+## Sign in to a model
+
+```bash
+nu login              # list providers
+nu login <provider>
+```
+
+Pick an account or an API key, then the model Nu should use. Some providers,
+such as OpenAI Codex and GitHub Copilot, show a code to enter on their site.
+Others, such as Anthropic and OpenRouter, open a sign-in page and the client
+catches the redirect. If the client can't listen for the redirect, paste the
+final URL into the terminal.
+
+An API key in `~/.nu/.env`, such as `ANTHROPIC_API_KEY`, works without signing
+in. Custom providers go in `~/.nu/models.json`, in Pi's format.
+
+## Chat
+
+```bash
+nu
+```
+
+Ask it `What can you do?`. Replies and tool calls stream into the terminal, and
+calls that need your approval show their choices. See [Chat](/nu/chat).
+
+## Update
+
+```bash
+nu update
+```
+
+It updates the server and the terminal client. On a machine with only the
+client, it updates the client. Turns that were running when the server
+restarted pick up where they stopped.
+
+When a new version is out, the terminal client and `/status` say so.

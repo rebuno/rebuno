@@ -229,6 +229,41 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Nu",
+        "icon": "/assets/brand/nu.svg",
+        "groups": [
+          {
+            "group": "Get started",
+            "icon": "rocket",
+            "expanded": true,
+            "pages": [
+              "nu/overview",
+              "nu/getting-started"
+            ]
+          },
+          {
+            "group": "Use",
+            "icon": "comments",
+            "pages": [
+              "nu/chat",
+              "nu/policy",
+              "nu/tools",
+              "nu/sandbox",
+              "nu/channels"
+            ]
+          },
+          {
+            "group": "Configure",
+            "icon": "sliders",
+            "pages": [
+              "nu/configuration",
+              "nu/extensions",
+              "nu/deployment"
+            ]
+          }
+        ]
       }
     ]
   },
