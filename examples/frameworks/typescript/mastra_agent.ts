@@ -3,6 +3,7 @@ import { env } from "node:process";
 
 import { createOpenAI } from "@ai-sdk/openai";
 import { Agent as MastraAgent } from "@mastra/core/agent";
+import type { MastraModelConfig } from "@mastra/core/llm";
 import { createTool } from "@mastra/core/tools";
 import { Agent, rebunoFetch, step } from "rebuno";
 
@@ -22,7 +23,7 @@ async function process(input: { query: string }) {
     id: "support",
     name: "Support",
     instructions: "Investigate customer issues, create tickets, and email support summaries.",
-    model: openai(modelName),
+    model: openai(modelName) as MastraModelConfig,
     maxRetries: 2,
     tools,
   });
