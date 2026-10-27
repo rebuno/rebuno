@@ -108,28 +108,22 @@ func (m *Manager) runDispatch(ctx context.Context) {
 	}
 }
 
-// Its own cadence, so a passed deadline is not left waiting on the much longer
-// singleton interval.
+// Its own lock key and cadence, so a passed deadline is not left waiting on the
+// much longer singleton interval or a long-running cleanup.
 func (m *Manager) deadlineTick(ctx context.Context) error {
-	return m.withLeaderLock(ctx, func(ctx context.Context) error {
-		return errors.Join(
-			m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC()),
-			m.kernel.AdmitQueued(ctx),
-			m.kernel.SettleSubagents(ctx),
-		)
-	})
+	return m.withLeaderLock(ctx, m.LeaderLockKey+":deadlines", m.runDeadlines)
 }
 
 func (m *Manager) singletonsTick(ctx context.Context) error {
-	return m.withLeaderLock(ctx, m.runSingletons)
+	return m.withLeaderLock(ctx, m.LeaderLockKey, m.runSingletons)
 }
 
 // With no locker configured, fn runs unconditionally on every replica.
-func (m *Manager) withLeaderLock(ctx context.Context, fn func(context.Context) error) error {
+func (m *Manager) withLeaderLock(ctx context.Context, key string, fn func(context.Context) error) error {
 	if m.leaderLocker == nil || m.LeaderLockKey == "" {
 		return fn(ctx)
 	}
-	release, err := m.leaderLocker.TryAcquire(ctx, m.LeaderLockKey)
+	release, err := m.leaderLocker.TryAcquire(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -141,11 +135,23 @@ func (m *Manager) withLeaderLock(ctx context.Context, fn func(context.Context) e
 	return fn(ctx)
 }
 
+func (m *Manager) runDeadlines(ctx context.Context) error {
+	return errors.Join(
+		m.kernel.CancelExpiredExecutions(ctx, time.Now().UTC()),
+		m.kernel.AdmitQueued(ctx),
+		m.kernel.SettleSubagents(ctx),
+	)
+}
+
 func (m *Manager) runSingletons(ctx context.Context) error {
 	now := time.Now().UTC()
+	var deadlines error
+	if m.deadlineInterval <= 0 {
+		deadlines = m.runDeadlines(ctx)
+	}
 	return errors.Join(
 		m.kernel.ExpireApprovals(ctx, now),
-		m.kernel.CancelExpiredExecutions(ctx, now),
+		deadlines,
 		m.kernel.Cleanup(ctx, m.Retention, now),
 	)
 }
